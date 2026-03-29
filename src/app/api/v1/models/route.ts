@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
       id: m.id,
       object: "model",
       created: Math.floor(new Date(m.created_at).getTime() / 1000),
-      owned_by: m.provider,
+      owned_by: "aether-router",
       credits_per_m_input: pricePerMTokens(m.cost_per_m_input, m.margin),
       credits_per_m_output: pricePerMTokens(m.cost_per_m_output, m.margin),
     })),

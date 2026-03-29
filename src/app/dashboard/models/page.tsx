@@ -13,7 +13,7 @@ export default async function ModelsPage() {
     <div>
       <h2 className="text-2xl font-bold mb-2">Available Models</h2>
       <p className="text-sm text-[var(--text-muted)] mb-6">
-        10,000 credits = $1.00 USD. Gemini CLI models include a 25% discount over official API pricing.
+        10,000 credits = $1.00 USD. All models include a 25% discount over official API pricing.
       </p>
 
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl overflow-x-auto">
@@ -21,7 +21,6 @@ export default async function ModelsPage() {
           <thead>
             <tr className="text-[var(--text-muted)] text-left border-b border-[var(--border)]">
               <th className="px-5 py-3 font-medium">Model</th>
-              <th className="px-5 py-3 font-medium">Provider</th>
               <th className="px-5 py-3 font-medium text-right">Input / 1M tokens</th>
               <th className="px-5 py-3 font-medium text-right">Output / 1M tokens</th>
               <th className="px-5 py-3 font-medium text-right">Credits/M (input)</th>
@@ -38,11 +37,6 @@ export default async function ModelsPage() {
                   <td className="px-5 py-3">
                     <p className="font-medium">{model.display_name}</p>
                     <p className="text-xs text-[var(--text-muted)] font-mono">{model.id}</p>
-                  </td>
-                  <td className="px-5 py-3">
-                    <span className="inline-block px-2 py-0.5 rounded-full text-xs bg-[var(--accent)]/10 text-[var(--accent)]">
-                      {model.provider}
-                    </span>
                   </td>
                   <td className="px-5 py-3 text-right">
                     ${priceInput.toFixed(4)}
