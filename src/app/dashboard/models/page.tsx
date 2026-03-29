@@ -13,7 +13,7 @@ export default async function ModelsPage() {
     <div>
       <h2 className="text-2xl font-bold mb-2">Available Models</h2>
       <p className="text-sm text-[var(--text-muted)] mb-6">
-        Prices include a 55% margin over provider costs. 10,000 credits = $1.00 USD.
+        10,000 credits = $1.00 USD. Gemini CLI models include a 25% discount over official API pricing.
       </p>
 
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl overflow-x-auto">
@@ -22,15 +22,17 @@ export default async function ModelsPage() {
             <tr className="text-[var(--text-muted)] text-left border-b border-[var(--border)]">
               <th className="px-5 py-3 font-medium">Model</th>
               <th className="px-5 py-3 font-medium">Provider</th>
-              <th className="px-5 py-3 font-medium text-right">Provider Cost/M</th>
-              <th className="px-5 py-3 font-medium text-right">Your Price/M</th>
-              <th className="px-5 py-3 font-medium text-right">Credits/M tokens</th>
+              <th className="px-5 py-3 font-medium text-right">Input / 1M tokens</th>
+              <th className="px-5 py-3 font-medium text-right">Output / 1M tokens</th>
+              <th className="px-5 py-3 font-medium text-right">Credits/M (input)</th>
             </tr>
           </thead>
           <tbody>
             {(models || []).map((model) => {
-              const creditsPerM = pricePerMTokens(model.cost_per_m_input, model.margin);
-              const yourPrice = creditsToUsd(creditsPerM);
+              const creditsInput = pricePerMTokens(model.cost_per_m_input, model.margin);
+              const creditsOutput = pricePerMTokens(model.cost_per_m_output, model.margin);
+              const priceInput = creditsToUsd(creditsInput);
+              const priceOutput = creditsToUsd(creditsOutput);
               return (
                 <tr key={model.id} className="border-t border-[var(--border)] hover:bg-[var(--bg-hover)]">
                   <td className="px-5 py-3">
@@ -42,14 +44,14 @@ export default async function ModelsPage() {
                       {model.provider}
                     </span>
                   </td>
-                  <td className="px-5 py-3 text-right text-[var(--text-muted)]">
-                    ${Number(model.cost_per_m_input).toFixed(2)}
+                  <td className="px-5 py-3 text-right">
+                    ${priceInput.toFixed(4)}
                   </td>
                   <td className="px-5 py-3 text-right">
-                    ${yourPrice.toFixed(4)}
+                    ${priceOutput.toFixed(4)}
                   </td>
                   <td className="px-5 py-3 text-right font-semibold">
-                    {creditsPerM.toLocaleString()}
+                    {creditsInput.toLocaleString()}
                   </td>
                 </tr>
               );

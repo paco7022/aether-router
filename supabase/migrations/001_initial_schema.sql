@@ -164,16 +164,21 @@ INSERT INTO models (id, provider, display_name, cost_per_m_input, cost_per_m_out
   ('mimo-v2-pro',                    'airforce', 'Mimo V2 Pro',                     0.40, 0.40);
 
 -- ============================================================
--- Seed: gemini-cli models (via api.aether-ai.dev)
--- Cost is 0 (own account), but we charge a small fee to cover infra
+-- Seed: gemini-cli models (via geminicli2api → Google account)
+-- Prices = official Google API pricing x 0.75 (25% discount)
+-- margin = 1.0 (discount already baked in, no additional markup)
 -- ============================================================
-INSERT INTO models (id, provider, display_name, cost_per_m_input, cost_per_m_output) VALUES
-  ('gemini-3-pro-high',              'gemini-cli', 'Gemini 3 Pro (High)',             0.00, 0.00),
-  ('gemini-3-pro-low',               'gemini-cli', 'Gemini 3 Pro (Low)',              0.00, 0.00),
-  ('gemini-3-flash-cli',             'gemini-cli', 'Gemini 3 Flash',                  0.00, 0.00),
-  ('claude-sonnet-4-5',              'gemini-cli', 'Claude Sonnet 4.5',               0.00, 0.00),
-  ('claude-sonnet-4-5-thinking',     'gemini-cli', 'Claude Sonnet 4.5 (Thinking)',    0.00, 0.00),
-  ('claude-opus-4-5-thinking',       'gemini-cli', 'Claude Opus 4.5 (Thinking)',      0.00, 0.00),
-  ('claude-opus-4-6',                'gemini-cli', 'Claude Opus 4.6',                 0.00, 0.00),
-  ('claude-opus-4-6-thinking',       'gemini-cli', 'Claude Opus 4.6 (Thinking)',      0.00, 0.00),
-  ('gpt-oss-120b',                   'gemini-cli', 'GPT-OSS 120B',                    0.00, 0.00);
+INSERT INTO models (id, provider, display_name, cost_per_m_input, cost_per_m_output, margin) VALUES
+  -- Gemini 2.5 Pro (official: $1.25 in / $10.00 out → x0.75)
+  ('gemini-2.5-pro',                 'gemini-cli', 'Gemini 2.5 Pro',                  0.9375, 7.5000, 1.0),
+  ('gemini-2.5-pro-nothinking',      'gemini-cli', 'Gemini 2.5 Pro (No Thinking)',    0.9375, 7.5000, 1.0),
+  ('gemini-2.5-pro-search',          'gemini-cli', 'Gemini 2.5 Pro (Search)',         0.9375, 7.5000, 1.0),
+  -- Gemini 2.5 Flash (official: $0.25 in / $1.50 out → x0.75, same as 3.1 flash)
+  ('gemini-2.5-flash',               'gemini-cli', 'Gemini 2.5 Flash',               0.1875, 1.1250, 1.0),
+  ('gemini-2.5-flash-nothinking',    'gemini-cli', 'Gemini 2.5 Flash (No Thinking)',  0.1875, 1.1250, 1.0),
+  -- Gemini 3.0 Pro (official: $5.00 in / $12.00 out → x0.75, same as 3.1)
+  ('gemini-3-pro-preview',           'gemini-cli', 'Gemini 3.0 Pro Preview',          3.7500, 9.0000, 1.0),
+  ('gemini-3-flash-preview',         'gemini-cli', 'Gemini 3.0 Flash Preview',        0.1875, 1.1250, 1.0),
+  -- Gemini 3.1 Pro (official: $5.00 in / $12.00 out → x0.75)
+  ('gemini-3.1-pro-preview',         'gemini-cli', 'Gemini 3.1 Pro Preview',          3.7500, 9.0000, 1.0),
+  ('gemini-3.1-flash-preview',       'gemini-cli', 'Gemini 3.1 Flash Preview',        0.1875, 1.1250, 1.0);

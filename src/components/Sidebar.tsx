@@ -15,7 +15,7 @@ const nav = [
 export function Sidebar({
   user,
 }: {
-  user: { email: string; displayName: string; credits: number };
+  user: { email: string; displayName: string; credits: number; planName?: string };
 }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -43,6 +43,9 @@ export function Sidebar({
         <p className="text-xs text-[var(--text-muted)]">
           ${(user.credits / 10_000).toFixed(2)} USD
         </p>
+        {user.planName && (
+          <p className="text-xs text-[var(--accent)] mt-1">{user.planName} plan</p>
+        )}
       </div>
 
       {/* Navigation */}
