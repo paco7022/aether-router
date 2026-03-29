@@ -162,3 +162,18 @@ INSERT INTO models (id, provider, display_name, cost_per_m_input, cost_per_m_out
   ('grok-4.1-fast-non-reasoning',    'airforce', 'Grok 4.1 Fast (Non-Reasoning)',   0.18, 0.18),
   ('grok-4.20-beta',                 'airforce', 'Grok 4.20 Beta',                  3.00, 3.00),
   ('mimo-v2-pro',                    'airforce', 'Mimo V2 Pro',                     0.40, 0.40);
+
+-- ============================================================
+-- Seed: gemini-cli models (via api.aether-ai.dev)
+-- Cost is 0 (own account), but we charge a small fee to cover infra
+-- ============================================================
+INSERT INTO models (id, provider, display_name, cost_per_m_input, cost_per_m_output) VALUES
+  ('gemini-3-pro-high',              'gemini-cli', 'Gemini 3 Pro (High)',             0.00, 0.00),
+  ('gemini-3-pro-low',               'gemini-cli', 'Gemini 3 Pro (Low)',              0.00, 0.00),
+  ('gemini-3-flash-cli',             'gemini-cli', 'Gemini 3 Flash',                  0.00, 0.00),
+  ('claude-sonnet-4-5',              'gemini-cli', 'Claude Sonnet 4.5',               0.00, 0.00),
+  ('claude-sonnet-4-5-thinking',     'gemini-cli', 'Claude Sonnet 4.5 (Thinking)',    0.00, 0.00),
+  ('claude-opus-4-5-thinking',       'gemini-cli', 'Claude Opus 4.5 (Thinking)',      0.00, 0.00),
+  ('claude-opus-4-6',                'gemini-cli', 'Claude Opus 4.6',                 0.00, 0.00),
+  ('claude-opus-4-6-thinking',       'gemini-cli', 'Claude Opus 4.6 (Thinking)',      0.00, 0.00),
+  ('gpt-oss-120b',                   'gemini-cli', 'GPT-OSS 120B',                    0.00, 0.00);
