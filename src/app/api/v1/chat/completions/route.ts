@@ -86,10 +86,11 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 6. Forward to provider
+  // 6. Forward to provider (use upstream_model_id for the real provider name)
+  const upstreamModel = model.upstream_model_id || modelId;
   try {
     const providerResponse = await provider.forward(
-      { ...body, model: modelId, stream } as any
+      { ...body, model: upstreamModel, stream } as any
     );
 
     if (!providerResponse.ok) {
