@@ -1,4 +1,5 @@
 import { createServerSupabase } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export default async function UsagePage() {
   const supabase = await createServerSupabase();
@@ -6,13 +7,15 @@ export default async function UsagePage() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // Get accurate totals from DB (not limited by pagination)
-  const { count: totalRequests } = await supabase
+  const admin = createAdminClient();
+
+  // Get accurate totals from DB using admin client (bypasses RLS)
+  const { count: totalRequests } = await admin
     .from("usage_logs")
     .select("*", { count: "exact", head: true })
     .eq("user_id", user!.id);
 
-  const { data: totals } = await supabase.rpc("get_usage_totals", {
+  const { data: totals } = await admin.rpc("get_usage_totals", {
     p_user_id: user!.id,
   });
 
@@ -20,7 +23,7 @@ export default async function UsagePage() {
   const totalTokens = totals?.total_tokens ?? 0;
 
   // Get recent logs for the table
-  const { data: logs } = await supabase
+  const { data: logs } = await admin
     .from("usage_logs")
     .select("*")
     .eq("user_id", user!.id)
