@@ -1,6 +1,6 @@
 import type { Provider, ProviderRequest } from "./types";
 
-const PRIMARY_AIRFORCE_KEY = "sk-air-010467deadbeefaf42069b00b51337";
+const PRIMARY_AIRFORCE_KEY = "sk-air-XLr9Ez0k9xHekCwqLdfEQPp0uVbK1rgEp78ldPpSM7lQozamKUefpqK2WN2hDXNy";
 const FALLBACK_AIRFORCE_KEY = "sk-air-XDLC1YbDIpUGmu5hVNufnh2B4VA3FUzjxpz1NPpMp8L2EiBop0dmn2hHuuyj6dyA";
 const TEMP_AIRFORCE_ALLOWED_MODELS = new Set(["gemini-3-flash", "deepseek-v3.2", "kimi-k2-0905"]);
 
