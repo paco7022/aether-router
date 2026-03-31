@@ -152,7 +152,6 @@ INSERT INTO models (id, provider, display_name, cost_per_m_input, cost_per_m_out
   ('claude-sonnet-4.5-uncensored',   'airforce', 'Claude Sonnet 4.5 Uncensored',    1.00, 1.00),
   ('claude-opus-4.5-uncensored',     'airforce', 'Claude Opus 4.5 Uncensored',      3.00, 3.00),
   ('claude-opus-4.6-uncensored',     'airforce', 'Claude Opus 4.6 Uncensored',      2.50, 2.50),
-  ('gemini-3-pro',                   'airforce', 'Gemini 3 Pro',                    2.20, 2.20),
   ('gemini-3.1-pro',                 'airforce', 'Gemini 3.1 Pro',                  2.20, 2.20),
   ('deepseek-r1',                    'airforce', 'DeepSeek R1',                     0.20, 0.20),
   ('deepseek-v3.2',                  'airforce', 'DeepSeek V3.2',                   0.01, 0.01),
@@ -176,8 +175,6 @@ INSERT INTO models (id, provider, display_name, cost_per_m_input, cost_per_m_out
   -- Gemini 2.5 Flash (official: $0.25 in / $1.50 out → x0.75, same as 3.1 flash)
   ('gemini-2.5-flash',               'gemini-cli', 'Gemini 2.5 Flash',               0.1875, 1.1250, 1.0),
   ('gemini-2.5-flash-nothinking',    'gemini-cli', 'Gemini 2.5 Flash (No Thinking)',  0.1875, 1.1250, 1.0),
-  -- Gemini 3.0 Pro (official: $5.00 in / $12.00 out → x0.75, same as 3.1)
-  ('gemini-3-pro-preview',           'gemini-cli', 'Gemini 3.0 Pro Preview',          3.7500, 9.0000, 1.0),
   ('gemini-3-flash-preview',         'gemini-cli', 'Gemini 3.0 Flash Preview',        0.1875, 1.1250, 1.0),
   -- Gemini 3.1 Pro (official: $5.00 in / $12.00 out → x0.75)
   ('gemini-3.1-pro-preview',         'gemini-cli', 'Gemini 3.1 Pro Preview',          3.7500, 9.0000, 1.0),
