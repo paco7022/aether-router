@@ -1,6 +1,7 @@
 import { createServerSupabase } from "@/lib/supabase/server";
 import { PlanCard } from "@/components/PlanCard";
 import { BuyCreditsCard } from "@/components/BuyCreditsCard";
+import { ClaimDailyButton } from "@/components/ClaimDailyButton";
 
 export default async function BillingPage() {
   const supabase = await createServerSupabase();
@@ -36,6 +37,11 @@ export default async function BillingPage() {
   const dailyCredits = profile?.daily_credits || 0;
   const totalCredits = permanentCredits + dailyCredits;
   const currentPlanId = profile?.plan_id || "free";
+
+  const today = new Date().toISOString().split("T")[0];
+  const alreadyClaimed = subscription?.last_grant_date === today;
+  const planObj = subscription?.plans as { credits_per_day: number } | null;
+  const creditsPerDay = planObj?.credits_per_day || 0;
 
   return (
     <div>
@@ -74,6 +80,11 @@ export default async function BillingPage() {
             )}
           </div>
         </div>
+        {creditsPerDay > 0 && (
+          <div className="mt-4 pt-4 border-t border-[var(--border)]">
+            <ClaimDailyButton alreadyClaimed={alreadyClaimed} creditsPerDay={creditsPerDay} />
+          </div>
+        )}
       </div>
 
       {/* Plans */}

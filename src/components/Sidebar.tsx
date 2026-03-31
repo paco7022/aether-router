@@ -15,7 +15,7 @@ const nav = [
 export function Sidebar({
   user,
 }: {
-  user: { email: string; displayName: string; credits: number; planName?: string };
+  user: { email: string; displayName: string; credits: number; dailyCredits: number; planName?: string };
 }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -37,12 +37,13 @@ export function Sidebar({
       <div className="px-5 py-4 border-b border-[var(--border)]">
         <p className="text-xs text-[var(--text-muted)] uppercase tracking-wider">Balance</p>
         <p className="text-2xl font-bold mt-1">
-          {user.credits.toLocaleString()}
+          {(user.credits + user.dailyCredits).toLocaleString()}
           <span className="text-sm font-normal text-[var(--text-muted)]"> credits</span>
         </p>
-        <p className="text-xs text-[var(--text-muted)]">
-          ${(user.credits / 10_000).toFixed(2)} USD
-        </p>
+        <div className="flex gap-3 mt-1">
+          <p className="text-xs text-teal-400">{user.dailyCredits.toLocaleString()} daily</p>
+          <p className="text-xs text-green-400">{user.credits.toLocaleString()} perm</p>
+        </div>
         {user.planName && (
           <p className="text-xs text-[var(--accent)] mt-1">{user.planName} plan</p>
         )}

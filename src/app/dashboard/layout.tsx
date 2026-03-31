@@ -29,6 +29,7 @@ export default async function DashboardLayout({
           email: user.email || "",
           displayName: profile?.display_name || "",
           credits: profile?.credits || 0,
+          dailyCredits: profile?.daily_credits || 0,
           planName: (profile?.plans as { name: string } | null)?.name,
         }}
       />
