@@ -1,14 +1,12 @@
 import type { Provider, ProviderRequest } from "./types";
 
+// Temporary provider for testing — key expires ~5h from now, free models
 export const gameronProvider: Provider = {
   name: "gameron",
-  baseUrl: process.env.GAMERON_BASE_URL || "https://api.gameron.me/v1",
+  baseUrl: "https://api.gameron.me/v1",
 
   async forward(request: ProviderRequest, signal?: AbortSignal): Promise<Response> {
-    const apiKey = process.env.GAMERON_API_KEY;
-    if (!apiKey) {
-      throw new Error("GAMERON_API_KEY not configured");
-    }
+    const apiKey = "sk-user-26362df37e200b57bb1a69160e73506e";
 
     const res = await fetch(`${this.baseUrl}/chat/completions`, {
       method: "POST",
