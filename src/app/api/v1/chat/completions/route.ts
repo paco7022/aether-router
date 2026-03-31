@@ -8,6 +8,30 @@ import { createAdminClient } from "@/lib/supabase/admin";
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
+function extractCompletionText(payload: unknown): string {
+  const data = payload as { choices?: Array<{ message?: { content?: unknown } }> };
+  const text = data?.choices?.[0]?.message?.content;
+
+  if (typeof text === "string") {
+    return text;
+  }
+
+  if (Array.isArray(text)) {
+    return text
+      .map((part) => {
+        if (typeof part === "string") return part;
+        if (part && typeof part === "object" && "text" in part) {
+          const maybeText = (part as { text?: unknown }).text;
+          return typeof maybeText === "string" ? maybeText : "";
+        }
+        return "";
+      })
+      .join("");
+  }
+
+  return "";
+}
+
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
 
@@ -125,7 +149,19 @@ export async function POST(req: NextRequest) {
       [key: string]: unknown;
     };
 
-    const usage = data.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+    let usage = data.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+
+    // Some providers omit usage on non-stream responses; estimate to avoid zero-charge responses.
+    if (!usage.total_tokens || usage.total_tokens <= 0) {
+      const estimatedPrompt = estimatePromptTokens(messages);
+      const estimatedCompletion = estimateTokens(extractCompletionText(data));
+      usage = {
+        prompt_tokens: estimatedPrompt,
+        completion_tokens: estimatedCompletion,
+        total_tokens: estimatedPrompt + estimatedCompletion,
+      };
+    }
+
     const { credits, costUsd } = calculateCredits(
       usage.prompt_tokens,
       usage.completion_tokens,
@@ -136,15 +172,24 @@ export async function POST(req: NextRequest) {
       }
     );
 
+    const finalCredits = Math.max(credits, 1);
+
     // 9. Deduct credits
-    const { data: newBalance } = await supabase.rpc("deduct_credits", {
+    const { data: newBalance, error: deductError } = await supabase.rpc("deduct_credits", {
       p_user_id: keyInfo.userId,
-      p_amount: credits,
+      p_amount: finalCredits,
     });
+
+    if (deductError) {
+      return NextResponse.json(
+        { error: { message: "Failed to deduct credits", type: "billing_error" } },
+        { status: 500 }
+      );
+    }
 
     if (newBalance === -1) {
       return NextResponse.json(
-        { error: { message: "Insufficient credits", type: "billing_error", credits_required: credits, credits_available: keyInfo.credits + keyInfo.dailyCredits } },
+        { error: { message: "Insufficient credits", type: "billing_error", credits_required: finalCredits, credits_available: keyInfo.credits + keyInfo.dailyCredits } },
         { status: 402 }
       );
     }
@@ -158,7 +203,7 @@ export async function POST(req: NextRequest) {
       prompt_tokens: usage.prompt_tokens,
       completion_tokens: usage.completion_tokens,
       total_tokens: usage.total_tokens,
-      credits_charged: credits,
+      credits_charged: finalCredits,
       cost_usd: costUsd,
       status: "success",
       duration_ms: durationMs,
@@ -166,7 +211,7 @@ export async function POST(req: NextRequest) {
 
     await supabase.from("transactions").insert({
       user_id: keyInfo.userId,
-      amount: -credits,
+      amount: -finalCredits,
       balance: newBalance as number,
       type: "usage",
       description: `${modelId} - ${usage.total_tokens} tokens`,
@@ -247,10 +292,12 @@ async function handleStreamingResponse(
       // Minimum 1 credit per request
       const finalCredits = Math.max(credits, 1);
 
-      const { data: newBalance } = await supabase.rpc("deduct_credits", {
+      const { data: newBalance, error: deductError } = await supabase.rpc("deduct_credits", {
         p_user_id: keyInfo.userId,
         p_amount: finalCredits,
       });
+
+      const wasCharged = !deductError && typeof newBalance === "number" && newBalance >= 0;
 
       const durationMs = Date.now() - startTime;
       await supabase.from("usage_logs").insert({
@@ -260,17 +307,17 @@ async function handleStreamingResponse(
         prompt_tokens: totalPromptTokens,
         completion_tokens: totalCompletionTokens,
         total_tokens: totalTokens,
-        credits_charged: finalCredits,
+        credits_charged: wasCharged ? finalCredits : 0,
         cost_usd: costUsd,
-        status: "success",
+        status: wasCharged ? "success" : "billing_failed",
         duration_ms: durationMs,
       });
 
-      if (typeof newBalance === "number" && newBalance >= 0) {
+      if (wasCharged) {
         await supabase.from("transactions").insert({
           user_id: keyInfo.userId,
           amount: -finalCredits,
-          balance: newBalance,
+          balance: newBalance as number,
           type: "usage",
           description: `${model.id} - ${totalTokens} tokens (stream)`,
         });
