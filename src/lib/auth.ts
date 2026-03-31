@@ -4,6 +4,7 @@ export interface ApiKeyInfo {
   keyId: string;
   userId: string;
   credits: number;
+  dailyCredits: number;
 }
 
 export async function validateApiKey(key: string): Promise<ApiKeyInfo | null> {
@@ -19,7 +20,7 @@ export async function validateApiKey(key: string): Promise<ApiKeyInfo | null> {
   // Look up key and join with profile for credits
   const { data: result, error } = await supabase
     .from("api_keys")
-    .select("id, user_id, is_active, profiles(credits)")
+    .select("id, user_id, is_active, profiles(credits, daily_credits)")
     .eq("key_hash", keyHash)
     .single();
 
@@ -33,12 +34,13 @@ export async function validateApiKey(key: string): Promise<ApiKeyInfo | null> {
     .update({ last_used: new Date().toISOString() })
     .eq("id", result.id);
 
-  const profile = result.profiles as unknown as { credits: number };
+  const profile = result.profiles as unknown as { credits: number; daily_credits: number };
 
   return {
     keyId: result.id,
     userId: result.user_id,
     credits: profile?.credits ?? 0,
+    dailyCredits: profile?.daily_credits ?? 0,
   };
 }
 

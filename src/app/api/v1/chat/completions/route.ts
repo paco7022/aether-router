@@ -131,7 +131,7 @@ export async function POST(req: NextRequest) {
 
     if (newBalance === -1) {
       return NextResponse.json(
-        { error: { message: "Insufficient credits", type: "billing_error", credits_required: credits, credits_available: keyInfo.credits } },
+        { error: { message: "Insufficient credits", type: "billing_error", credits_required: credits, credits_available: keyInfo.credits + keyInfo.dailyCredits } },
         { status: 402 }
       );
     }

@@ -15,7 +15,7 @@ export default async function BillingPage() {
     { data: packages },
     { data: transactions },
   ] = await Promise.all([
-    supabase.from("profiles").select("credits, plan_id").eq("id", user!.id).single(),
+    supabase.from("profiles").select("credits, daily_credits, plan_id").eq("id", user!.id).single(),
     supabase
       .from("subscriptions")
       .select("*, plans(*)")
@@ -32,7 +32,9 @@ export default async function BillingPage() {
       .limit(50),
   ]);
 
-  const credits = profile?.credits || 0;
+  const permanentCredits = profile?.credits || 0;
+  const dailyCredits = profile?.daily_credits || 0;
+  const totalCredits = permanentCredits + dailyCredits;
   const currentPlanId = profile?.plan_id || "free";
 
   return (
@@ -43,17 +45,25 @@ export default async function BillingPage() {
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-6 mb-8">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-sm text-[var(--text-muted)]">Current Balance</p>
+            <p className="text-sm text-[var(--text-muted)]">Total Balance</p>
             <p className="text-4xl font-bold mt-1">
-              {credits.toLocaleString()}{" "}
+              {totalCredits.toLocaleString()}{" "}
               <span className="text-lg font-normal text-[var(--text-muted)]">credits</span>
             </p>
-            <p className="text-sm text-[var(--text-muted)]">
-              ${(credits / 10_000).toFixed(2)} USD
-            </p>
+            <div className="flex gap-4 mt-2">
+              <div>
+                <p className="text-xs text-[var(--text-muted)]">Daily (temporary)</p>
+                <p className="text-sm font-medium text-teal-400">{dailyCredits.toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-xs text-[var(--text-muted)]">Permanent</p>
+                <p className="text-sm font-medium text-green-400">{permanentCredits.toLocaleString()}</p>
+              </div>
+            </div>
           </div>
           <div className="text-right">
             <p className="text-xs text-[var(--text-muted)] mb-1">10,000 credits = $1.00 USD</p>
+            <p className="text-xs text-[var(--text-muted)] mb-2">Daily credits are used first and reset each day</p>
             {subscription?.plans && (
               <p className="text-sm">
                 Current plan:{" "}
@@ -70,7 +80,7 @@ export default async function BillingPage() {
       <div className="mb-8">
         <h3 className="text-xl font-bold mb-1">Plans</h3>
         <p className="text-sm text-[var(--text-muted)] mb-5">
-          Subscribe monthly for daily credits. Higher plans = better value vs buying credits.
+          Subscribe monthly for daily temporary credits. They reset each day &mdash; use them or lose them. Higher plans = better value.
         </p>
 
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -88,7 +98,7 @@ export default async function BillingPage() {
       <div className="mb-8">
         <h3 className="text-xl font-bold mb-1">Buy Credits</h3>
         <p className="text-sm text-[var(--text-muted)] mb-5">
-          One-time purchase. $1 = 10,000 credits. These never expire.
+          One-time purchase. $1 = 10,000 permanent credits. These never expire.
         </p>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
