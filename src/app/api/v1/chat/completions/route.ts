@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { validateApiKey } from "@/lib/auth";
 import { calculateCredits } from "@/lib/credits";
+import { estimateTokens, estimatePromptTokens } from "@/lib/token-estimator";
 import { getProvider } from "@/lib/providers";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -76,6 +77,15 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // 5.5. Pre-check credits before forwarding (avoid free requests)
+  const totalCredits = keyInfo.credits + keyInfo.dailyCredits;
+  if (totalCredits <= 0) {
+    return NextResponse.json(
+      { error: { message: "Insufficient credits", type: "billing_error", credits_available: totalCredits } },
+      { status: 402 }
+    );
+  }
+
   // 6. Forward to provider
   try {
     const providerResponse = await provider.forward(
@@ -98,11 +108,13 @@ export async function POST(req: NextRequest) {
 
     // 7. Handle streaming
     if (stream) {
+      const estPrompt = estimatePromptTokens(messages);
       return handleStreamingResponse(
         providerResponse,
         keyInfo,
         model,
-        startTime
+        startTime,
+        estPrompt
       );
     }
 
@@ -172,13 +184,15 @@ async function handleStreamingResponse(
   providerResponse: Response,
   keyInfo: { userId: string; keyId: string; credits: number },
   model: { id: string; cost_per_m_input: number; cost_per_m_output: number; margin: number },
-  startTime: number
+  startTime: number,
+  estimatedPromptTokens: number = 0
 ) {
   const supabase = createAdminClient();
   let totalPromptTokens = 0;
   let totalCompletionTokens = 0;
+  let completionText = "";
+  let hasUsageData = false;
 
-  const encoder = new TextEncoder();
   const decoder = new TextDecoder();
 
   const transformStream = new TransformStream({
@@ -195,8 +209,14 @@ async function handleStreamingResponse(
         try {
           const parsed = JSON.parse(jsonStr);
           if (parsed.usage) {
-            totalPromptTokens = parsed.usage.prompt_tokens || totalPromptTokens;
-            totalCompletionTokens = parsed.usage.completion_tokens || totalCompletionTokens;
+            hasUsageData = true;
+            totalPromptTokens = parsed.usage.prompt_tokens ?? totalPromptTokens;
+            totalCompletionTokens = parsed.usage.completion_tokens ?? totalCompletionTokens;
+          }
+          // Accumulate completion text for fallback estimation
+          const delta = parsed.choices?.[0]?.delta?.content;
+          if (typeof delta === "string") {
+            completionText += delta;
           }
         } catch {
           // Not valid JSON, skip
@@ -205,47 +225,54 @@ async function handleStreamingResponse(
     },
 
     async flush() {
-      // Deduct credits after stream completes
+      // If provider didn't send usage data, estimate tokens
+      if (!hasUsageData) {
+        totalPromptTokens = estimatedPromptTokens;
+        totalCompletionTokens = estimateTokens(completionText);
+      }
+
+      // Always deduct credits (even if tokens are estimated)
       const totalTokens = totalPromptTokens + totalCompletionTokens;
-      if (totalTokens > 0) {
-        const { credits, costUsd } = calculateCredits(
-          totalPromptTokens,
-          totalCompletionTokens,
-          {
-            cost_per_m_input: model.cost_per_m_input,
-            cost_per_m_output: model.cost_per_m_output,
-            margin: model.margin,
-          }
-        );
-
-        const { data: newBalance } = await supabase.rpc("deduct_credits", {
-          p_user_id: keyInfo.userId,
-          p_amount: credits,
-        });
-
-        const durationMs = Date.now() - startTime;
-        await supabase.from("usage_logs").insert({
-          user_id: keyInfo.userId,
-          api_key_id: keyInfo.keyId,
-          model_id: model.id,
-          prompt_tokens: totalPromptTokens,
-          completion_tokens: totalCompletionTokens,
-          total_tokens: totalTokens,
-          credits_charged: credits,
-          cost_usd: costUsd,
-          status: "success",
-          duration_ms: durationMs,
-        });
-
-        if (typeof newBalance === "number" && newBalance >= 0) {
-          await supabase.from("transactions").insert({
-            user_id: keyInfo.userId,
-            amount: -credits,
-            balance: newBalance,
-            type: "usage",
-            description: `${model.id} - ${totalTokens} tokens (stream)`,
-          });
+      const { credits, costUsd } = calculateCredits(
+        totalPromptTokens,
+        totalCompletionTokens,
+        {
+          cost_per_m_input: model.cost_per_m_input,
+          cost_per_m_output: model.cost_per_m_output,
+          margin: model.margin,
         }
+      );
+
+      // Minimum 1 credit per request
+      const finalCredits = Math.max(credits, 1);
+
+      const { data: newBalance } = await supabase.rpc("deduct_credits", {
+        p_user_id: keyInfo.userId,
+        p_amount: finalCredits,
+      });
+
+      const durationMs = Date.now() - startTime;
+      await supabase.from("usage_logs").insert({
+        user_id: keyInfo.userId,
+        api_key_id: keyInfo.keyId,
+        model_id: model.id,
+        prompt_tokens: totalPromptTokens,
+        completion_tokens: totalCompletionTokens,
+        total_tokens: totalTokens,
+        credits_charged: finalCredits,
+        cost_usd: costUsd,
+        status: "success",
+        duration_ms: durationMs,
+      });
+
+      if (typeof newBalance === "number" && newBalance >= 0) {
+        await supabase.from("transactions").insert({
+          user_id: keyInfo.userId,
+          amount: -finalCredits,
+          balance: newBalance,
+          type: "usage",
+          description: `${model.id} - ${totalTokens} tokens (stream)`,
+        });
       }
     },
   });

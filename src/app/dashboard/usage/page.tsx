@@ -6,16 +6,26 @@ export default async function UsagePage() {
     data: { user },
   } = await supabase.auth.getUser();
 
+  // Get accurate totals from DB (not limited by pagination)
+  const { count: totalRequests } = await supabase
+    .from("usage_logs")
+    .select("*", { count: "exact", head: true })
+    .eq("user_id", user!.id);
+
+  const { data: totals } = await supabase.rpc("get_usage_totals", {
+    p_user_id: user!.id,
+  });
+
+  const totalCredits = totals?.total_credits ?? 0;
+  const totalTokens = totals?.total_tokens ?? 0;
+
+  // Get recent logs for the table
   const { data: logs } = await supabase
     .from("usage_logs")
     .select("*")
     .eq("user_id", user!.id)
     .order("created_at", { ascending: false })
     .limit(100);
-
-  // Calculate totals
-  const totalCredits = (logs || []).reduce((sum, l) => sum + l.credits_charged, 0);
-  const totalTokens = (logs || []).reduce((sum, l) => sum + l.total_tokens, 0);
 
   return (
     <div>
@@ -25,7 +35,7 @@ export default async function UsagePage() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5">
           <p className="text-sm text-[var(--text-muted)]">Total Requests</p>
-          <p className="text-2xl font-bold mt-1">{(logs || []).length}</p>
+          <p className="text-2xl font-bold mt-1">{(totalRequests ?? 0).toLocaleString()}</p>
         </div>
         <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5">
           <p className="text-sm text-[var(--text-muted)]">Total Tokens</p>
