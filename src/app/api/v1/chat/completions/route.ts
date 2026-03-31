@@ -8,6 +8,12 @@ import { createAdminClient } from "@/lib/supabase/admin";
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
+const TEMP_AIRFORCE_ALLOWED_MODELS = new Set(["gemini-3-flash", "deepseek-v3.2", "kimi-k2-0905"]);
+
+function normalizeAirforceModelId(id: string): string {
+  return String(id || "").replace(/^a\//, "");
+}
+
 function extractCompletionText(payload: unknown): string {
   const data = payload as { choices?: Array<{ message?: { content?: unknown } }> };
   const text = data?.choices?.[0]?.message?.content;
@@ -112,6 +118,23 @@ export async function POST(req: NextRequest) {
 
   // 6. Forward to provider (use upstream_model_id for the real provider name)
   const upstreamModel = model.upstream_model_id || modelId;
+
+  if (model.provider === "airforce") {
+    const allowedModel = normalizeAirforceModelId(upstreamModel);
+    if (!TEMP_AIRFORCE_ALLOWED_MODELS.has(allowedModel)) {
+      return NextResponse.json(
+        {
+          error: {
+            message:
+              "Airforce temporary pool only allows: gemini-3-flash, deepseek-v3.2, kimi-k2-0905",
+            type: "invalid_request",
+          },
+        },
+        { status: 403 }
+      );
+    }
+  }
+
   try {
     const providerResponse = await provider.forward(
       { ...body, model: upstreamModel, stream } as any
