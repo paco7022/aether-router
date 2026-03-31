@@ -100,17 +100,9 @@ export function PlanCard({
             Current Plan
           </div>
         ) : (
-          <button
-            onClick={handleSubscribe}
-            disabled={loading}
-            className={`w-full py-2 px-4 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${
-              plan.is_popular
-                ? "bg-teal-500 hover:bg-teal-400 text-white"
-                : "bg-[var(--bg-hover)] hover:bg-[var(--accent)] hover:text-white text-[var(--text)]"
-            }`}
-          >
-            {loading ? "..." : "Subscribe"}
-          </button>
+          <div className="w-full py-2 px-4 rounded-lg bg-[var(--bg-hover)] text-center text-sm text-[var(--text-muted)] cursor-not-allowed opacity-60">
+            Coming soon
+          </div>
         )}
       </div>
     </div>

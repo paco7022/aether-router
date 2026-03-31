@@ -12,10 +12,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { package_id } = await req.json();
-  if (!package_id) {
-    return NextResponse.json({ error: "package_id required" }, { status: 400 });
-  }
+  // Disabled until Stripe is connected
+  return NextResponse.json({ error: "Credit purchases are coming soon. Stripe integration pending." }, { status: 503 });
 
   const admin = createAdminClient();
 

@@ -38,13 +38,9 @@ export function BuyCreditsCard({ pkg }: { pkg: CreditPackage }) {
           ${pkg.price_usd} USD — permanent, no expiry
         </p>
       </div>
-      <button
-        onClick={handleBuy}
-        disabled={loading}
-        className="px-4 py-1.5 bg-[var(--bg-hover)] hover:bg-[var(--accent)] hover:text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
-      >
-        {loading ? "..." : "Buy"}
-      </button>
+      <div className="px-4 py-1.5 bg-[var(--bg-hover)] rounded-lg text-sm text-[var(--text-muted)] cursor-not-allowed opacity-60">
+        Coming soon
+      </div>
     </div>
   );
 }
