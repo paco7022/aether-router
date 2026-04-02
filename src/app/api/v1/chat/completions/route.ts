@@ -202,15 +202,31 @@ export async function POST(req: NextRequest) {
 
     if (!providerResponse.ok) {
       const errorText = await providerResponse.text();
+      const status = providerResponse.status;
+
+      // User-friendly messages instead of leaking upstream details
+      let userMessage: string;
+      if (status === 403 || status === 401) {
+        userMessage = "This model is temporarily unavailable. Please try again in a moment.";
+      } else if (status === 429) {
+        userMessage = "This model is currently rate limited. Please wait a moment and try again.";
+      } else if (status >= 500) {
+        userMessage = "The model provider is experiencing issues. Please try again later.";
+      } else {
+        userMessage = `Model request failed (${status}). Please try again.`;
+      }
+
+      console.error(`[${model.provider}] Upstream error ${status}: ${errorText}`);
+
       return NextResponse.json(
         {
           error: {
-            message: `Upstream provider error: ${providerResponse.status}`,
+            message: userMessage,
             type: "upstream_error",
-            details: errorText,
+            provider: model.provider,
           },
         },
-        { status: providerResponse.status }
+        { status: status >= 500 ? 502 : status }
       );
     }
 
