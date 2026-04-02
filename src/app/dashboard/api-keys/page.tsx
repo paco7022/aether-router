@@ -153,11 +153,11 @@ export default function ApiKeysPage() {
           Use your API key with any OpenAI-compatible client:
         </p>
         <pre className="bg-[var(--bg)] rounded-lg p-4 text-xs font-mono overflow-x-auto">
-{`curl -X POST https://api.aether-ai.dev/v1/chat/completions \\
+{`curl -X POST https://aether-router.vercel.app/api/v1/chat/completions \\
   -H "Authorization: Bearer ak_your_key_here" \\
   -H "Content-Type: application/json" \\
   -d '{
-    "model": "deepseek-v3.2",
+    "model": "gm/gemini-3.1-pro-preview",
     "messages": [{"role": "user", "content": "Hello!"}]
   }'`}
         </pre>

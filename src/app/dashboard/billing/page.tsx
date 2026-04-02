@@ -1,7 +1,11 @@
+import { Suspense } from "react";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { PlanCard } from "@/components/PlanCard";
 import { BuyCreditsCard } from "@/components/BuyCreditsCard";
 import { ClaimDailyButton } from "@/components/ClaimDailyButton";
+import { GmRequestsCard } from "@/components/GmRequestsCard";
+import { CheckoutFeedback } from "@/components/CheckoutFeedback";
 
 export default async function BillingPage() {
   const supabase = await createServerSupabase();
@@ -16,7 +20,7 @@ export default async function BillingPage() {
     { data: packages },
     { data: transactions },
   ] = await Promise.all([
-    supabase.from("profiles").select("credits, daily_credits, plan_id").eq("id", user!.id).single(),
+    supabase.from("profiles").select("credits, daily_credits, plan_id, gm_claimed_date").eq("id", user!.id).single(),
     supabase
       .from("subscriptions")
       .select("*, plans(*)")
@@ -33,10 +37,31 @@ export default async function BillingPage() {
       .limit(50),
   ]);
 
+  // Fetch gm/ usage for today and plan limits
+  const admin = createAdminClient();
+  const todayStart = new Date();
+  todayStart.setUTCHours(0, 0, 0, 0);
+
+  const [{ count: gmUsedToday }, { data: currentPlan }] = await Promise.all([
+    admin
+      .from("usage_logs")
+      .select("*", { count: "exact", head: true })
+      .eq("user_id", user!.id)
+      .like("model_id", "gm/%")
+      .gte("created_at", todayStart.toISOString()),
+    admin
+      .from("plans")
+      .select("gm_daily_requests, gm_max_context")
+      .eq("id", profile?.plan_id || "free")
+      .single(),
+  ]);
+
   const permanentCredits = profile?.credits || 0;
   const dailyCredits = profile?.daily_credits || 0;
   const totalCredits = permanentCredits + dailyCredits;
   const currentPlanId = profile?.plan_id || "free";
+  const gmClaimedToday = profile?.gm_claimed_date === new Date().toISOString().split("T")[0];
+  const isFree = currentPlanId === "free";
 
   const today = new Date().toISOString().split("T")[0];
   const alreadyClaimed = subscription?.last_grant_date === today;
@@ -46,6 +71,10 @@ export default async function BillingPage() {
   return (
     <div>
       <h2 className="text-2xl font-bold mb-6">Billing</h2>
+
+      <Suspense>
+        <CheckoutFeedback />
+      </Suspense>
 
       {/* Current balance */}
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-6 mb-8">
@@ -85,6 +114,16 @@ export default async function BillingPage() {
             <ClaimDailyButton alreadyClaimed={alreadyClaimed} creditsPerDay={creditsPerDay} />
           </div>
         )}
+      </div>
+
+      {/* GM Requests */}
+      <div className="mb-8">
+        <GmRequestsCard
+          used={gmUsedToday ?? 0}
+          limit={currentPlan?.gm_daily_requests ?? 20}
+          claimed={gmClaimedToday}
+          isFree={isFree}
+        />
       </div>
 
       {/* Plans */}

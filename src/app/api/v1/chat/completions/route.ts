@@ -107,7 +107,69 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 5.5. Pre-check credits before forwarding (avoid free requests)
+  // 5.5. Gameron plan limits (requests/day + context cap)
+  if (model.provider === "gameron") {
+    // Free users must claim gm/ requests daily from the billing page
+    if (keyInfo.planId === "free") {
+      const today = new Date().toISOString().split("T")[0];
+      if (keyInfo.gmClaimedDate !== today) {
+        return NextResponse.json(
+          { error: { message: "Claim your daily premium requests first at the billing page.", type: "claim_required" } },
+          { status: 403 }
+        );
+      }
+    }
+
+    const { data: plan } = await supabase
+      .from("plans")
+      .select("gm_daily_requests, gm_max_context")
+      .eq("id", keyInfo.planId)
+      .single();
+
+    // Default to free-tier limits if plan not found (safe fallback)
+    const gmDailyRequests = plan?.gm_daily_requests ?? 20;
+    const gmMaxContext = plan?.gm_max_context ?? 32768;
+
+    // Check daily request limit (0 = unlimited)
+    if (gmDailyRequests > 0) {
+      const todayStart = new Date();
+      todayStart.setUTCHours(0, 0, 0, 0);
+      const { count, error: countError } = await supabase
+        .from("usage_logs")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", keyInfo.userId)
+        .like("model_id", "gm/%")
+        .gte("created_at", todayStart.toISOString());
+
+      // If count query fails, block to be safe
+      if (countError) {
+        return NextResponse.json(
+          { error: { message: "Failed to check rate limit", type: "server_error" } },
+          { status: 500 }
+        );
+      }
+
+      if ((count ?? 0) >= gmDailyRequests) {
+        return NextResponse.json(
+          { error: { message: `Daily limit reached (${gmDailyRequests} requests/day for your plan). Upgrade for more.`, type: "rate_limit" } },
+          { status: 429 }
+        );
+      }
+    }
+
+    // Check context length limit (0 = unlimited)
+    if (gmMaxContext > 0) {
+      const estimatedContext = estimatePromptTokens(messages);
+      if (estimatedContext > gmMaxContext) {
+        return NextResponse.json(
+          { error: { message: `Context too long (~${estimatedContext} tokens). Your plan allows ${gmMaxContext} tokens max. Upgrade for more.`, type: "context_limit" } },
+          { status: 413 }
+        );
+      }
+    }
+  }
+
+  // 5.6. Pre-check credits before forwarding (avoid free requests)
   const totalCredits = keyInfo.credits + keyInfo.dailyCredits;
   if (totalCredits <= 0) {
     return NextResponse.json(

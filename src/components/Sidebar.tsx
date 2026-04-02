@@ -12,10 +12,14 @@ const nav = [
   { href: "/dashboard/billing", label: "Billing", icon: "$" },
 ];
 
+const adminNav = { href: "/dashboard/admin", label: "Admin", icon: "!" };
+
 export function Sidebar({
   user,
+  isAdmin,
 }: {
   user: { email: string; displayName: string; credits: number; dailyCredits: number; planName?: string };
+  isAdmin?: boolean;
 }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -68,6 +72,23 @@ export function Sidebar({
             </Link>
           );
         })}
+
+        {isAdmin && (
+          <>
+            <div className="border-t border-[var(--border)] my-2" />
+            <Link
+              href={adminNav.href}
+              className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
+                pathname === adminNav.href
+                  ? "bg-red-600 text-white"
+                  : "text-red-400 hover:bg-red-500/10 hover:text-red-300"
+              }`}
+            >
+              <span className="font-mono text-base w-5 text-center">{adminNav.icon}</span>
+              {adminNav.label}
+            </Link>
+          </>
+        )}
       </nav>
 
       {/* User */}

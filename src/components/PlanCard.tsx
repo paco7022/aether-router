@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 interface Plan {
@@ -12,6 +11,8 @@ interface Plan {
   credits_per_month: number;
   bonus_pct: number;
   is_popular: boolean;
+  gm_daily_requests: number;
+  gm_max_context: number;
 }
 
 export function PlanCard({
@@ -21,24 +22,31 @@ export function PlanCard({
   plan: Plan;
   isCurrent: boolean;
 }) {
-  const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   const bonusLabel =
     plan.bonus_pct > 0 ? `${plan.bonus_pct}% more value vs buying` : "";
 
   async function handleSubscribe() {
+    if (plan.price_usd <= 0) return;
     setLoading(true);
+    setError("");
     try {
       const res = await fetch("/api/v1/billing/subscribe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ plan_id: plan.id }),
       });
-      if (res.ok) {
-        router.refresh();
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        setError(data.error || "Something went wrong");
+        setLoading(false);
       }
-    } finally {
+    } catch {
+      setError("Network error. Please try again.");
       setLoading(false);
     }
   }
@@ -94,14 +102,45 @@ export function PlanCard({
         )}
       </div>
 
+      {/* Gameron (gm/) model limits */}
+      <div className="mb-4 pt-3 border-t border-[var(--border)]">
+        <p className="text-xs font-semibold text-purple-400 mb-1.5">
+          Premium Models (gm/)
+        </p>
+        <div className="space-y-0.5 text-xs text-[var(--text-muted)]">
+          <p>
+            {plan.gm_daily_requests > 0
+              ? `${plan.gm_daily_requests} requests/day`
+              : "Unlimited requests"}
+          </p>
+          <p>
+            {plan.gm_max_context > 0
+              ? `${(plan.gm_max_context / 1024).toFixed(0)}k context`
+              : "Unlimited context"}
+          </p>
+        </div>
+      </div>
+
+      {error && (
+        <p className="text-red-400 text-xs mb-2">{error}</p>
+      )}
+
       <div className="mt-auto">
         {isCurrent ? (
           <div className="w-full py-2 px-4 rounded-lg bg-[var(--bg-hover)] text-center text-sm text-[var(--text-muted)]">
             Current Plan
           </div>
+        ) : plan.price_usd > 0 ? (
+          <button
+            onClick={handleSubscribe}
+            disabled={loading}
+            className="w-full py-2 px-4 rounded-lg bg-teal-600 hover:bg-teal-500 text-white text-sm font-medium transition-colors disabled:opacity-50 cursor-pointer"
+          >
+            {loading ? "Redirecting..." : isCurrent ? "Manage" : "Subscribe"}
+          </button>
         ) : (
-          <div className="w-full py-2 px-4 rounded-lg bg-[var(--bg-hover)] text-center text-sm text-[var(--text-muted)] cursor-not-allowed opacity-60">
-            Coming soon
+          <div className="w-full py-2 px-4 rounded-lg bg-[var(--bg-hover)] text-center text-sm text-[var(--text-muted)]">
+            Free Tier
           </div>
         )}
       </div>
