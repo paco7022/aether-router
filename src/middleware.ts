@@ -1,8 +1,20 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, x-api-key",
+  "Access-Control-Max-Age": "86400",
+};
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // CORS preflight for API routes
+  if (pathname.startsWith("/api/v1/") && request.method === "OPTIONS") {
+    return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
+  }
 
   // Don't protect API routes (they use API key auth), auth pages, or public assets
   if (
@@ -13,6 +25,14 @@ export async function middleware(request: NextRequest) {
     pathname === "/" ||
     pathname.startsWith("/_next/")
   ) {
+    // Add CORS headers to API responses
+    if (pathname.startsWith("/api/v1/")) {
+      const response = NextResponse.next();
+      Object.entries(CORS_HEADERS).forEach(([key, value]) => {
+        response.headers.set(key, value);
+      });
+      return response;
+    }
     return NextResponse.next();
   }
 
