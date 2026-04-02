@@ -61,8 +61,6 @@ export default async function BillingPage() {
   const totalCredits = permanentCredits + dailyCredits;
   const currentPlanId = profile?.plan_id || "free";
   const gmClaimedToday = profile?.gm_claimed_date === new Date().toISOString().split("T")[0];
-  const isFree = currentPlanId === "free";
-
   const today = new Date().toISOString().split("T")[0];
   const alreadyClaimed = subscription?.last_grant_date === today;
   const planObj = subscription?.plans as { credits_per_day: number } | null;
@@ -122,7 +120,6 @@ export default async function BillingPage() {
           used={gmUsedToday ?? 0}
           limit={currentPlan?.gm_daily_requests ?? 20}
           claimed={gmClaimedToday}
-          isFree={isFree}
         />
       </div>
 

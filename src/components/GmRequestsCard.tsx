@@ -7,12 +7,10 @@ export function GmRequestsCard({
   used,
   limit,
   claimed,
-  isFree,
 }: {
   used: number;
   limit: number;
   claimed: boolean;
-  isFree: boolean;
 }) {
   const [loading, setLoading] = useState(false);
   const [hasClaimed, setHasClaimed] = useState(claimed);
@@ -32,7 +30,8 @@ export function GmRequestsCard({
 
     if (res.ok) {
       setHasClaimed(true);
-      setMessage(`${limit} premium requests unlocked for today!`);
+      const label = isUnlimited ? "Unlimited" : `${limit}`;
+      setMessage(`${label} premium requests unlocked for today!`);
       router.refresh();
     } else {
       setMessage(data.error || "Failed to claim");
@@ -41,8 +40,8 @@ export function GmRequestsCard({
     setLoading(false);
   }
 
-  // Free users who haven't claimed yet
-  const needsClaim = isFree && !hasClaimed;
+  // ALL users must claim daily to unlock gm/ models
+  const needsClaim = !hasClaimed;
 
   return (
     <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5">

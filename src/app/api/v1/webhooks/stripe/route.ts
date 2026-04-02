@@ -94,33 +94,8 @@ export async function POST(req: NextRequest) {
             .update({ plan_id: planId })
             .eq("id", userId);
 
-          // Grant initial daily credits
-          const { data: plan } = await admin
-            .from("plans")
-            .select("credits_per_day")
-            .eq("id", planId)
-            .single();
-
-          if (plan && plan.credits_per_day > 0) {
-            await admin.rpc("add_credits", {
-              p_user_id: userId,
-              p_amount: plan.credits_per_day,
-            });
-
-            const { data: profile } = await admin
-              .from("profiles")
-              .select("credits")
-              .eq("id", userId)
-              .single();
-
-            await admin.from("transactions").insert({
-              user_id: userId,
-              amount: plan.credits_per_day,
-              balance: profile?.credits || 0,
-              type: "daily_grant",
-              description: `Initial daily credits for ${planId} plan`,
-            });
-          }
+          // Don't auto-grant daily credits — user must click "Claim" button
+          // This ensures users know they've received their daily allowance
         }
       }
       break;

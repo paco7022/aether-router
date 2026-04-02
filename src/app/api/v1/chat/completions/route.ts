@@ -109,15 +109,13 @@ export async function POST(req: NextRequest) {
 
   // 5.5. Gameron plan limits (requests/day + context cap)
   if (model.provider === "gameron") {
-    // Free users must claim gm/ requests daily from the billing page
-    if (keyInfo.planId === "free") {
-      const today = new Date().toISOString().split("T")[0];
-      if (keyInfo.gmClaimedDate !== today) {
-        return NextResponse.json(
-          { error: { message: "Claim your daily premium requests first at the billing page.", type: "claim_required" } },
-          { status: 403 }
-        );
-      }
+    // ALL users must claim gm/ requests daily from the billing page
+    const today = new Date().toISOString().split("T")[0];
+    if (keyInfo.gmClaimedDate !== today) {
+      return NextResponse.json(
+        { error: { message: "Claim your daily premium requests first at the billing page.", type: "claim_required" } },
+        { status: 403 }
+      );
     }
 
     const { data: plan } = await supabase
