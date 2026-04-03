@@ -63,7 +63,7 @@ print(response.choices[0].message.content)`}
             description="Send a chat completion request. Supports streaming."
             auth
             body={[
-              { field: "model", type: "string", required: true, desc: "Model ID (use /api/v1/models to list available models)" },
+              { field: "model", type: "string", required: true, desc: "Model ID (see Models page)" },
               { field: "messages", type: "array", required: true, desc: "Array of {role, content} objects" },
               { field: "stream", type: "boolean", required: false, desc: "Enable streaming (default: false)" },
               { field: "temperature", type: "number", required: false, desc: "Sampling temperature (passed to provider)" },
@@ -176,13 +176,13 @@ print(response.choices[0].message.content)`}
                 status={403}
                 type="invalid_request"
                 cause="Model is restricted or not in the allowed pool."
-                fix="Use GET /api/v1/models to see currently available models."
+                fix="Check the Models page for currently available models."
               />
               <ErrorRow
                 status={404}
                 type="invalid_request"
                 cause="The requested model ID doesn't exist or is disabled."
-                fix="Use GET /api/v1/models to check exact model IDs (case-sensitive)."
+                fix="Check exact model ID on the Models page (IDs are case-sensitive)."
               />
               <ErrorRow
                 status={413}
@@ -231,7 +231,7 @@ print(response.choices[0].message.content)`}
             <li>Credits are deducted per request based on token usage (input + output).</li>
             <li>Minimum charge is <strong className="text-[var(--text)]">1 credit</strong> per request.</li>
             <li>Daily credits are consumed first, then permanent credits.</li>
-            <li>Per-model pricing is available via <code className="text-[var(--accent)] font-mono text-xs">GET /api/v1/models</code>.</li>
+            <li>Per-model pricing is visible on the <a href="/dashboard/models" className="text-[var(--accent)] hover:underline">Models</a> page.</li>
           </ul>
         </div>
       </section>
