@@ -36,16 +36,25 @@ export default async function UsagePage() {
 
       {/* Summary */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5">
-          <p className="text-sm text-[var(--text-muted)]">Total Requests</p>
+        <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5 hover:border-blue-500/30 transition-colors">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-[var(--text-muted)]">Total Requests</p>
+            <span className="text-lg font-mono text-blue-400/50">=</span>
+          </div>
           <p className="text-2xl font-bold mt-1">{(totalRequests ?? 0).toLocaleString()}</p>
         </div>
-        <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5">
-          <p className="text-sm text-[var(--text-muted)]">Total Tokens</p>
+        <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5 hover:border-cyan-500/30 transition-colors">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-[var(--text-muted)]">Total Tokens</p>
+            <span className="text-lg font-mono text-cyan-400/50">&gt;</span>
+          </div>
           <p className="text-2xl font-bold mt-1">{totalTokens.toLocaleString()}</p>
         </div>
-        <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5">
-          <p className="text-sm text-[var(--text-muted)]">Total Credits Used</p>
+        <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5 hover:border-green-500/30 transition-colors">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-[var(--text-muted)]">Total Credits Used</p>
+            <span className="text-lg font-mono text-green-400/50">$</span>
+          </div>
           <p className="text-2xl font-bold mt-1">{totalCredits.toLocaleString()}</p>
           <p className="text-xs text-[var(--text-muted)]">${(totalCredits / 10_000).toFixed(2)} USD</p>
         </div>
@@ -97,8 +106,10 @@ export default async function UsagePage() {
         </table>
 
         {(!logs || logs.length === 0) && (
-          <div className="p-8 text-center text-[var(--text-muted)]">
-            <p>No usage data yet.</p>
+          <div className="p-12 text-center">
+            <p className="text-4xl mb-3 opacity-30 font-mono">=</p>
+            <p className="text-sm font-medium mb-1">No usage data yet</p>
+            <p className="text-xs text-[var(--text-muted)]">Your API request history will appear here.</p>
           </div>
         )}
       </div>

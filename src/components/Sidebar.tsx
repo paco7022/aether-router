@@ -10,6 +10,7 @@ const nav = [
   { href: "/dashboard/models", label: "Models", icon: ">" },
   { href: "/dashboard/usage", label: "Usage", icon: "=" },
   { href: "/dashboard/billing", label: "Billing", icon: "$" },
+  { href: "/dashboard/docs", label: "Docs", icon: "?" },
 ];
 
 const adminNav = { href: "/dashboard/admin", label: "Admin", icon: "!" };
