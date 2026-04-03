@@ -70,12 +70,6 @@ print(response.choices[0].message.content)`}
               { field: "max_tokens", type: "number", required: false, desc: "Max tokens to generate (passed to provider)" },
             ]}
           />
-          <EndpointCard
-            method="GET"
-            path="/api/v1/models"
-            description="List all available models with pricing info. Authentication optional."
-            body={[]}
-          />
         </div>
       </section>
 
