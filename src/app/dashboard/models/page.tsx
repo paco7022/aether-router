@@ -21,7 +21,6 @@ export default async function ModelsPage() {
           <thead>
             <tr className="text-[var(--text-muted)] text-left border-b border-[var(--border)]">
               <th className="px-5 py-3 font-medium">Model</th>
-              <th className="px-5 py-3 font-medium">Provider</th>
               <th className="px-5 py-3 font-medium text-right">Input / 1M tokens</th>
               <th className="px-5 py-3 font-medium text-right">Output / 1M tokens</th>
               <th className="px-5 py-3 font-medium text-right">Credits/M (input)</th>
@@ -38,9 +37,6 @@ export default async function ModelsPage() {
                   <td className="px-5 py-3">
                     <p className="font-medium">{model.display_name}</p>
                     <p className="text-xs text-[var(--text-muted)] font-mono">{model.id}</p>
-                  </td>
-                  <td className="px-5 py-3">
-                    <ProviderBadge provider={model.provider} />
                   </td>
                   <td className="px-5 py-3 text-right">
                     ${priceInput.toFixed(4)}
@@ -65,16 +61,3 @@ export default async function ModelsPage() {
   );
 }
 
-function ProviderBadge({ provider }: { provider: string }) {
-  const styles: Record<string, string> = {
-    gameron: "bg-purple-500/10 text-purple-400",
-    airforce: "bg-blue-500/10 text-blue-400",
-    gemini: "bg-cyan-500/10 text-cyan-400",
-  };
-
-  return (
-    <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${styles[provider] || "bg-zinc-500/10 text-zinc-400"}`}>
-      {provider}
-    </span>
-  );
-}
