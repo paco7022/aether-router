@@ -5,3 +5,5 @@ node_modules/
 out/
 
 .vercel
+tsconfig.tsbuildinfo
+supabase/.temp/
