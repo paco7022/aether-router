@@ -40,11 +40,15 @@ export function ClaimDailyButton({
       <button
         onClick={handleClaim}
         disabled={loading || claimed}
-        className={`font-medium rounded-lg px-5 py-2.5 text-sm transition-all ${
+        className={`font-medium rounded-xl px-5 py-2.5 text-sm transition-all ${
           claimed
-            ? "bg-zinc-700 text-zinc-400 cursor-not-allowed"
-            : "bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white hover:scale-105"
+            ? "text-[var(--text-dim)] cursor-not-allowed"
+            : "btn-aurora hover:scale-[1.02]"
         }`}
+        style={claimed ? {
+          background: "rgba(255, 255, 255, 0.03)",
+          border: "1px solid rgba(255, 255, 255, 0.06)",
+        } : {}}
       >
         {loading
           ? "Claiming..."
@@ -53,7 +57,7 @@ export function ClaimDailyButton({
           : `Claim ${creditsPerDay.toLocaleString()} daily credits`}
       </button>
       {message && (
-        <span className={`text-sm font-medium ${claimed ? "text-teal-400" : "text-red-400"}`}>
+        <span className={`text-sm font-medium ${claimed ? "text-teal-400" : "text-red-400/80"}`}>
           {message}
         </span>
       )}

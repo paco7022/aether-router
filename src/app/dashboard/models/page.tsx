@@ -11,19 +11,21 @@ export default async function ModelsPage() {
 
   return (
     <div>
-      <h2 className="text-2xl font-bold mb-2">Available Models</h2>
-      <p className="text-sm text-[var(--text-muted)] mb-6">
-        10,000 credits = $1.00 USD. All models include a 25% discount over official API pricing.
-      </p>
+      <div className="mb-6">
+        <h2 className="text-2xl font-bold text-white/90">Available Models</h2>
+        <p className="text-sm text-[var(--text-muted)] mt-1">
+          10,000 credits = $1.00 USD. All models include a 25% discount over official API pricing.
+        </p>
+      </div>
 
-      <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl overflow-x-auto">
-        <table className="w-full text-sm">
+      <div className="glass-card shimmer-line overflow-hidden">
+        <table className="w-full text-sm aurora-table">
           <thead>
-            <tr className="text-[var(--text-muted)] text-left border-b border-[var(--border)]">
-              <th className="px-5 py-3 font-medium">Model</th>
-              <th className="px-5 py-3 font-medium text-right">Input / 1M tokens</th>
-              <th className="px-5 py-3 font-medium text-right">Output / 1M tokens</th>
-              <th className="px-5 py-3 font-medium text-right">Credits/M (input)</th>
+            <tr className="text-[var(--text-muted)] text-left">
+              <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider">Model</th>
+              <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider text-right">Input / 1M tokens</th>
+              <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider text-right">Output / 1M tokens</th>
+              <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider text-right">Credits/M (input)</th>
             </tr>
           </thead>
           <tbody>
@@ -33,18 +35,18 @@ export default async function ModelsPage() {
               const priceInput = creditsToUsd(creditsInput);
               const priceOutput = creditsToUsd(creditsOutput);
               return (
-                <tr key={model.id} className="border-t border-[var(--border)] hover:bg-[var(--bg-hover)]">
-                  <td className="px-5 py-3">
-                    <p className="font-medium">{model.display_name}</p>
-                    <p className="text-xs text-[var(--text-muted)] font-mono">{model.id}</p>
+                <tr key={model.id}>
+                  <td className="px-5 py-3.5">
+                    <p className="font-medium text-white/85">{model.display_name}</p>
+                    <p className="text-[11px] text-cyan-300/50 font-mono mt-0.5">{model.id}</p>
                   </td>
-                  <td className="px-5 py-3 text-right">
+                  <td className="px-5 py-3.5 text-right text-white/70">
                     ${priceInput.toFixed(4)}
                   </td>
-                  <td className="px-5 py-3 text-right">
+                  <td className="px-5 py-3.5 text-right text-white/70">
                     ${priceOutput.toFixed(4)}
                   </td>
-                  <td className="px-5 py-3 text-right font-semibold">
+                  <td className="px-5 py-3.5 text-right font-semibold aurora-text">
                     {creditsInput.toLocaleString()}
                   </td>
                 </tr>
@@ -54,10 +56,9 @@ export default async function ModelsPage() {
         </table>
       </div>
 
-      <p className="text-xs text-[var(--text-muted)] mt-4">
+      <p className="text-xs text-[var(--text-dim)] mt-4">
         We are a routing service. Model availability and quality depend on upstream providers.
       </p>
     </div>
   );
 }
-

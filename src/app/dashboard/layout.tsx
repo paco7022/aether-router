@@ -25,7 +25,15 @@ export default async function DashboardLayout({
     .single();
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex min-h-screen relative">
+      {/* Aurora background */}
+      <div className="aurora-bg">
+        <div className="aurora-orb-1" />
+        <div className="aurora-orb-2" />
+      </div>
+      {/* Noise overlay */}
+      <div className="noise-overlay" />
+
       <Sidebar
         user={{
           email: user.email || "",
@@ -37,7 +45,7 @@ export default async function DashboardLayout({
         isAdmin={isAdmin(user.email)}
       />
       <FingerprintCapture />
-      <main className="flex-1 p-6 lg:p-8 ml-64">{children}</main>
+      <main className="flex-1 p-6 lg:p-8 ml-64 relative z-10">{children}</main>
     </div>
   );
 }

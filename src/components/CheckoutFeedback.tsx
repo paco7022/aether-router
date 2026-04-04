@@ -8,7 +8,11 @@ export function CheckoutFeedback() {
 
   if (checkout === "success") {
     return (
-      <div className="mb-6 p-4 rounded-xl bg-green-500/10 border border-green-500/30 text-green-400 text-sm">
+      <div className="mb-6 p-4 rounded-xl text-sm" style={{
+        background: "rgba(52, 211, 153, 0.06)",
+        border: "1px solid rgba(52, 211, 153, 0.15)",
+        color: "#34d399",
+      }}>
         Payment successful! Your credits or subscription will be activated shortly.
       </div>
     );
@@ -16,7 +20,11 @@ export function CheckoutFeedback() {
 
   if (checkout === "cancel") {
     return (
-      <div className="mb-6 p-4 rounded-xl bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 text-sm">
+      <div className="mb-6 p-4 rounded-xl text-sm" style={{
+        background: "rgba(251, 191, 36, 0.06)",
+        border: "1px solid rgba(251, 191, 36, 0.15)",
+        color: "#fbbf24",
+      }}>
         Checkout was cancelled. No charges were made.
       </div>
     );

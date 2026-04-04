@@ -78,35 +78,41 @@ export default function ApiKeysPage() {
 
   return (
     <div>
-      <h2 className="text-2xl font-bold mb-6">API Keys</h2>
+      <div className="mb-6">
+        <h2 className="text-2xl font-bold text-white/90">API Keys</h2>
+        <p className="text-sm text-[var(--text-muted)] mt-1">Manage your authentication keys</p>
+      </div>
 
       {/* Create new key */}
-      <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5 mb-6">
-        <h3 className="font-semibold mb-3">Create New Key</h3>
+      <div className="glass-card shimmer-line p-5 mb-6">
+        <h3 className="font-semibold text-white/85 mb-3">Create New Key</h3>
         <div className="flex gap-3">
           <input
             type="text"
             value={newKeyName}
             onChange={(e) => setNewKeyName(e.target.value)}
             placeholder="Key name (optional)"
-            className="flex-1 bg-[var(--bg)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[var(--accent)]"
+            className="flex-1 bg-[var(--bg-input)] border border-white/[0.06] rounded-xl px-4 py-2.5 text-sm text-white/90 placeholder-[var(--text-dim)] transition-all"
           />
           <button
             onClick={createKey}
             disabled={loading}
-            className="bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-medium rounded-lg px-5 py-2 text-sm transition-colors disabled:opacity-50"
+            className="btn-aurora px-5 py-2.5 text-sm disabled:opacity-50"
           >
             {loading ? "Creating..." : "Create Key"}
           </button>
         </div>
 
         {createdKey && (
-          <div className="mt-4 bg-green-500/10 border border-green-500/20 rounded-lg p-4">
-            <p className="text-sm text-green-400 font-medium mb-1">
+          <div className="mt-4 rounded-xl p-4" style={{
+            background: "rgba(52, 211, 153, 0.06)",
+            border: "1px solid rgba(52, 211, 153, 0.15)",
+          }}>
+            <p className="text-sm text-emerald-400 font-medium mb-2">
               Key created! Copy it now — it won&apos;t be shown again.
             </p>
             <div className="flex gap-2 items-center">
-              <code className="flex-1 bg-[var(--bg)] rounded-lg p-3 text-sm font-mono break-all select-all">
+              <code className="flex-1 bg-[var(--bg-input)] rounded-lg p-3 text-sm font-mono break-all select-all text-white/80">
                 {createdKey}
               </code>
               <button
@@ -115,7 +121,11 @@ export default function ApiKeysPage() {
                   setCopied(true);
                   setTimeout(() => setCopied(false), 2000);
                 }}
-                className="shrink-0 px-3 py-2 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-xs font-medium hover:bg-[var(--bg-hover)] transition-colors"
+                className="shrink-0 px-4 py-2.5 rounded-xl text-xs font-medium transition-all"
+                style={{
+                  background: "rgba(255, 255, 255, 0.04)",
+                  border: "1px solid rgba(255, 255, 255, 0.08)",
+                }}
               >
                 {copied ? "Copied!" : "Copy"}
               </button>
@@ -125,28 +135,28 @@ export default function ApiKeysPage() {
       </div>
 
       {/* Key list */}
-      <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl">
-        <div className="p-5 border-b border-[var(--border)]">
-          <h3 className="font-semibold">Your Keys</h3>
+      <div className="glass-card shimmer-line overflow-hidden">
+        <div className="p-5 border-b border-white/[0.04]">
+          <h3 className="font-semibold text-white/85">Your Keys</h3>
         </div>
 
         {keys.length > 0 ? (
-          <div className="divide-y divide-[var(--border)]">
+          <div className="divide-y divide-white/[0.04]">
             {keys.map((key) => (
-              <div key={key.id} className="flex items-center justify-between px-5 py-4">
+              <div key={key.id} className="flex items-center justify-between px-5 py-4 hover:bg-[var(--bg-hover)] transition-colors">
                 <div>
-                  <p className="font-medium text-sm">{key.name}</p>
-                  <p className="text-xs text-[var(--text-muted)] font-mono mt-0.5">
+                  <p className="font-medium text-sm text-white/85">{key.name}</p>
+                  <p className="text-xs text-cyan-300/50 font-mono mt-0.5">
                     {key.key_prefix}...
                   </p>
-                  <p className="text-xs text-[var(--text-muted)] mt-0.5">
+                  <p className="text-xs text-[var(--text-dim)] mt-0.5">
                     Created {new Date(key.created_at).toLocaleDateString()}
                     {key.last_used && ` | Last used ${new Date(key.last_used).toLocaleDateString()}`}
                   </p>
                 </div>
                 <button
                   onClick={() => deleteKey(key.id)}
-                  className="text-xs text-[var(--text-muted)] hover:text-[var(--danger)] transition-colors px-3 py-1.5 rounded-lg hover:bg-red-500/10"
+                  className="text-xs text-[var(--text-dim)] hover:text-[var(--danger)] transition-colors px-3 py-1.5 rounded-lg hover:bg-red-500/5"
                 >
                   Delete
                 </button>
@@ -154,20 +164,27 @@ export default function ApiKeysPage() {
             ))}
           </div>
         ) : (
-          <div className="p-12 text-center">
-            <p className="text-4xl mb-3 opacity-30 font-mono">#</p>
-            <p className="text-sm font-medium mb-1">No API keys yet</p>
-            <p className="text-xs text-[var(--text-muted)]">Create your first key above to start making requests.</p>
+          <div className="p-16 text-center">
+            <div className="w-12 h-12 rounded-full mx-auto mb-4 flex items-center justify-center"
+              style={{
+                background: "linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(34, 211, 238, 0.08))",
+                border: "1px solid rgba(139, 92, 246, 0.1)",
+              }}
+            >
+              <span className="text-[var(--text-dim)] text-lg font-mono">#</span>
+            </div>
+            <p className="text-sm font-medium text-white/60 mb-1">No API keys yet</p>
+            <p className="text-xs text-[var(--text-dim)]">Create your first key above to start making requests.</p>
           </div>
         )}
       </div>
 
-      <div className="mt-6 bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5">
-        <h3 className="font-semibold mb-2">Quick Start</h3>
+      <div className="glass-card shimmer-line mt-6 p-5">
+        <h3 className="font-semibold text-white/85 mb-2">Quick Start</h3>
         <p className="text-sm text-[var(--text-muted)] mb-3">
           Use your API key with any OpenAI-compatible client:
         </p>
-        <pre className="bg-[var(--bg)] rounded-lg p-4 text-xs font-mono overflow-x-auto">
+        <pre className="bg-[var(--bg-input)] rounded-xl p-4 text-xs font-mono overflow-x-auto text-white/70 border border-white/[0.04]">
 {`curl -X POST https://aether-router.vercel.app/api/v1/chat/completions \\
   -H "Authorization: Bearer ak_your_key_here" \\
   -H "Content-Type: application/json" \\

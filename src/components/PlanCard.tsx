@@ -53,58 +53,67 @@ export function PlanCard({
 
   return (
     <div
-      className={`relative bg-[var(--bg-card)] border rounded-xl p-5 flex flex-col ${
+      className={`relative glass-card p-5 flex flex-col ${
         plan.is_popular
-          ? "border-teal-500/60 shadow-lg shadow-teal-500/10"
-          : "border-[var(--border)]"
+          ? "aurora-border"
+          : ""
       }`}
+      style={plan.is_popular ? {
+        boxShadow: "0 0 30px -8px rgba(20, 184, 166, 0.15)",
+        borderColor: "rgba(20, 184, 166, 0.25)",
+      } : {}}
     >
       {plan.is_popular && (
-        <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-teal-500 text-white text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wider">
+        <span
+          className="absolute -top-3 left-1/2 -translate-x-1/2 text-white text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-wider"
+          style={{
+            background: "linear-gradient(135deg, #14b8a6, #22d3ee)",
+          }}
+        >
           Popular
         </span>
       )}
 
       <div className="mb-4">
-        <h4 className="text-lg font-bold">{plan.name}</h4>
+        <h4 className="text-lg font-bold text-white/90">{plan.name}</h4>
         <p className="text-xs text-[var(--text-muted)]">{plan.description}</p>
       </div>
 
       <div className="mb-4">
         {plan.price_usd > 0 ? (
-          <p className="text-3xl font-bold">
+          <p className="text-3xl font-bold text-white/90">
             ${plan.price_usd}
             <span className="text-base font-normal text-[var(--text-muted)]">
               /mo
             </span>
           </p>
         ) : (
-          <p className="text-3xl font-bold">Free</p>
+          <p className="text-3xl font-bold text-white/90">Free</p>
         )}
       </div>
 
       <div className="mb-4 space-y-1 text-sm">
         <p>
-          <span className="font-semibold">
+          <span className="font-semibold text-white/85">
             {plan.credits_per_day.toLocaleString()}
           </span>{" "}
           <span className="text-[var(--text-muted)]">credits/day</span>
         </p>
         <p>
           <span className="text-[var(--text-muted)]">~</span>
-          <span className="font-semibold">
+          <span className="font-semibold text-white/85">
             {(plan.credits_per_month / 1000).toFixed(0)}K
           </span>{" "}
           <span className="text-[var(--text-muted)]">credits/month</span>
         </p>
         {bonusLabel && (
-          <p className="text-teal-400 text-xs mt-1">{bonusLabel}</p>
+          <p className="text-teal-400/80 text-xs mt-1">{bonusLabel}</p>
         )}
       </div>
 
       {/* Gameron (gm/) model limits */}
-      <div className="mb-4 pt-3 border-t border-[var(--border)]">
-        <p className="text-xs font-semibold text-purple-400 mb-1.5">
+      <div className="mb-4 pt-3 border-t border-white/[0.04]">
+        <p className="text-xs font-semibold text-violet-400/80 mb-1.5">
           Premium Models (gm/)
         </p>
         <div className="space-y-0.5 text-xs text-[var(--text-muted)]">
@@ -122,24 +131,37 @@ export function PlanCard({
       </div>
 
       {error && (
-        <p className="text-red-400 text-xs mb-2">{error}</p>
+        <p className="text-red-400/80 text-xs mb-2">{error}</p>
       )}
 
       <div className="mt-auto">
         {isCurrent ? (
-          <div className="w-full py-2 px-4 rounded-lg bg-[var(--bg-hover)] text-center text-sm text-[var(--text-muted)]">
+          <div className="w-full py-2.5 px-4 rounded-xl text-center text-sm text-[var(--text-dim)]"
+            style={{ background: "rgba(255, 255, 255, 0.03)", border: "1px solid rgba(255, 255, 255, 0.06)" }}>
             Current Plan
           </div>
         ) : plan.price_usd > 0 ? (
           <button
             onClick={handleSubscribe}
             disabled={loading}
-            className="w-full py-2 px-4 rounded-lg bg-teal-600 hover:bg-teal-500 text-white text-sm font-medium transition-colors disabled:opacity-50 cursor-pointer"
+            className="w-full py-2.5 px-4 rounded-xl text-white text-sm font-medium transition-all disabled:opacity-50 cursor-pointer"
+            style={{
+              background: "linear-gradient(135deg, #14b8a6, #22d3ee)",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.boxShadow = "0 0 24px -4px rgba(20, 184, 166, 0.4)";
+              e.currentTarget.style.transform = "translateY(-1px)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.boxShadow = "none";
+              e.currentTarget.style.transform = "none";
+            }}
           >
-            {loading ? "Redirecting..." : isCurrent ? "Manage" : "Subscribe"}
+            {loading ? "Redirecting..." : "Subscribe"}
           </button>
         ) : (
-          <div className="w-full py-2 px-4 rounded-lg bg-[var(--bg-hover)] text-center text-sm text-[var(--text-muted)]">
+          <div className="w-full py-2.5 px-4 rounded-xl text-center text-sm text-[var(--text-dim)]"
+            style={{ background: "rgba(255, 255, 255, 0.03)", border: "1px solid rgba(255, 255, 255, 0.06)" }}>
             Free Tier
           </div>
         )}

@@ -68,47 +68,53 @@ export default async function BillingPage() {
 
   return (
     <div>
-      <h2 className="text-2xl font-bold mb-6">Billing</h2>
+      <div className="mb-6">
+        <h2 className="text-2xl font-bold text-white/90">Billing</h2>
+        <p className="text-sm text-[var(--text-muted)] mt-1">Manage your credits, plans, and purchases</p>
+      </div>
 
       <Suspense>
         <CheckoutFeedback />
       </Suspense>
 
       {/* Current balance */}
-      <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-6 mb-8">
+      <div className="glass-card aurora-border shimmer-line p-6 mb-8">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-sm text-[var(--text-muted)]">Total Balance</p>
-            <p className="text-4xl font-bold mt-1">
-              {totalCredits.toLocaleString()}{" "}
-              <span className="text-lg font-normal text-[var(--text-muted)]">credits</span>
+            <p className="text-xs text-[var(--text-muted)] uppercase tracking-wider mb-2">Total Balance</p>
+            <p className="text-4xl font-bold aurora-text">
+              {totalCredits.toLocaleString()}
             </p>
-            <div className="flex gap-4 mt-2">
+            <p className="text-sm text-[var(--text-muted)] mt-1">credits</p>
+            <div className="flex gap-4 mt-3">
               <div>
-                <p className="text-xs text-[var(--text-muted)]">Daily (temporary)</p>
+                <p className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Daily</p>
                 <p className="text-sm font-medium text-teal-400">{dailyCredits.toLocaleString()}</p>
               </div>
               <div>
-                <p className="text-xs text-[var(--text-muted)]">Permanent</p>
-                <p className="text-sm font-medium text-green-400">{permanentCredits.toLocaleString()}</p>
+                <p className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Permanent</p>
+                <p className="text-sm font-medium text-emerald-400">{permanentCredits.toLocaleString()}</p>
               </div>
             </div>
           </div>
           <div className="text-right">
-            <p className="text-xs text-[var(--text-muted)] mb-1">10,000 credits = $1.00 USD</p>
-            <p className="text-xs text-[var(--text-muted)] mb-2">Daily credits are used first and reset each day</p>
+            <p className="text-xs text-[var(--text-dim)] mb-1">10,000 credits = $1.00 USD</p>
+            <p className="text-xs text-[var(--text-dim)] mb-2">Daily credits are used first and reset each day</p>
             {subscription?.plans && (
-              <p className="text-sm">
-                Current plan:{" "}
-                <span className="font-semibold text-[var(--accent)]">
-                  {(subscription.plans as { name: string }).name}
-                </span>
-              </p>
+              <div className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium"
+                style={{
+                  background: "linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(34, 211, 238, 0.1))",
+                  border: "1px solid rgba(139, 92, 246, 0.2)",
+                  color: "rgba(167, 139, 250, 0.9)",
+                }}
+              >
+                {(subscription.plans as { name: string }).name}
+              </div>
             )}
           </div>
         </div>
         {creditsPerDay > 0 && (
-          <div className="mt-4 pt-4 border-t border-[var(--border)]">
+          <div className="mt-4 pt-4 border-t border-white/[0.04]">
             <ClaimDailyButton alreadyClaimed={alreadyClaimed} creditsPerDay={creditsPerDay} />
           </div>
         )}
@@ -125,9 +131,9 @@ export default async function BillingPage() {
 
       {/* Plans */}
       <div className="mb-8">
-        <h3 className="text-xl font-bold mb-1">Plans</h3>
+        <h3 className="text-xl font-bold text-white/90 mb-1">Plans</h3>
         <p className="text-sm text-[var(--text-muted)] mb-5">
-          Subscribe monthly for daily temporary credits. They reset each day &mdash; use them or lose them. Higher plans = better value.
+          Subscribe monthly for daily temporary credits. They reset each day &mdash; use them or lose them.
         </p>
 
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -143,7 +149,7 @@ export default async function BillingPage() {
 
       {/* Buy Credits */}
       <div className="mb-8">
-        <h3 className="text-xl font-bold mb-1">Buy Credits</h3>
+        <h3 className="text-xl font-bold text-white/90 mb-1">Buy Credits</h3>
         <p className="text-sm text-[var(--text-muted)] mb-5">
           One-time purchase. $1 = 10,000 permanent credits. These never expire.
         </p>
@@ -156,41 +162,41 @@ export default async function BillingPage() {
       </div>
 
       {/* Transaction history */}
-      <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl">
-        <div className="p-5 border-b border-[var(--border)]">
-          <h3 className="font-semibold">Transaction History</h3>
+      <div className="glass-card shimmer-line overflow-hidden">
+        <div className="p-5 border-b border-white/[0.04]">
+          <h3 className="font-semibold text-white/85">Transaction History</h3>
         </div>
 
         {transactions && transactions.length > 0 ? (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm aurora-table">
               <thead>
-                <tr className="text-[var(--text-muted)] text-left border-b border-[var(--border)]">
-                  <th className="px-5 py-3 font-medium">Date</th>
-                  <th className="px-5 py-3 font-medium">Type</th>
-                  <th className="px-5 py-3 font-medium">Description</th>
-                  <th className="px-5 py-3 font-medium text-right">Amount</th>
-                  <th className="px-5 py-3 font-medium text-right">Balance</th>
+                <tr className="text-[var(--text-muted)] text-left">
+                  <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider">Date</th>
+                  <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider">Type</th>
+                  <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider">Description</th>
+                  <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider text-right">Amount</th>
+                  <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider text-right">Balance</th>
                 </tr>
               </thead>
               <tbody>
                 {transactions.map((tx) => (
-                  <tr key={tx.id} className="border-t border-[var(--border)]">
+                  <tr key={tx.id}>
                     <td className="px-5 py-3 text-[var(--text-muted)] whitespace-nowrap">
                       {new Date(tx.created_at).toLocaleString()}
                     </td>
                     <td className="px-5 py-3">
                       <span
-                        className={`inline-block px-2 py-0.5 rounded-full text-xs ${
+                        className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium ${
                           tx.type === "usage"
-                            ? "bg-blue-500/10 text-blue-400"
+                            ? "badge-success"
                             : tx.type === "purchase"
-                            ? "bg-green-500/10 text-green-400"
+                            ? "badge-success"
                             : tx.type === "daily_grant"
-                            ? "bg-teal-500/10 text-teal-400"
+                            ? "text-teal-400 bg-teal-400/10 border border-teal-400/15"
                             : tx.type === "admin_grant"
-                            ? "bg-purple-500/10 text-purple-400"
-                            : "bg-zinc-500/10 text-zinc-400"
+                            ? "text-violet-400 bg-violet-400/10 border border-violet-400/15"
+                            : "text-zinc-400 bg-zinc-400/10 border border-zinc-400/15"
                         }`}
                       >
                         {tx.type}
@@ -201,7 +207,7 @@ export default async function BillingPage() {
                     </td>
                     <td
                       className={`px-5 py-3 text-right font-medium ${
-                        tx.amount > 0 ? "text-green-400" : "text-red-400"
+                        tx.amount > 0 ? "text-emerald-400" : "text-red-400/80"
                       }`}
                     >
                       {tx.amount > 0 ? "+" : ""}
@@ -216,7 +222,7 @@ export default async function BillingPage() {
             </table>
           </div>
         ) : (
-          <div className="p-8 text-center text-[var(--text-muted)]">
+          <div className="p-12 text-center text-[var(--text-dim)]">
             <p>No transactions yet.</p>
           </div>
         )}

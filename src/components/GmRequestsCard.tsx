@@ -44,15 +44,22 @@ export function GmRequestsCard({
   const needsClaim = !hasClaimed;
 
   return (
-    <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5">
+    <div className="glass-card shimmer-line p-5">
       <div className="flex items-center justify-between mb-3">
         <div>
-          <h4 className="font-semibold text-sm">Premium Model Requests</h4>
+          <h4 className="font-semibold text-sm text-white/85">Premium Model Requests</h4>
           <p className="text-xs text-[var(--text-muted)]">
             Daily usage for gm/ models (Claude, GPT, Gemini)
           </p>
         </div>
-        <span className="text-xs px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400">
+        <span
+          className="text-[10px] px-2.5 py-0.5 rounded-full font-medium"
+          style={{
+            background: "rgba(139, 92, 246, 0.1)",
+            border: "1px solid rgba(139, 92, 246, 0.15)",
+            color: "rgba(167, 139, 250, 0.9)",
+          }}
+        >
           gm/
         </span>
       </div>
@@ -65,21 +72,21 @@ export function GmRequestsCard({
           <button
             onClick={handleClaim}
             disabled={loading}
-            className="bg-purple-600 hover:bg-purple-500 text-white font-medium rounded-lg px-5 py-2.5 text-sm transition-all hover:scale-105 disabled:opacity-50"
+            className="btn-aurora font-medium px-5 py-2.5 text-sm transition-all hover:scale-[1.02] disabled:opacity-50"
           >
             {loading ? "Claiming..." : `Claim ${limit} requests`}
           </button>
           {message && (
-            <p className="text-sm text-red-400 mt-2">{message}</p>
+            <p className="text-sm text-red-400/80 mt-2">{message}</p>
           )}
         </div>
       ) : (
         <>
           {/* Progress bar */}
           <div className="mb-2">
-            <div className="flex justify-between text-xs mb-1">
+            <div className="flex justify-between text-xs mb-1.5">
               <span className="text-[var(--text-muted)]">Used today</span>
-              <span className="font-medium">
+              <span className="font-medium text-white/80">
                 {isUnlimited ? (
                   <>{used.toLocaleString()} <span className="text-[var(--text-muted)]">/ unlimited</span></>
                 ) : (
@@ -87,15 +94,20 @@ export function GmRequestsCard({
                 )}
               </span>
             </div>
-            <div className="w-full h-2 bg-[var(--bg-hover)] rounded-full overflow-hidden">
+            <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: "rgba(255, 255, 255, 0.04)" }}>
               {isUnlimited ? (
-                <div className="h-full bg-purple-500/30 rounded-full w-full" />
+                <div className="h-full rounded-full w-full" style={{ background: "linear-gradient(90deg, rgba(139, 92, 246, 0.3), rgba(34, 211, 238, 0.2))" }} />
               ) : (
                 <div
-                  className={`h-full rounded-full transition-all ${
-                    pct >= 90 ? "bg-red-500" : pct >= 70 ? "bg-yellow-500" : "bg-purple-500"
-                  }`}
-                  style={{ width: `${pct}%` }}
+                  className="h-full rounded-full transition-all"
+                  style={{
+                    width: `${pct}%`,
+                    background: pct >= 90
+                      ? "linear-gradient(90deg, #f87171, #ef4444)"
+                      : pct >= 70
+                      ? "linear-gradient(90deg, #fbbf24, #f59e0b)"
+                      : "linear-gradient(90deg, #8b5cf6, #22d3ee)",
+                  }}
                 />
               )}
             </div>
@@ -110,7 +122,7 @@ export function GmRequestsCard({
                 : "Limit reached — upgrade for more"}
             </span>
             {message && (
-              <span className="text-purple-400 font-medium">{message}</span>
+              <span className="text-violet-400 font-medium">{message}</span>
             )}
           </div>
         </>

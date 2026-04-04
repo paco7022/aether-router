@@ -32,71 +32,79 @@ export default async function UsagePage() {
 
   return (
     <div>
-      <h2 className="text-2xl font-bold mb-6">Usage History</h2>
+      <div className="mb-6">
+        <h2 className="text-2xl font-bold text-white/90">Usage History</h2>
+        <p className="text-sm text-[var(--text-muted)] mt-1">Track your API consumption</p>
+      </div>
 
       {/* Summary */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5 hover:border-blue-500/30 transition-colors">
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-[var(--text-muted)]">Total Requests</p>
-            <span className="text-lg font-mono text-blue-400/50">=</span>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6">
+        <div className="glass-card aurora-border shimmer-line p-5 glow-blue">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs text-[var(--text-muted)] uppercase tracking-wider">Total Requests</p>
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center"
+              style={{ background: "rgba(59, 130, 246, 0.1)", border: "1px solid rgba(59, 130, 246, 0.12)" }}>
+              <span className="text-blue-400/70 text-sm font-mono">=</span>
+            </div>
           </div>
-          <p className="text-2xl font-bold mt-1">{(totalRequests ?? 0).toLocaleString()}</p>
+          <p className="text-2xl font-bold text-white/90">{(totalRequests ?? 0).toLocaleString()}</p>
         </div>
-        <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5 hover:border-cyan-500/30 transition-colors">
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-[var(--text-muted)]">Total Tokens</p>
-            <span className="text-lg font-mono text-cyan-400/50">&gt;</span>
+        <div className="glass-card aurora-border shimmer-line p-5 glow-cyan">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs text-[var(--text-muted)] uppercase tracking-wider">Total Tokens</p>
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center"
+              style={{ background: "rgba(34, 211, 238, 0.1)", border: "1px solid rgba(34, 211, 238, 0.12)" }}>
+              <span className="text-cyan-400/70 text-sm font-mono">&gt;</span>
+            </div>
           </div>
-          <p className="text-2xl font-bold mt-1">{totalTokens.toLocaleString()}</p>
+          <p className="text-2xl font-bold text-white/90">{totalTokens.toLocaleString()}</p>
         </div>
-        <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5 hover:border-green-500/30 transition-colors">
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-[var(--text-muted)]">Total Credits Used</p>
-            <span className="text-lg font-mono text-green-400/50">$</span>
+        <div className="glass-card aurora-border shimmer-line p-5 glow-green">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs text-[var(--text-muted)] uppercase tracking-wider">Total Credits Used</p>
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center"
+              style={{ background: "rgba(52, 211, 153, 0.1)", border: "1px solid rgba(52, 211, 153, 0.12)" }}>
+              <span className="text-emerald-400/70 text-sm font-mono">$</span>
+            </div>
           </div>
-          <p className="text-2xl font-bold mt-1">{totalCredits.toLocaleString()}</p>
-          <p className="text-xs text-[var(--text-muted)]">${(totalCredits / 10_000).toFixed(2)} USD</p>
+          <p className="text-2xl font-bold text-white/90">{totalCredits.toLocaleString()}</p>
+          <p className="text-xs text-emerald-400/60 mt-1">${(totalCredits / 10_000).toFixed(2)} USD</p>
         </div>
       </div>
 
       {/* Usage table */}
-      <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl overflow-x-auto">
-        <table className="w-full text-sm">
+      <div className="glass-card shimmer-line overflow-hidden">
+        <table className="w-full text-sm aurora-table">
           <thead>
-            <tr className="text-[var(--text-muted)] text-left border-b border-[var(--border)]">
-              <th className="px-5 py-3 font-medium">Timestamp</th>
-              <th className="px-5 py-3 font-medium">Model</th>
-              <th className="px-5 py-3 font-medium text-right">Prompt</th>
-              <th className="px-5 py-3 font-medium text-right">Completion</th>
-              <th className="px-5 py-3 font-medium text-right">Total</th>
-              <th className="px-5 py-3 font-medium text-right">Credits</th>
-              <th className="px-5 py-3 font-medium text-right">Latency</th>
-              <th className="px-5 py-3 font-medium">Status</th>
+            <tr className="text-[var(--text-muted)] text-left">
+              <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider">Timestamp</th>
+              <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider">Model</th>
+              <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider text-right">Prompt</th>
+              <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider text-right">Completion</th>
+              <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider text-right">Total</th>
+              <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider text-right">Credits</th>
+              <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider text-right">Latency</th>
+              <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider">Status</th>
             </tr>
           </thead>
           <tbody>
             {(logs || []).map((log) => (
-              <tr key={log.id} className="border-t border-[var(--border)]">
+              <tr key={log.id}>
                 <td className="px-5 py-3 text-[var(--text-muted)] whitespace-nowrap">
                   {new Date(log.created_at).toLocaleString()}
                 </td>
-                <td className="px-5 py-3 font-mono text-xs">{log.model_id}</td>
-                <td className="px-5 py-3 text-right">{log.prompt_tokens.toLocaleString()}</td>
-                <td className="px-5 py-3 text-right">{log.completion_tokens.toLocaleString()}</td>
-                <td className="px-5 py-3 text-right font-medium">{log.total_tokens.toLocaleString()}</td>
-                <td className="px-5 py-3 text-right">{log.credits_charged.toLocaleString()}</td>
+                <td className="px-5 py-3 font-mono text-xs text-cyan-300/70">{log.model_id}</td>
+                <td className="px-5 py-3 text-right text-white/70">{log.prompt_tokens.toLocaleString()}</td>
+                <td className="px-5 py-3 text-right text-white/70">{log.completion_tokens.toLocaleString()}</td>
+                <td className="px-5 py-3 text-right font-medium text-white/85">{log.total_tokens.toLocaleString()}</td>
+                <td className="px-5 py-3 text-right text-white/70">{log.credits_charged.toLocaleString()}</td>
                 <td className="px-5 py-3 text-right text-[var(--text-muted)]">
                   {log.duration_ms ? `${(log.duration_ms / 1000).toFixed(1)}s` : "-"}
                 </td>
                 <td className="px-5 py-3">
-                  <span
-                    className={`inline-block px-2 py-0.5 rounded-full text-xs ${
-                      log.status === "success"
-                        ? "bg-green-500/10 text-green-400"
-                        : "bg-red-500/10 text-red-400"
-                    }`}
-                  >
+                  <span className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-medium ${
+                    log.status === "success" ? "badge-success" : "badge-error"
+                  }`}>
                     {log.status}
                   </span>
                 </td>
@@ -106,10 +114,17 @@ export default async function UsagePage() {
         </table>
 
         {(!logs || logs.length === 0) && (
-          <div className="p-12 text-center">
-            <p className="text-4xl mb-3 opacity-30 font-mono">=</p>
-            <p className="text-sm font-medium mb-1">No usage data yet</p>
-            <p className="text-xs text-[var(--text-muted)]">Your API request history will appear here.</p>
+          <div className="p-16 text-center">
+            <div className="w-12 h-12 rounded-full mx-auto mb-4 flex items-center justify-center"
+              style={{
+                background: "linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(34, 211, 238, 0.08))",
+                border: "1px solid rgba(139, 92, 246, 0.1)",
+              }}
+            >
+              <span className="text-[var(--text-dim)] text-lg font-mono">=</span>
+            </div>
+            <p className="text-sm font-medium text-white/60 mb-1">No usage data yet</p>
+            <p className="text-xs text-[var(--text-dim)]">Your API request history will appear here.</p>
           </div>
         )}
       </div>

@@ -239,27 +239,35 @@ export default function AdminPage() {
 
   return (
     <div>
-      <h2 className="text-2xl font-bold mb-1">Admin Panel</h2>
-      <p className="text-sm text-[var(--text-muted)] mb-6">Manage users, models, plans, and credits.</p>
+      <div className="mb-6">
+        <h2 className="text-2xl font-bold text-white/90">Admin Panel</h2>
+        <p className="text-sm text-[var(--text-muted)] mt-1">Manage users, models, plans, and credits.</p>
+      </div>
 
       {error && (
-        <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 mb-4 text-sm text-red-400">
+        <div className="badge-error rounded-xl p-3 mb-4 text-sm flex items-center justify-between">
           {error}
-          <button onClick={() => setError(null)} className="ml-3 underline">dismiss</button>
+          <button onClick={() => setError(null)} className="text-xs underline opacity-70 hover:opacity-100">dismiss</button>
         </div>
       )}
 
       {/* Tabs */}
-      <div className="flex gap-1 mb-6 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-1 w-fit">
+      <div className="flex gap-1 mb-6 p-1 w-fit rounded-xl" style={{
+        background: "rgba(15, 15, 35, 0.6)",
+        border: "1px solid rgba(255, 255, 255, 0.04)",
+      }}>
         {tabs.map((t) => (
           <button
             key={t.id}
             onClick={() => { setTab(t.id); setSelectedUser(null); }}
-            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${
               tab === t.id
-                ? "bg-[var(--accent)] text-white"
+                ? "text-white"
                 : "text-[var(--text-muted)] hover:text-[var(--text)]"
             }`}
+            style={tab === t.id ? {
+              background: "linear-gradient(135deg, rgba(139, 92, 246, 0.3), rgba(34, 211, 238, 0.15))",
+            } : {}}
           >
             {t.label}
           </button>
@@ -268,42 +276,41 @@ export default function AdminPage() {
 
       {loading && <p className="text-sm text-[var(--text-muted)] mb-4">Loading...</p>}
 
-      {/* ── Stats Tab ── */}
+      {/* Stats Tab */}
       {tab === "stats" && stats && (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <StatCard label="Total Users" value={stats.totalUsers} />
-            <StatCard label="Total Requests" value={stats.totalRequests} />
-            <StatCard label="Today Requests" value={stats.todayRequests} />
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            <StatCard label="Total Users" value={stats.totalUsers} color="violet" />
+            <StatCard label="Total Requests" value={stats.totalRequests} color="blue" />
+            <StatCard label="Today Requests" value={stats.todayRequests} color="cyan" />
           </div>
 
-          <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl">
-            <div className="p-4 border-b border-[var(--border)]">
-              <h3 className="font-semibold text-sm">Top Users Today</h3>
+          <div className="glass-card shimmer-line overflow-hidden">
+            <div className="p-4 border-b border-white/[0.04]">
+              <h3 className="font-semibold text-sm text-white/85">Top Users Today</h3>
             </div>
             {stats.topUsersToday.length > 0 ? (
-              <div className="divide-y divide-[var(--border)]">
+              <div className="divide-y divide-white/[0.04]">
                 {stats.topUsersToday.map((u, i) => (
-                  <div key={u.user_id} className="flex items-center justify-between px-4 py-3 text-sm">
+                  <div key={u.user_id} className="flex items-center justify-between px-4 py-3 text-sm hover:bg-[var(--bg-hover)] transition-colors">
                     <div className="flex items-center gap-3">
-                      <span className="text-[var(--text-muted)] w-5 text-right">{i + 1}.</span>
-                      <span className="font-mono text-xs">{u.email}</span>
+                      <span className="text-[var(--text-dim)] w-5 text-right text-xs">{i + 1}.</span>
+                      <span className="font-mono text-xs text-cyan-300/60">{u.email}</span>
                     </div>
-                    <span className="font-medium">{u.requests} reqs</span>
+                    <span className="font-medium text-white/80">{u.requests} reqs</span>
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="p-4 text-sm text-[var(--text-muted)]">No requests today.</p>
+              <p className="p-4 text-sm text-[var(--text-dim)]">No requests today.</p>
             )}
           </div>
         </div>
       )}
 
-      {/* ── Users Tab ── */}
+      {/* Users Tab */}
       {tab === "users" && (
         <div className="flex gap-6">
-          {/* User list */}
           <div className="flex-1 min-w-0">
             <div className="mb-4">
               <input
@@ -312,12 +319,12 @@ export default function AdminPage() {
                 onChange={(e) => setUserSearch(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && loadUsers(userSearch)}
                 placeholder="Search by email or name... (Enter)"
-                className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[var(--accent)]"
+                className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-xl px-4 py-2.5 text-sm text-white/90 placeholder-[var(--text-dim)] transition-all"
               />
             </div>
 
-            <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl">
-              <div className="divide-y divide-[var(--border)]">
+            <div className="glass-card overflow-hidden">
+              <div className="divide-y divide-white/[0.04]">
                 {users.map((u) => (
                   <button
                     key={u.id}
@@ -328,18 +335,18 @@ export default function AdminPage() {
                   >
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="text-sm font-medium">{u.display_name || u.email}</p>
-                        <p className="text-xs text-[var(--text-muted)] font-mono">{u.email}</p>
+                        <p className="text-sm font-medium text-white/85">{u.display_name || u.email}</p>
+                        <p className="text-xs text-cyan-300/50 font-mono">{u.email}</p>
                       </div>
                       <div className="text-right">
-                        <p className="text-sm font-medium">{(u.credits + u.daily_credits).toLocaleString()} cr</p>
-                        <p className="text-xs text-[var(--text-muted)]">{u.plan_id}</p>
+                        <p className="text-sm font-medium text-white/80">{(u.credits + u.daily_credits).toLocaleString()} cr</p>
+                        <p className="text-xs text-[var(--text-dim)]">{u.plan_id}</p>
                       </div>
                     </div>
                   </button>
                 ))}
                 {users.length === 0 && !loading && (
-                  <p className="p-4 text-sm text-[var(--text-muted)]">No users found.</p>
+                  <p className="p-4 text-sm text-[var(--text-dim)]">No users found.</p>
                 )}
               </div>
             </div>
@@ -348,49 +355,34 @@ export default function AdminPage() {
           {/* User detail panel */}
           {selectedUser && (
             <div className="w-96 shrink-0 space-y-4">
-              <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-4">
-                <h3 className="font-semibold text-sm mb-1">{selectedUser.display_name || selectedUser.email}</h3>
-                <p className="text-xs text-[var(--text-muted)] font-mono mb-3">{selectedUser.id}</p>
+              <div className="glass-card shimmer-line p-4">
+                <h3 className="font-semibold text-sm text-white/85 mb-1">{selectedUser.display_name || selectedUser.email}</h3>
+                <p className="text-xs text-cyan-300/50 font-mono mb-3">{selectedUser.id}</p>
 
                 {/* Credits */}
                 <div className="space-y-2 mb-4">
-                  <label className="text-xs text-[var(--text-muted)]">Permanent Credits</label>
-                  <input
-                    type="number"
-                    value={creditInput}
-                    onChange={(e) => setCreditInput(e.target.value)}
-                    className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-sm"
-                  />
-                  <label className="text-xs text-[var(--text-muted)]">Daily Credits</label>
-                  <input
-                    type="number"
-                    value={dailyCreditInput}
-                    onChange={(e) => setDailyCreditInput(e.target.value)}
-                    className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-sm"
-                  />
-                  <button
-                    onClick={handleSetCredits}
-                    className="w-full bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-xs font-medium rounded-lg px-3 py-1.5 transition-colors"
-                  >
+                  <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Permanent Credits</label>
+                  <input type="number" value={creditInput} onChange={(e) => setCreditInput(e.target.value)}
+                    className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-lg px-3 py-1.5 text-sm text-white/90" />
+                  <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Daily Credits</label>
+                  <input type="number" value={dailyCreditInput} onChange={(e) => setDailyCreditInput(e.target.value)}
+                    className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-lg px-3 py-1.5 text-sm text-white/90" />
+                  <button onClick={handleSetCredits}
+                    className="w-full btn-aurora text-xs font-medium px-3 py-1.5">
                     Set Credits
                   </button>
                 </div>
 
                 {/* Quick add */}
                 <div className="space-y-2 mb-4">
-                  <label className="text-xs text-[var(--text-muted)]">Add/Remove Credits (use negative to remove)</label>
+                  <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Add/Remove Credits</label>
                   <div className="flex gap-2">
-                    <input
-                      type="number"
-                      value={addCreditAmount}
-                      onChange={(e) => setAddCreditAmount(e.target.value)}
+                    <input type="number" value={addCreditAmount} onChange={(e) => setAddCreditAmount(e.target.value)}
                       placeholder="e.g. 10000"
-                      className="flex-1 bg-[var(--bg)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-sm"
-                    />
-                    <button
-                      onClick={handleAddCredits}
-                      className="bg-green-600 hover:bg-green-700 text-white text-xs font-medium rounded-lg px-3 py-1.5 transition-colors"
-                    >
+                      className="flex-1 bg-[var(--bg-input)] border border-white/[0.06] rounded-lg px-3 py-1.5 text-sm text-white/90 placeholder-[var(--text-dim)]" />
+                    <button onClick={handleAddCredits}
+                      className="text-white text-xs font-medium rounded-lg px-3 py-1.5 transition-all"
+                      style={{ background: "linear-gradient(135deg, #14b8a6, #22d3ee)" }}>
                       Add
                     </button>
                   </div>
@@ -398,13 +390,10 @@ export default function AdminPage() {
 
                 {/* Plan */}
                 <div className="space-y-2 mb-4">
-                  <label className="text-xs text-[var(--text-muted)]">Plan</label>
+                  <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Plan</label>
                   <div className="flex gap-2">
-                    <select
-                      value={planSelect}
-                      onChange={(e) => setPlanSelect(e.target.value)}
-                      className="flex-1 bg-[var(--bg)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-sm"
-                    >
+                    <select value={planSelect} onChange={(e) => setPlanSelect(e.target.value)}
+                      className="flex-1 bg-[var(--bg-input)] border border-white/[0.06] rounded-lg px-3 py-1.5 text-sm text-white/90">
                       <option value="free">free</option>
                       <option value="basic">basic</option>
                       <option value="pro">pro</option>
@@ -413,47 +402,45 @@ export default function AdminPage() {
                       <option value="ultra">ultra</option>
                       <option value="ultimate">ultimate</option>
                     </select>
-                    <button
-                      onClick={handleSetPlan}
-                      className="bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-xs font-medium rounded-lg px-3 py-1.5 transition-colors"
-                    >
-                      Set
-                    </button>
+                    <button onClick={handleSetPlan} className="btn-aurora text-xs font-medium px-3 py-1.5">Set</button>
                   </div>
                 </div>
 
                 {/* GM Claim */}
                 <div className="space-y-2 mb-4">
-                  <label className="text-xs text-[var(--text-muted)]">
+                  <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">
                     GM Claimed: {selectedUser.gm_claimed_date || "never"}
                   </label>
-                  <button
-                    onClick={handleResetGmClaim}
-                    className="w-full bg-[var(--warning)]/20 hover:bg-[var(--warning)]/30 text-[var(--warning)] text-xs font-medium rounded-lg px-3 py-1.5 transition-colors border border-[var(--warning)]/20"
-                  >
+                  <button onClick={handleResetGmClaim}
+                    className="w-full text-xs font-medium rounded-lg px-3 py-1.5 transition-colors"
+                    style={{
+                      background: "rgba(251, 191, 36, 0.08)",
+                      border: "1px solid rgba(251, 191, 36, 0.15)",
+                      color: "#fbbf24",
+                    }}>
                     Reset GM Claim
                   </button>
                 </div>
               </div>
 
               {/* API Keys */}
-              <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl">
-                <div className="p-4 border-b border-[var(--border)]">
-                  <h3 className="font-semibold text-sm">API Keys ({userKeys.length})</h3>
+              <div className="glass-card overflow-hidden">
+                <div className="p-4 border-b border-white/[0.04]">
+                  <h3 className="font-semibold text-sm text-white/85">API Keys ({userKeys.length})</h3>
                 </div>
-                <div className="divide-y divide-[var(--border)]">
+                <div className="divide-y divide-white/[0.04]">
                   {userKeys.map((k) => (
                     <div key={k.id} className="flex items-center justify-between px-4 py-2.5">
                       <div>
-                        <p className="text-xs font-medium">{k.name}</p>
-                        <p className="text-xs text-[var(--text-muted)] font-mono">{k.key_prefix}...</p>
+                        <p className="text-xs font-medium text-white/80">{k.name}</p>
+                        <p className="text-xs text-cyan-300/50 font-mono">{k.key_prefix}...</p>
                       </div>
                       <button
                         onClick={() => handleToggleKey(k.id, !k.is_active)}
-                        className={`text-xs px-2.5 py-1 rounded-lg font-medium transition-colors ${
+                        className={`text-[11px] px-2.5 py-1 rounded-lg font-medium transition-colors ${
                           k.is_active
-                            ? "bg-green-500/10 text-green-400 hover:bg-red-500/10 hover:text-red-400"
-                            : "bg-red-500/10 text-red-400 hover:bg-green-500/10 hover:text-green-400"
+                            ? "badge-success hover:badge-error"
+                            : "badge-error hover:badge-success"
                         }`}
                       >
                         {k.is_active ? "Active" : "Inactive"}
@@ -461,29 +448,29 @@ export default function AdminPage() {
                     </div>
                   ))}
                   {userKeys.length === 0 && (
-                    <p className="p-4 text-xs text-[var(--text-muted)]">No API keys.</p>
+                    <p className="p-4 text-xs text-[var(--text-dim)]">No API keys.</p>
                   )}
                 </div>
               </div>
 
               {/* Device Fingerprints */}
-              <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl">
-                <div className="p-4 border-b border-[var(--border)]">
-                  <h3 className="font-semibold text-sm">Device Fingerprints ({userFingerprints.length})</h3>
+              <div className="glass-card overflow-hidden">
+                <div className="p-4 border-b border-white/[0.04]">
+                  <h3 className="font-semibold text-sm text-white/85">Device Fingerprints ({userFingerprints.length})</h3>
                 </div>
-                <div className="divide-y divide-[var(--border)]">
+                <div className="divide-y divide-white/[0.04]">
                   {userFingerprints.map((fp) => (
                     <div key={fp.id} className="px-4 py-3 space-y-2">
                       <div className="flex items-center justify-between">
                         <div className="min-w-0">
-                          <p className="text-xs font-mono truncate" title={fp.fingerprint}>
+                          <p className="text-xs font-mono text-cyan-300/50 truncate" title={fp.fingerprint}>
                             {fp.fingerprint}
                           </p>
-                          <p className="text-xs text-[var(--text-muted)]">
+                          <p className="text-xs text-[var(--text-dim)]">
                             Last seen: {new Date(fp.last_seen_at).toLocaleDateString()}
                           </p>
                           {fp.ip_address && (
-                            <p className="text-xs text-[var(--text-muted)]">IP: {fp.ip_address}</p>
+                            <p className="text-xs text-[var(--text-dim)]">IP: {fp.ip_address}</p>
                           )}
                         </div>
                         <button
@@ -492,22 +479,25 @@ export default function AdminPage() {
                               ? handleUnbanFingerprint(fp.fingerprint)
                               : handleBanFingerprint(fp.fingerprint)
                           }
-                          className={`text-xs px-2.5 py-1 rounded-lg font-medium transition-colors shrink-0 ml-2 ${
+                          className={`text-[11px] px-2.5 py-1 rounded-lg font-medium transition-colors shrink-0 ml-2 ${
                             fp.is_banned
-                              ? "bg-red-500/10 text-red-400 hover:bg-green-500/10 hover:text-green-400"
-                              : "bg-green-500/10 text-green-400 hover:bg-red-500/10 hover:text-red-400"
+                              ? "badge-error"
+                              : "badge-success"
                           }`}
                         >
                           {fp.is_banned ? "Banned" : "Active"}
                         </button>
                       </div>
                       {fp.linked_accounts.length > 0 && (
-                        <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-lg p-2">
-                          <p className="text-xs text-yellow-400 font-medium mb-1">
+                        <div className="rounded-lg p-2" style={{
+                          background: "rgba(251, 191, 36, 0.04)",
+                          border: "1px solid rgba(251, 191, 36, 0.1)",
+                        }}>
+                          <p className="text-xs font-medium mb-1" style={{ color: "rgba(251, 191, 36, 0.8)" }}>
                             Linked accounts ({fp.linked_accounts.length}):
                           </p>
                           {fp.linked_accounts.map((la) => (
-                            <p key={la.user_id} className="text-xs text-yellow-400/80 font-mono">
+                            <p key={la.user_id} className="text-xs font-mono" style={{ color: "rgba(251, 191, 36, 0.6)" }}>
                               {la.email}
                             </p>
                           ))}
@@ -516,7 +506,7 @@ export default function AdminPage() {
                     </div>
                   ))}
                   {userFingerprints.length === 0 && (
-                    <p className="p-4 text-xs text-[var(--text-muted)]">No fingerprints recorded yet.</p>
+                    <p className="p-4 text-xs text-[var(--text-dim)]">No fingerprints recorded yet.</p>
                   )}
                 </div>
               </div>
@@ -525,104 +515,113 @@ export default function AdminPage() {
         </div>
       )}
 
-      {/* ── Models Tab ── */}
+      {/* Models Tab */}
       {tab === "models" && (
-        <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-[var(--text-muted)] text-left border-b border-[var(--border)]">
-                  <th className="px-4 py-3 font-medium">Model ID</th>
-                  <th className="px-4 py-3 font-medium">Provider</th>
-                  <th className="px-4 py-3 font-medium">Upstream</th>
-                  <th className="px-4 py-3 font-medium">Input $/M</th>
-                  <th className="px-4 py-3 font-medium">Output $/M</th>
-                  <th className="px-4 py-3 font-medium">Margin</th>
-                  <th className="px-4 py-3 font-medium text-center">Status</th>
+        <div className="glass-card shimmer-line overflow-hidden">
+          <table className="w-full text-sm aurora-table">
+            <thead>
+              <tr className="text-[var(--text-muted)] text-left">
+                <th className="px-4 py-3.5 font-medium text-xs uppercase tracking-wider">Model ID</th>
+                <th className="px-4 py-3.5 font-medium text-xs uppercase tracking-wider">Provider</th>
+                <th className="px-4 py-3.5 font-medium text-xs uppercase tracking-wider">Upstream</th>
+                <th className="px-4 py-3.5 font-medium text-xs uppercase tracking-wider">Input $/M</th>
+                <th className="px-4 py-3.5 font-medium text-xs uppercase tracking-wider">Output $/M</th>
+                <th className="px-4 py-3.5 font-medium text-xs uppercase tracking-wider">Margin</th>
+                <th className="px-4 py-3.5 font-medium text-xs uppercase tracking-wider text-center">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {models.map((m) => (
+                <tr key={m.id}>
+                  <td className="px-4 py-3 font-mono text-xs text-cyan-300/60">{m.id}</td>
+                  <td className="px-4 py-3 text-white/70">{m.provider}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-[var(--text-muted)]">{m.upstream_model_id}</td>
+                  <td className="px-4 py-3 text-white/70">${m.cost_per_m_input}</td>
+                  <td className="px-4 py-3 text-white/70">${m.cost_per_m_output}</td>
+                  <td className="px-4 py-3 text-white/70">{m.margin}x</td>
+                  <td className="px-4 py-3 text-center">
+                    <button
+                      onClick={() => handleToggleModel(m.id, !m.is_active)}
+                      className={`text-[11px] px-3 py-1 rounded-full font-medium transition-colors ${
+                        m.is_active ? "badge-success" : "badge-error"
+                      }`}
+                    >
+                      {m.is_active ? "Active" : "Inactive"}
+                    </button>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {models.map((m) => (
-                  <tr key={m.id} className="border-t border-[var(--border)]">
-                    <td className="px-4 py-3 font-mono text-xs">{m.id}</td>
-                    <td className="px-4 py-3">{m.provider}</td>
-                    <td className="px-4 py-3 font-mono text-xs text-[var(--text-muted)]">{m.upstream_model_id}</td>
-                    <td className="px-4 py-3">${m.cost_per_m_input}</td>
-                    <td className="px-4 py-3">${m.cost_per_m_output}</td>
-                    <td className="px-4 py-3">{m.margin}x</td>
-                    <td className="px-4 py-3 text-center">
-                      <button
-                        onClick={() => handleToggleModel(m.id, !m.is_active)}
-                        className={`text-xs px-3 py-1 rounded-full font-medium transition-colors ${
-                          m.is_active
-                            ? "bg-green-500/10 text-green-400 hover:bg-red-500/10 hover:text-red-400"
-                            : "bg-red-500/10 text-red-400 hover:bg-green-500/10 hover:text-green-400"
-                        }`}
-                      >
-                        {m.is_active ? "Active" : "Inactive"}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 
-      {/* ── Plans Tab ── */}
+      {/* Plans Tab */}
       {tab === "plans" && (
-        <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-[var(--text-muted)] text-left border-b border-[var(--border)]">
-                  <th className="px-4 py-3 font-medium">Plan</th>
-                  <th className="px-4 py-3 font-medium">Price</th>
-                  <th className="px-4 py-3 font-medium">Credits/Day</th>
-                  <th className="px-4 py-3 font-medium">GM Reqs/Day</th>
-                  <th className="px-4 py-3 font-medium">GM Context</th>
-                  <th className="px-4 py-3 font-medium text-center">Status</th>
+        <div className="glass-card shimmer-line overflow-hidden">
+          <table className="w-full text-sm aurora-table">
+            <thead>
+              <tr className="text-[var(--text-muted)] text-left">
+                <th className="px-4 py-3.5 font-medium text-xs uppercase tracking-wider">Plan</th>
+                <th className="px-4 py-3.5 font-medium text-xs uppercase tracking-wider">Price</th>
+                <th className="px-4 py-3.5 font-medium text-xs uppercase tracking-wider">Credits/Day</th>
+                <th className="px-4 py-3.5 font-medium text-xs uppercase tracking-wider">GM Reqs/Day</th>
+                <th className="px-4 py-3.5 font-medium text-xs uppercase tracking-wider">GM Context</th>
+                <th className="px-4 py-3.5 font-medium text-xs uppercase tracking-wider text-center">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {plans.map((p) => (
+                <tr key={p.id}>
+                  <td className="px-4 py-3 font-medium text-white/85">{p.name}</td>
+                  <td className="px-4 py-3 text-white/70">${p.price_usd}/mo</td>
+                  <td className="px-4 py-3 text-white/70">{p.credits_per_day.toLocaleString()}</td>
+                  <td className="px-4 py-3 text-white/70">{p.gm_daily_requests > 0 ? p.gm_daily_requests : "Unlimited"}</td>
+                  <td className="px-4 py-3 text-white/70">
+                    {p.gm_max_context > 0 ? `${(p.gm_max_context / 1024).toFixed(0)}k` : "Unlimited"}
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    <button
+                      onClick={() => handleTogglePlan(p.id, !p.is_active)}
+                      className={`text-[11px] px-3 py-1 rounded-full font-medium transition-colors ${
+                        p.is_active ? "badge-success" : "badge-error"
+                      }`}
+                    >
+                      {p.is_active ? "Active" : "Inactive"}
+                    </button>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {plans.map((p) => (
-                  <tr key={p.id} className="border-t border-[var(--border)]">
-                    <td className="px-4 py-3 font-medium">{p.name}</td>
-                    <td className="px-4 py-3">${p.price_usd}/mo</td>
-                    <td className="px-4 py-3">{p.credits_per_day.toLocaleString()}</td>
-                    <td className="px-4 py-3">{p.gm_daily_requests > 0 ? p.gm_daily_requests : "Unlimited"}</td>
-                    <td className="px-4 py-3">
-                      {p.gm_max_context > 0 ? `${(p.gm_max_context / 1024).toFixed(0)}k` : "Unlimited"}
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <button
-                        onClick={() => handleTogglePlan(p.id, !p.is_active)}
-                        className={`text-xs px-3 py-1 rounded-full font-medium transition-colors ${
-                          p.is_active
-                            ? "bg-green-500/10 text-green-400 hover:bg-red-500/10 hover:text-red-400"
-                            : "bg-red-500/10 text-red-400 hover:bg-green-500/10 hover:text-green-400"
-                        }`}
-                      >
-                        {p.is_active ? "Active" : "Inactive"}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
   );
 }
 
-function StatCard({ label, value }: { label: string; value: number }) {
+function StatCard({ label, value, color }: { label: string; value: number; color: "violet" | "blue" | "cyan" }) {
+  const glowClass = color === "violet" ? "glow-violet" : color === "blue" ? "glow-blue" : "glow-cyan";
+  const iconColors: Record<string, string> = {
+    violet: "rgba(139, 92, 246, 0.1)",
+    blue: "rgba(59, 130, 246, 0.1)",
+    cyan: "rgba(34, 211, 238, 0.1)",
+  };
+  const borderColors: Record<string, string> = {
+    violet: "rgba(139, 92, 246, 0.12)",
+    blue: "rgba(59, 130, 246, 0.12)",
+    cyan: "rgba(34, 211, 238, 0.12)",
+  };
+
   return (
-    <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5">
-      <p className="text-xs text-[var(--text-muted)] uppercase tracking-wider">{label}</p>
-      <p className="text-3xl font-bold mt-1">{value.toLocaleString()}</p>
+    <div className={`glass-card aurora-border shimmer-line p-5 ${glowClass}`}>
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-xs text-[var(--text-muted)] uppercase tracking-wider">{label}</p>
+        <div className="w-8 h-8 rounded-lg flex items-center justify-center"
+          style={{ background: iconColors[color], border: `1px solid ${borderColors[color]}` }}>
+        </div>
+      </div>
+      <p className="text-3xl font-bold text-white/90">{value.toLocaleString()}</p>
     </div>
   );
 }

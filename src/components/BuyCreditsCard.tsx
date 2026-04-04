@@ -36,24 +36,33 @@ export function BuyCreditsCard({ pkg }: { pkg: CreditPackage }) {
   }
 
   return (
-    <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5">
+    <div className="glass-card aurora-border p-5">
       <div className="flex items-center justify-between">
         <div>
-          <p className="font-bold">{pkg.name}</p>
+          <p className="font-bold text-white/85">{pkg.name}</p>
           <p className="text-xs text-[var(--text-muted)]">
             ${pkg.price_usd} USD — permanent, no expiry
           </p>
         </div>
         <button
-        onClick={handleBuy}
-        disabled={loading}
-        className="px-4 py-1.5 bg-teal-600 hover:bg-teal-500 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 cursor-pointer"
-      >
+          onClick={handleBuy}
+          disabled={loading}
+          className="px-4 py-1.5 rounded-xl text-white text-sm font-medium transition-all disabled:opacity-50 cursor-pointer"
+          style={{
+            background: "linear-gradient(135deg, #14b8a6, #22d3ee)",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.boxShadow = "0 0 20px -4px rgba(20, 184, 166, 0.4)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.boxShadow = "none";
+          }}
+        >
           {loading ? "..." : "Buy"}
         </button>
       </div>
       {error && (
-        <p className="text-red-400 text-xs mt-2">{error}</p>
+        <p className="text-red-400/80 text-xs mt-2">{error}</p>
       )}
     </div>
   );

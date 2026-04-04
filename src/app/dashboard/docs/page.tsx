@@ -1,27 +1,29 @@
 export default function DocsPage() {
   return (
     <div className="max-w-4xl">
-      <h2 className="text-2xl font-bold mb-2">API Documentation</h2>
-      <p className="text-sm text-[var(--text-muted)] mb-8">
-        Everything you need to integrate with Aether Router.
-      </p>
+      <div className="mb-8">
+        <h2 className="text-2xl font-bold text-white/90">API Documentation</h2>
+        <p className="text-sm text-[var(--text-muted)] mt-1">
+          Everything you need to integrate with Aether Router.
+        </p>
+      </div>
 
       {/* Quick Start */}
       <section className="mb-10">
-        <h3 className="text-xl font-bold mb-4">Quick Start</h3>
-        <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5 space-y-4">
+        <h3 className="text-xl font-bold text-white/85 mb-4">Quick Start</h3>
+        <div className="glass-card shimmer-line p-5 space-y-4">
           <p className="text-sm text-[var(--text-muted)]">
             Aether Router is compatible with the OpenAI API format. Just point your base URL to Aether Router and use your API key.
           </p>
           <div>
-            <p className="text-xs text-[var(--text-muted)] uppercase tracking-wider mb-2">Base URL</p>
-            <code className="block bg-[var(--bg)] border border-[var(--border)] rounded-lg px-4 py-3 text-sm font-mono">
+            <p className="text-[10px] text-[var(--text-dim)] uppercase tracking-[0.15em] mb-2">Base URL</p>
+            <code className="block bg-[var(--bg-input)] border border-white/[0.04] rounded-xl px-4 py-3 text-sm font-mono text-cyan-300/70">
               https://aether-router.vercel.app/api/v1
             </code>
           </div>
           <div>
-            <p className="text-xs text-[var(--text-muted)] uppercase tracking-wider mb-2">Example Request (cURL)</p>
-            <pre className="bg-[var(--bg)] border border-[var(--border)] rounded-lg px-4 py-3 text-sm font-mono overflow-x-auto whitespace-pre">
+            <p className="text-[10px] text-[var(--text-dim)] uppercase tracking-[0.15em] mb-2">Example Request (cURL)</p>
+            <pre className="bg-[var(--bg-input)] border border-white/[0.04] rounded-xl px-4 py-3 text-sm font-mono overflow-x-auto whitespace-pre text-white/60">
 {`curl https://aether-router.vercel.app/api/v1/chat/completions \\
   -H "Authorization: Bearer YOUR_API_KEY" \\
   -H "Content-Type: application/json" \\
@@ -34,8 +36,8 @@ export default function DocsPage() {
             </pre>
           </div>
           <div>
-            <p className="text-xs text-[var(--text-muted)] uppercase tracking-wider mb-2">Example with Python (OpenAI SDK)</p>
-            <pre className="bg-[var(--bg)] border border-[var(--border)] rounded-lg px-4 py-3 text-sm font-mono overflow-x-auto whitespace-pre">
+            <p className="text-[10px] text-[var(--text-dim)] uppercase tracking-[0.15em] mb-2">Example with Python (OpenAI SDK)</p>
+            <pre className="bg-[var(--bg-input)] border border-white/[0.04] rounded-xl px-4 py-3 text-sm font-mono overflow-x-auto whitespace-pre text-white/60">
 {`from openai import OpenAI
 
 client = OpenAI(
@@ -55,7 +57,7 @@ print(response.choices[0].message.content)`}
 
       {/* Endpoints */}
       <section className="mb-10">
-        <h3 className="text-xl font-bold mb-4">Endpoints</h3>
+        <h3 className="text-xl font-bold text-white/85 mb-4">Endpoints</h3>
         <div className="space-y-4">
           <EndpointCard
             method="POST"
@@ -75,26 +77,26 @@ print(response.choices[0].message.content)`}
 
       {/* Authentication */}
       <section className="mb-10">
-        <h3 className="text-xl font-bold mb-4">Authentication</h3>
-        <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5">
-          <p className="text-sm mb-3">
-            All requests to <code className="text-[var(--accent)] font-mono text-xs">/chat/completions</code> require a valid API key in the Authorization header:
+        <h3 className="text-xl font-bold text-white/85 mb-4">Authentication</h3>
+        <div className="glass-card shimmer-line p-5">
+          <p className="text-sm mb-3 text-white/80">
+            All requests to <code className="text-violet-400 font-mono text-xs">/chat/completions</code> require a valid API key in the Authorization header:
           </p>
-          <code className="block bg-[var(--bg)] border border-[var(--border)] rounded-lg px-4 py-3 text-sm font-mono">
+          <code className="block bg-[var(--bg-input)] border border-white/[0.04] rounded-xl px-4 py-3 text-sm font-mono text-cyan-300/70">
             Authorization: Bearer sk-aether-...
           </code>
           <p className="text-sm text-[var(--text-muted)] mt-3">
-            Create API keys from the <a href="/dashboard/api-keys" className="text-[var(--accent)] hover:underline">API Keys</a> page. Keys are hashed on our side and cannot be retrieved after creation — save them securely.
+            Create API keys from the <a href="/dashboard/api-keys" className="text-violet-400 hover:text-violet-300 transition-colors">API Keys</a> page. Keys are hashed on our side and cannot be retrieved after creation — save them securely.
           </p>
         </div>
       </section>
 
       {/* Streaming */}
       <section className="mb-10">
-        <h3 className="text-xl font-bold mb-4">Streaming</h3>
-        <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5">
-          <p className="text-sm mb-3">
-            Set <code className="text-[var(--accent)] font-mono text-xs">{'"stream": true'}</code> in your request body to receive Server-Sent Events (SSE).
+        <h3 className="text-xl font-bold text-white/85 mb-4">Streaming</h3>
+        <div className="glass-card shimmer-line p-5">
+          <p className="text-sm mb-3 text-white/80">
+            Set <code className="text-violet-400 font-mono text-xs">{'"stream": true'}</code> in your request body to receive Server-Sent Events (SSE).
             Credits are deducted after the stream finishes, based on actual token usage.
           </p>
           <p className="text-sm text-[var(--text-muted)]">
@@ -105,26 +107,26 @@ print(response.choices[0].message.content)`}
 
       {/* Gameron Models */}
       <section className="mb-10">
-        <h3 className="text-xl font-bold mb-4">Premium Models (gm/)</h3>
-        <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5 space-y-3">
-          <p className="text-sm">
-            Models prefixed with <code className="text-[var(--accent)] font-mono text-xs">gm/</code> are premium models with additional restrictions:
+        <h3 className="text-xl font-bold text-white/85 mb-4">Premium Models (gm/)</h3>
+        <div className="glass-card shimmer-line p-5 space-y-3">
+          <p className="text-sm text-white/80">
+            Models prefixed with <code className="text-violet-400 font-mono text-xs">gm/</code> are premium models with additional restrictions:
           </p>
           <ul className="text-sm space-y-2 ml-4 list-disc text-[var(--text-muted)]">
-            <li>You must <strong className="text-[var(--text)]">claim daily requests</strong> from the Billing page before using them each day.</li>
-            <li>Each plan has a <strong className="text-[var(--text)]">daily request limit</strong> — upgrade your plan for more.</li>
-            <li>Each plan has a <strong className="text-[var(--text)]">max context length</strong> — longer conversations may be rejected.</li>
+            <li>You must <strong className="text-white/80">claim daily requests</strong> from the Billing page before using them each day.</li>
+            <li>Each plan has a <strong className="text-white/80">daily request limit</strong> — upgrade your plan for more.</li>
+            <li>Each plan has a <strong className="text-white/80">max context length</strong> — longer conversations may be rejected.</li>
           </ul>
         </div>
       </section>
 
       {/* Error Reference */}
       <section className="mb-10">
-        <h3 className="text-xl font-bold mb-4">Error Reference</h3>
+        <h3 className="text-xl font-bold text-white/85 mb-4">Error Reference</h3>
         <p className="text-sm text-[var(--text-muted)] mb-4">
           All errors return a JSON object with this structure:
         </p>
-        <pre className="bg-[var(--bg)] border border-[var(--border)] rounded-lg px-4 py-3 text-sm font-mono mb-6 overflow-x-auto whitespace-pre">
+        <pre className="bg-[var(--bg-input)] border border-white/[0.04] rounded-xl px-4 py-3 text-sm font-mono mb-6 overflow-x-auto whitespace-pre text-white/60">
 {`{
   "error": {
     "message": "Human-readable description",
@@ -132,82 +134,27 @@ print(response.choices[0].message.content)`}
   }
 }`}
         </pre>
-        <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="glass-card shimmer-line overflow-hidden">
+          <table className="w-full text-sm aurora-table">
             <thead>
-              <tr className="text-[var(--text-muted)] text-left border-b border-[var(--border)]">
-                <th className="px-5 py-3 font-medium">Status</th>
-                <th className="px-5 py-3 font-medium">Type</th>
-                <th className="px-5 py-3 font-medium">Cause & Fix</th>
+              <tr className="text-[var(--text-muted)] text-left">
+                <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider">Status</th>
+                <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider">Type</th>
+                <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider">Cause & Fix</th>
               </tr>
             </thead>
             <tbody>
-              <ErrorRow
-                status={400}
-                type="invalid_request"
-                cause="Missing or malformed request body."
-                fix='Check that "model" and "messages" fields are present and valid JSON.'
-              />
-              <ErrorRow
-                status={401}
-                type="auth_error"
-                cause="Missing or invalid API key."
-                fix="Ensure your Authorization header is: Bearer sk-aether-..."
-              />
-              <ErrorRow
-                status={402}
-                type="billing_error"
-                cause="Not enough credits to complete the request."
-                fix="Buy more credits or claim daily credits from the Billing page."
-              />
-              <ErrorRow
-                status={403}
-                type="claim_required"
-                cause="Premium model (gm/) used without claiming daily requests."
-                fix='Go to Billing > "Claim Daily GM Requests" before making requests.'
-              />
-              <ErrorRow
-                status={403}
-                type="invalid_request"
-                cause="Model is restricted or not in the allowed pool."
-                fix="Check the Models page for currently available models."
-              />
-              <ErrorRow
-                status={404}
-                type="invalid_request"
-                cause="The requested model ID doesn't exist or is disabled."
-                fix="Check exact model ID on the Models page (IDs are case-sensitive)."
-              />
-              <ErrorRow
-                status={413}
-                type="context_limit"
-                cause="Your prompt exceeds the max context length for your plan."
-                fix="Shorten your messages or upgrade your plan for a higher context limit."
-              />
-              <ErrorRow
-                status={429}
-                type="rate_limit"
-                cause="You've hit the daily request limit for premium models."
-                fix="Wait until tomorrow (UTC reset) or upgrade your plan."
-              />
-              <ErrorRow
-                status={502}
-                type="upstream_error"
-                cause="The upstream AI provider returned an error or is down."
-                fix="Retry after a few seconds. If persistent, the provider may be experiencing issues."
-              />
-              <ErrorRow
-                status={503}
-                type="server_error"
-                cause="The provider for this model is not configured or unavailable."
-                fix="Try a different model or check back later."
-              />
-              <ErrorRow
-                status={500}
-                type="server_error"
-                cause="Unexpected internal error."
-                fix="If this persists, contact support with the request details."
-              />
+              <ErrorRow status={400} type="invalid_request" cause="Missing or malformed request body." fix='Check that "model" and "messages" fields are present and valid JSON.' />
+              <ErrorRow status={401} type="auth_error" cause="Missing or invalid API key." fix="Ensure your Authorization header is: Bearer sk-aether-..." />
+              <ErrorRow status={402} type="billing_error" cause="Not enough credits to complete the request." fix="Buy more credits or claim daily credits from the Billing page." />
+              <ErrorRow status={403} type="claim_required" cause="Premium model (gm/) used without claiming daily requests." fix='Go to Billing > "Claim Daily GM Requests" before making requests.' />
+              <ErrorRow status={403} type="invalid_request" cause="Model is restricted or not in the allowed pool." fix="Check the Models page for currently available models." />
+              <ErrorRow status={404} type="invalid_request" cause="The requested model ID doesn't exist or is disabled." fix="Check exact model ID on the Models page (IDs are case-sensitive)." />
+              <ErrorRow status={413} type="context_limit" cause="Your prompt exceeds the max context length for your plan." fix="Shorten your messages or upgrade your plan for a higher context limit." />
+              <ErrorRow status={429} type="rate_limit" cause="You've hit the daily request limit for premium models." fix="Wait until tomorrow (UTC reset) or upgrade your plan." />
+              <ErrorRow status={502} type="upstream_error" cause="The upstream AI provider returned an error or is down." fix="Retry after a few seconds. If persistent, the provider may be experiencing issues." />
+              <ErrorRow status={503} type="server_error" cause="The provider for this model is not configured or unavailable." fix="Try a different model or check back later." />
+              <ErrorRow status={500} type="server_error" cause="Unexpected internal error." fix="If this persists, contact support with the request details." />
             </tbody>
           </table>
         </div>
@@ -215,22 +162,22 @@ print(response.choices[0].message.content)`}
 
       {/* Credits & Pricing */}
       <section className="mb-10">
-        <h3 className="text-xl font-bold mb-4">Credits & Pricing</h3>
-        <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5 space-y-3">
+        <h3 className="text-xl font-bold text-white/85 mb-4">Credits & Pricing</h3>
+        <div className="glass-card shimmer-line p-5 space-y-3">
           <div className="flex items-center gap-3">
-            <span className="text-2xl font-bold">10,000</span>
+            <span className="text-2xl font-bold aurora-text">10,000</span>
             <span className="text-sm text-[var(--text-muted)]">credits = $1.00 USD</span>
           </div>
           <ul className="text-sm space-y-2 ml-4 list-disc text-[var(--text-muted)]">
             <li>Credits are deducted per request based on token usage (input + output).</li>
-            <li>Minimum charge is <strong className="text-[var(--text)]">1 credit</strong> per request.</li>
+            <li>Minimum charge is <strong className="text-white/80">1 credit</strong> per request.</li>
             <li>Daily credits are consumed first, then permanent credits.</li>
-            <li>Per-model pricing is visible on the <a href="/dashboard/models" className="text-[var(--accent)] hover:underline">Models</a> page.</li>
+            <li>Per-model pricing is visible on the <a href="/dashboard/models" className="text-violet-400 hover:text-violet-300 transition-colors">Models</a> page.</li>
           </ul>
         </div>
       </section>
 
-      <p className="text-xs text-[var(--text-muted)] mt-6">
+      <p className="text-xs text-[var(--text-dim)] mt-6">
         Aether Router is a proxy service. We do not control model availability, uptime, or output quality from upstream providers.
       </p>
     </div>
@@ -251,35 +198,35 @@ function EndpointCard({
   body: { field: string; type: string; required: boolean; desc: string }[];
 }) {
   return (
-    <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5">
+    <div className="glass-card shimmer-line p-5">
       <div className="flex items-center gap-3 mb-2">
         <span
-          className={`px-2 py-0.5 rounded text-xs font-bold ${
+          className={`px-2.5 py-0.5 rounded-lg text-[11px] font-bold ${
             method === "GET"
-              ? "bg-green-500/10 text-green-400"
-              : "bg-blue-500/10 text-blue-400"
+              ? "badge-success"
+              : "text-blue-400 bg-blue-400/10 border border-blue-400/15"
           }`}
         >
           {method}
         </span>
-        <code className="font-mono text-sm">{path}</code>
+        <code className="font-mono text-sm text-cyan-300/70">{path}</code>
         {auth && (
-          <span className="px-2 py-0.5 rounded text-xs bg-yellow-500/10 text-yellow-400">
+          <span className="px-2.5 py-0.5 rounded-lg text-[11px] font-medium text-amber-400 bg-amber-400/10 border border-amber-400/15">
             Auth Required
           </span>
         )}
       </div>
       <p className="text-sm text-[var(--text-muted)] mb-3">{description}</p>
       {body.length > 0 && (
-        <div className="border-t border-[var(--border)] pt-3">
-          <p className="text-xs text-[var(--text-muted)] uppercase tracking-wider mb-2">Request Body</p>
+        <div className="border-t border-white/[0.04] pt-3">
+          <p className="text-[10px] text-[var(--text-dim)] uppercase tracking-[0.15em] mb-2">Request Body</p>
           <div className="space-y-1.5">
             {body.map((param) => (
               <div key={param.field} className="flex items-start gap-2 text-sm">
-                <code className="font-mono text-xs text-[var(--accent)] min-w-[120px]">{param.field}</code>
-                <span className="text-xs text-[var(--text-muted)] min-w-[60px]">{param.type}</span>
+                <code className="font-mono text-xs text-violet-400 min-w-[120px]">{param.field}</code>
+                <span className="text-xs text-[var(--text-dim)] min-w-[60px]">{param.type}</span>
                 {param.required && (
-                  <span className="text-xs text-red-400">required</span>
+                  <span className="text-[10px] text-red-400/80 font-medium">required</span>
                 )}
                 <span className="text-xs text-[var(--text-muted)]">{param.desc}</span>
               </div>
@@ -306,19 +253,19 @@ function ErrorRow({
     status >= 500
       ? "text-red-400"
       : status >= 400
-      ? "text-yellow-400"
-      : "text-green-400";
+      ? "text-amber-400"
+      : "text-emerald-400";
 
   return (
-    <tr className="border-t border-[var(--border)] hover:bg-[var(--bg-hover)]">
+    <tr>
       <td className="px-5 py-3 align-top">
         <span className={`font-mono font-bold ${statusColor}`}>{status}</span>
       </td>
       <td className="px-5 py-3 align-top">
-        <code className="text-xs font-mono text-[var(--text-muted)]">{type}</code>
+        <code className="text-xs font-mono text-cyan-300/50">{type}</code>
       </td>
       <td className="px-5 py-3">
-        <p className="text-sm">{cause}</p>
+        <p className="text-sm text-white/80">{cause}</p>
         <p className="text-xs text-[var(--text-muted)] mt-1">{fix}</p>
       </td>
     </tr>
