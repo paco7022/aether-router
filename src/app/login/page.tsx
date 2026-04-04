@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { getFingerprint } from "@/lib/fingerprint";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -12,6 +13,11 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
   const supabase = createClient();
+  const fpRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    getFingerprint().then((fp) => { fpRef.current = fp; });
+  }, []);
 
   async function handleGoogleLogin() {
     setError("");
@@ -35,6 +41,13 @@ export default function LoginPage() {
       setError(error.message);
       setLoading(false);
     } else {
+      if (fpRef.current) {
+        fetch("/api/v1/fingerprint", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fingerprint: fpRef.current }),
+        }).catch(() => {});
+      }
       router.push("/dashboard");
     }
   }

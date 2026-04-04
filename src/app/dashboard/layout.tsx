@@ -1,6 +1,7 @@
 import { createServerSupabase } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { Sidebar } from "@/components/Sidebar";
+import { FingerprintCapture } from "@/components/FingerprintCapture";
 import { isAdmin } from "@/lib/admin";
 
 export default async function DashboardLayout({
@@ -35,6 +36,7 @@ export default async function DashboardLayout({
         }}
         isAdmin={isAdmin(user.email)}
       />
+      <FingerprintCapture />
       <main className="flex-1 p-6 lg:p-8 ml-64">{children}</main>
     </div>
   );

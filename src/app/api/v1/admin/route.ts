@@ -32,7 +32,29 @@ export async function GET(req: NextRequest) {
         .limit(100);
 
       if (search) {
-        query = query.or(`email.ilike.%${search}%,display_name.ilike.%${search}%`);
+        // Use separate .ilike() filters to avoid PostgREST .or() parsing issues with special chars
+        const [{ data: byEmail }, { data: byName }] = await Promise.all([
+          supabase
+            .from("profiles")
+            .select("id, email, display_name, credits, daily_credits, plan_id, gm_claimed_date, created_at, updated_at")
+            .ilike("email", `%${search}%`)
+            .order("created_at", { ascending: false })
+            .limit(100),
+          supabase
+            .from("profiles")
+            .select("id, email, display_name, credits, daily_credits, plan_id, gm_claimed_date, created_at, updated_at")
+            .ilike("display_name", `%${search}%`)
+            .order("created_at", { ascending: false })
+            .limit(100),
+        ]);
+        // Merge and deduplicate
+        const seen = new Set<string>();
+        const merged = [...(byEmail || []), ...(byName || [])].filter((u) => {
+          if (seen.has(u.id)) return false;
+          seen.add(u.id);
+          return true;
+        });
+        return NextResponse.json({ users: merged });
       }
 
       const { data, error } = await query;
@@ -116,6 +138,48 @@ export async function GET(req: NextRequest) {
         .order("created_at", { ascending: false });
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
       return NextResponse.json({ keys: data });
+    }
+
+    case "fingerprints": {
+      const userId = req.nextUrl.searchParams.get("user_id");
+      if (!userId) return NextResponse.json({ error: "user_id required" }, { status: 400 });
+
+      // Get this user's fingerprints
+      const { data: fps, error } = await supabase
+        .from("device_fingerprints")
+        .select("*")
+        .eq("user_id", userId)
+        .order("last_seen_at", { ascending: false });
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+      // For each fingerprint, find other accounts sharing it
+      const linkedAccounts: Record<string, { email: string; user_id: string }[]> = {};
+      for (const fp of fps || []) {
+        const { data: linked } = await supabase
+          .from("device_fingerprints")
+          .select("user_id, profiles(email)")
+          .eq("fingerprint", fp.fingerprint)
+          .neq("user_id", userId);
+        linkedAccounts[fp.fingerprint] = (linked || []).map((l) => ({
+          user_id: l.user_id,
+          email: (l.profiles as unknown as { email: string })?.email || l.user_id,
+        }));
+      }
+
+      // Check which fingerprints are banned
+      const fpValues = (fps || []).map((f) => f.fingerprint);
+      const { data: bans } = fpValues.length > 0
+        ? await supabase.from("banned_fingerprints").select("fingerprint").in("fingerprint", fpValues)
+        : { data: [] };
+      const bannedSet = new Set((bans || []).map((b) => b.fingerprint));
+
+      return NextResponse.json({
+        fingerprints: (fps || []).map((fp) => ({
+          ...fp,
+          is_banned: bannedSet.has(fp.fingerprint),
+          linked_accounts: linkedAccounts[fp.fingerprint] || [],
+        })),
+      });
     }
 
     default:
@@ -202,6 +266,26 @@ export async function POST(req: NextRequest) {
       const { plan_id, ...updates } = body;
       delete updates.action;
       const { error } = await supabase.from("plans").update(updates).eq("id", plan_id);
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ ok: true });
+    }
+
+    // ── Fingerprint banning ──
+    case "ban_fingerprint": {
+      const { fingerprint, reason } = body;
+      if (!fingerprint) return NextResponse.json({ error: "fingerprint required" }, { status: 400 });
+      const { error } = await supabase.from("banned_fingerprints").upsert(
+        { fingerprint, reason: reason || "Banned by admin", banned_by: user.email },
+        { onConflict: "fingerprint" }
+      );
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ ok: true });
+    }
+
+    case "unban_fingerprint": {
+      const { fingerprint } = body;
+      if (!fingerprint) return NextResponse.json({ error: "fingerprint required" }, { status: 400 });
+      const { error } = await supabase.from("banned_fingerprints").delete().eq("fingerprint", fingerprint);
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
       return NextResponse.json({ ok: true });
     }

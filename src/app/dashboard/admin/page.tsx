@@ -24,6 +24,17 @@ interface ApiKeyRow {
   last_used: string | null;
 }
 
+interface DeviceFingerprint {
+  id: string;
+  fingerprint: string;
+  user_agent: string | null;
+  ip_address: string | null;
+  created_at: string;
+  last_seen_at: string;
+  is_banned: boolean;
+  linked_accounts: { user_id: string; email: string }[];
+}
+
 interface Model {
   id: string;
   provider: string;
@@ -81,6 +92,7 @@ export default function AdminPage() {
   const [userSearch, setUserSearch] = useState("");
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
   const [userKeys, setUserKeys] = useState<ApiKeyRow[]>([]);
+  const [userFingerprints, setUserFingerprints] = useState<DeviceFingerprint[]>([]);
   const [creditInput, setCreditInput] = useState("");
   const [dailyCreditInput, setDailyCreditInput] = useState("");
   const [addCreditAmount, setAddCreditAmount] = useState("");
@@ -137,8 +149,26 @@ export default function AdminPage() {
     setDailyCreditInput(String(u.daily_credits));
     setPlanSelect(u.plan_id);
     setAddCreditAmount("");
-    const data = await api("GET", { action: "keys", user_id: u.id });
-    setUserKeys(data.keys || []);
+    const [keysData, fpData] = await Promise.all([
+      api("GET", { action: "keys", user_id: u.id }),
+      api("GET", { action: "fingerprints", user_id: u.id }),
+    ]);
+    setUserKeys(keysData.keys || []);
+    setUserFingerprints(fpData.fingerprints || []);
+  }
+
+  async function handleBanFingerprint(fingerprint: string) {
+    await api("POST", undefined, { action: "ban_fingerprint", fingerprint, reason: "Banned by admin" });
+    setUserFingerprints((prev) =>
+      prev.map((fp) => (fp.fingerprint === fingerprint ? { ...fp, is_banned: true } : fp))
+    );
+  }
+
+  async function handleUnbanFingerprint(fingerprint: string) {
+    await api("POST", undefined, { action: "unban_fingerprint", fingerprint });
+    setUserFingerprints((prev) =>
+      prev.map((fp) => (fp.fingerprint === fingerprint ? { ...fp, is_banned: false } : fp))
+    );
   }
 
   async function handleSetCredits() {
@@ -432,6 +462,61 @@ export default function AdminPage() {
                   ))}
                   {userKeys.length === 0 && (
                     <p className="p-4 text-xs text-[var(--text-muted)]">No API keys.</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Device Fingerprints */}
+              <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl">
+                <div className="p-4 border-b border-[var(--border)]">
+                  <h3 className="font-semibold text-sm">Device Fingerprints ({userFingerprints.length})</h3>
+                </div>
+                <div className="divide-y divide-[var(--border)]">
+                  {userFingerprints.map((fp) => (
+                    <div key={fp.id} className="px-4 py-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="min-w-0">
+                          <p className="text-xs font-mono truncate" title={fp.fingerprint}>
+                            {fp.fingerprint}
+                          </p>
+                          <p className="text-xs text-[var(--text-muted)]">
+                            Last seen: {new Date(fp.last_seen_at).toLocaleDateString()}
+                          </p>
+                          {fp.ip_address && (
+                            <p className="text-xs text-[var(--text-muted)]">IP: {fp.ip_address}</p>
+                          )}
+                        </div>
+                        <button
+                          onClick={() =>
+                            fp.is_banned
+                              ? handleUnbanFingerprint(fp.fingerprint)
+                              : handleBanFingerprint(fp.fingerprint)
+                          }
+                          className={`text-xs px-2.5 py-1 rounded-lg font-medium transition-colors shrink-0 ml-2 ${
+                            fp.is_banned
+                              ? "bg-red-500/10 text-red-400 hover:bg-green-500/10 hover:text-green-400"
+                              : "bg-green-500/10 text-green-400 hover:bg-red-500/10 hover:text-red-400"
+                          }`}
+                        >
+                          {fp.is_banned ? "Banned" : "Active"}
+                        </button>
+                      </div>
+                      {fp.linked_accounts.length > 0 && (
+                        <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-lg p-2">
+                          <p className="text-xs text-yellow-400 font-medium mb-1">
+                            Linked accounts ({fp.linked_accounts.length}):
+                          </p>
+                          {fp.linked_accounts.map((la) => (
+                            <p key={la.user_id} className="text-xs text-yellow-400/80 font-mono">
+                              {la.email}
+                            </p>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {userFingerprints.length === 0 && (
+                    <p className="p-4 text-xs text-[var(--text-muted)]">No fingerprints recorded yet.</p>
                   )}
                 </div>
               </div>
