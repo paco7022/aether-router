@@ -125,7 +125,7 @@ export async function POST(req: NextRequest) {
       .single();
 
     // Default to free-tier limits if plan not found (safe fallback)
-    const gmDailyRequests = plan?.gm_daily_requests ?? 20;
+    const gmDailyRequests = plan?.gm_daily_requests ?? 15;
     const gmMaxContext = plan?.gm_max_context ?? 32768;
 
     // Check daily request limit (0 = unlimited)
