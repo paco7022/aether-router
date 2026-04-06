@@ -141,6 +141,26 @@ export async function POST(req: NextRequest) {
           { status: 403 }
         );
       }
+
+      // Free users: block gm/claude-* while c/ pool still has requests
+      const isClaudeModel = modelId.includes("claude");
+      if (keyInfo.planId === "free" && isClaudeModel) {
+        const { data: pool } = await supabase
+          .from("lightningzeus_daily_pool")
+          .select("used, pool_limit")
+          .eq("pool_date", today)
+          .maybeSingle();
+
+        const poolUsed = pool?.used ?? 0;
+        const poolLimit = pool?.pool_limit ?? 3000;
+
+        if (poolUsed < poolLimit) {
+          return NextResponse.json(
+            { error: { message: `Use c/ models first (${poolLimit - poolUsed} requests remaining in today's pool). Try c/claude-sonnet-4-6 or c/claude-opus-4-6.`, type: "use_c_first" } },
+            { status: 429 }
+          );
+        }
+      }
     }
 
     const { data: plan } = await supabase
