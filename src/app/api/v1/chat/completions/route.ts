@@ -107,15 +107,40 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 5.5. Gameron plan limits (requests/day + context cap)
-  if (model.provider === "gameron") {
-    // ALL users must claim gm/ requests daily from the billing page
+  // 5.5a. LightningZeus global pool check (c/ models)
+  if (model.provider === "lightningzeus") {
     const today = new Date().toISOString().split("T")[0];
-    if (keyInfo.gmClaimedDate !== today) {
+
+    // Check global pool
+    const { data: pool } = await supabase
+      .from("lightningzeus_daily_pool")
+      .select("used, pool_limit")
+      .eq("pool_date", today)
+      .maybeSingle();
+
+    const used = pool?.used ?? 0;
+    const limit = pool?.pool_limit ?? 3000;
+
+    if (used >= limit) {
       return NextResponse.json(
-        { error: { message: "Claim your daily premium requests first at the billing page.", type: "claim_required" } },
-        { status: 403 }
+        { error: { message: `Daily pool exhausted (${limit} requests/day). Try gm/ models instead.`, type: "rate_limit" } },
+        { status: 429 }
       );
+    }
+  }
+
+  // 5.5b. Premium plan limits (requests/day + context cap) — applies to gameron AND lightningzeus
+  const isPremiumProvider = model.provider === "gameron" || model.provider === "lightningzeus";
+  if (isPremiumProvider) {
+    // Gameron-only: require daily claim
+    if (model.provider === "gameron") {
+      const today = new Date().toISOString().split("T")[0];
+      if (keyInfo.gmClaimedDate !== today) {
+        return NextResponse.json(
+          { error: { message: "Claim your daily premium requests first at the billing page.", type: "claim_required" } },
+          { status: 403 }
+        );
+      }
     }
 
     const { data: plan } = await supabase
@@ -128,28 +153,35 @@ export async function POST(req: NextRequest) {
     const gmDailyRequests = plan?.gm_daily_requests ?? 15;
     const gmMaxContext = plan?.gm_max_context ?? 32768;
 
-    // Check daily request limit (0 = unlimited)
+    // Check daily request limit (0 = unlimited) — count both gm/ and c/ usage
     if (gmDailyRequests > 0) {
       const todayStart = new Date();
       todayStart.setUTCHours(0, 0, 0, 0);
-      const { count, error: countError } = await supabase
+      const { count: gmCount, error: gmErr } = await supabase
         .from("usage_logs")
         .select("*", { count: "exact", head: true })
         .eq("user_id", keyInfo.userId)
         .like("model_id", "gm/%")
         .gte("created_at", todayStart.toISOString());
 
-      // If count query fails, block to be safe
-      if (countError) {
+      const { count: cCount, error: cErr } = await supabase
+        .from("usage_logs")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", keyInfo.userId)
+        .like("model_id", "c/%")
+        .gte("created_at", todayStart.toISOString());
+
+      if (gmErr || cErr) {
         return NextResponse.json(
           { error: { message: "Failed to check rate limit", type: "server_error" } },
           { status: 500 }
         );
       }
 
-      if ((count ?? 0) >= gmDailyRequests) {
+      const totalPremiumUsed = (gmCount ?? 0) + (cCount ?? 0);
+      if (totalPremiumUsed >= gmDailyRequests) {
         return NextResponse.json(
-          { error: { message: `Daily limit reached (${gmDailyRequests} requests/day for your plan). Upgrade for more.`, type: "rate_limit" } },
+          { error: { message: `Daily premium limit reached (${gmDailyRequests} requests/day for your plan). Upgrade for more.`, type: "rate_limit" } },
           { status: 429 }
         );
       }
@@ -316,6 +348,11 @@ export async function POST(req: NextRequest) {
       description: `${modelId} - ${usage.total_tokens} tokens`,
     });
 
+    // Increment lightningzeus global pool counter
+    if (model.provider === "lightningzeus") {
+      await incrementLightningzeusPool(supabase);
+    }
+
     return NextResponse.json(data);
   } catch (error) {
     return NextResponse.json(
@@ -328,7 +365,7 @@ export async function POST(req: NextRequest) {
 async function handleStreamingResponse(
   providerResponse: Response,
   keyInfo: { userId: string; keyId: string; credits: number },
-  model: { id: string; cost_per_m_input: number; cost_per_m_output: number; margin: number },
+  model: { id: string; provider: string; cost_per_m_input: number; cost_per_m_output: number; margin: number },
   startTime: number,
   estimatedPromptTokens: number = 0
 ) {
@@ -420,6 +457,11 @@ async function handleStreamingResponse(
           type: "usage",
           description: `${model.id} - ${totalTokens} tokens (stream)`,
         });
+
+        // Increment lightningzeus global pool counter
+        if (model.provider === "lightningzeus") {
+          await incrementLightningzeusPool(supabase);
+        }
       }
     },
   });
@@ -441,4 +483,25 @@ async function handleStreamingResponse(
       Connection: "keep-alive",
     },
   });
+}
+
+async function incrementLightningzeusPool(supabase: ReturnType<typeof createAdminClient>) {
+  const today = new Date().toISOString().split("T")[0];
+
+  const { data: existing } = await supabase
+    .from("lightningzeus_daily_pool")
+    .select("used")
+    .eq("pool_date", today)
+    .maybeSingle();
+
+  if (existing) {
+    await supabase
+      .from("lightningzeus_daily_pool")
+      .update({ used: existing.used + 1 })
+      .eq("pool_date", today);
+  } else {
+    await supabase
+      .from("lightningzeus_daily_pool")
+      .insert({ pool_date: today, used: 1, pool_limit: 3000 });
+  }
 }
