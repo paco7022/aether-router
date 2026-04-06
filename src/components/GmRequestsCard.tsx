@@ -49,19 +49,31 @@ export function GmRequestsCard({
         <div>
           <h4 className="font-semibold text-sm text-white/85">Premium Model Requests</h4>
           <p className="text-xs text-[var(--text-muted)]">
-            Daily usage for gm/ models (Claude, GPT, Gemini)
+            Daily usage for premium models (gm/ and c/)
           </p>
         </div>
-        <span
-          className="text-[10px] px-2.5 py-0.5 rounded-full font-medium"
-          style={{
-            background: "rgba(139, 92, 246, 0.1)",
-            border: "1px solid rgba(139, 92, 246, 0.15)",
-            color: "rgba(167, 139, 250, 0.9)",
-          }}
-        >
-          gm/
-        </span>
+        <div className="flex gap-1">
+          <span
+            className="text-[10px] px-2.5 py-0.5 rounded-full font-medium"
+            style={{
+              background: "rgba(139, 92, 246, 0.1)",
+              border: "1px solid rgba(139, 92, 246, 0.15)",
+              color: "rgba(167, 139, 250, 0.9)",
+            }}
+          >
+            gm/
+          </span>
+          <span
+            className="text-[10px] px-2.5 py-0.5 rounded-full font-medium"
+            style={{
+              background: "rgba(34, 211, 238, 0.1)",
+              border: "1px solid rgba(34, 211, 238, 0.15)",
+              color: "rgba(34, 211, 238, 0.9)",
+            }}
+          >
+            c/
+          </span>
+        </div>
       </div>
 
       {needsClaim ? (
