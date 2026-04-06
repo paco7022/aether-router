@@ -5,7 +5,7 @@ const RETRY_DELAY_MS = 1000;
 
 export const lightningzeusProvider: Provider = {
   name: "lightningzeus",
-  baseUrl: process.env.LIGHTNINGZEUS_BASE_URL || "http://lightningzeus.com/v1",
+  baseUrl: process.env.LIGHTNINGZEUS_BASE_URL || "https://lightningzeus.com/v1",
 
   async forward(request: ProviderRequest, signal?: AbortSignal): Promise<Response> {
     const apiKey = process.env.LIGHTNINGZEUS_API_KEY;
