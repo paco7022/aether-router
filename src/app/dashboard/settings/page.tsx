@@ -1,4 +1,5 @@
 import { createServerSupabase } from "@/lib/supabase/server";
+import { DeleteAccountButton } from "@/components/DeleteAccountButton";
 
 export default async function SettingsPage() {
   const supabase = await createServerSupabase();
@@ -55,6 +56,15 @@ export default async function SettingsPage() {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Danger Zone */}
+      <div className="glass-card shimmer-line p-6 mt-6" style={{ borderColor: "rgba(239, 68, 68, 0.1)" }}>
+        <h3 className="font-semibold text-red-400/80 mb-3">Danger Zone</h3>
+        <p className="text-xs text-[var(--text-dim)] mb-4">
+          Deleting your account will remove all data and free your device fingerprint so you can register again with a different email.
+        </p>
+        <DeleteAccountButton />
       </div>
     </div>
   );
