@@ -195,8 +195,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Check context length limit (0 = unlimited)
-    if (gmMaxContext > 0) {
+    // Check context length limit (0 = unlimited) — only applies to gm/ models, c/ has no context limit
+    if (gmMaxContext > 0 && model.provider === "gameron") {
       const estimatedContext = estimatePromptTokens(messages);
       if (estimatedContext > gmMaxContext) {
         return NextResponse.json(
