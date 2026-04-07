@@ -132,7 +132,15 @@ export async function POST(req: NextRequest) {
   // 5.5b. Premium plan limits (requests/day + context cap) — applies to gameron AND lightningzeus
   const isPremiumProvider = model.provider === "gameron" || model.provider === "lightningzeus";
   if (isPremiumProvider) {
-    // Gameron-only: require daily claim
+    // Block gm/ models for free and basic ($3) tiers — they only get c/ models
+    if (model.provider === "gameron" && (keyInfo.planId === "free" || keyInfo.planId === "basic")) {
+      return NextResponse.json(
+        { error: { message: "Oops, it seems that something has gone wrong, you do not have access to this model, try with c/ or upgrade your plan.", type: "plan_restricted" } },
+        { status: 403 }
+      );
+    }
+
+    // Gameron-only: require daily claim (only for plans that have gm/ access)
     if (model.provider === "gameron") {
       const today = new Date().toISOString().split("T")[0];
       if (keyInfo.gmClaimedDate !== today) {
@@ -140,26 +148,6 @@ export async function POST(req: NextRequest) {
           { error: { message: "Claim your daily premium requests first at the billing page.", type: "claim_required" } },
           { status: 403 }
         );
-      }
-
-      // Free users: block gm/claude-* while c/ pool still has requests
-      const isClaudeModel = modelId.includes("claude");
-      if (keyInfo.planId === "free" && isClaudeModel) {
-        const { data: pool } = await supabase
-          .from("lightningzeus_daily_pool")
-          .select("used, pool_limit")
-          .eq("pool_date", today)
-          .maybeSingle();
-
-        const poolUsed = pool?.used ?? 0;
-        const poolLimit = pool?.pool_limit ?? 3000;
-
-        if (poolUsed < poolLimit) {
-          return NextResponse.json(
-            { error: { message: `Use c/ models first (${poolLimit - poolUsed} requests remaining in today's pool). Try c/claude-sonnet-4-6 or c/claude-opus-4-6.`, type: "use_c_first" } },
-            { status: 429 }
-          );
-        }
       }
     }
 
