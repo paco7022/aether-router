@@ -236,9 +236,13 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const providerResponse = await provider.forward(
-      { ...body, model: upstreamModel, stream } as any
-    );
+    // Ask upstream to include usage data in stream chunks (OpenAI-compatible)
+    const forwardBody = { ...body, model: upstreamModel, stream };
+    if (stream) {
+      (forwardBody as Record<string, unknown>).stream_options = { include_usage: true };
+    }
+
+    const providerResponse = await provider.forward(forwardBody as any);
 
     if (!providerResponse.ok) {
       const errorText = await providerResponse.text();
