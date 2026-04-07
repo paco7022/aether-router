@@ -111,23 +111,41 @@ export function PlanCard({
         )}
       </div>
 
-      {/* Gameron (gm/) model limits */}
+      {/* Premium model limits */}
       <div className="mb-4 pt-3 border-t border-white/[0.04]">
-        <p className="text-xs font-semibold text-violet-400/80 mb-1.5">
-          Premium Models (gm/)
-        </p>
-        <div className="space-y-0.5 text-xs text-[var(--text-muted)]">
-          <p>
-            {plan.gm_daily_requests > 0
-              ? `${plan.gm_daily_requests} requests/day`
-              : "Unlimited requests"}
-          </p>
-          <p>
-            {plan.gm_max_context > 0
-              ? `${(plan.gm_max_context / 1024).toFixed(0)}k context`
-              : "Unlimited context"}
-          </p>
-        </div>
+        {plan.id === "free" || plan.id === "basic" ? (
+          <>
+            <p className="text-xs font-semibold text-cyan-400/80 mb-1.5">
+              Premium Models (c/)
+            </p>
+            <div className="space-y-0.5 text-xs text-[var(--text-muted)]">
+              <p>
+                {plan.gm_daily_requests > 0
+                  ? `${plan.gm_daily_requests} requests/day`
+                  : "Unlimited requests"}
+              </p>
+              <p>Unlimited context</p>
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="text-xs font-semibold text-violet-400/80 mb-1.5">
+              Premium Models (gm/)
+            </p>
+            <div className="space-y-0.5 text-xs text-[var(--text-muted)]">
+              <p>
+                {plan.gm_daily_requests > 0
+                  ? `${plan.gm_daily_requests} requests/day`
+                  : "Unlimited requests"}
+              </p>
+              <p>
+                {plan.gm_max_context > 0
+                  ? `${(plan.gm_max_context / 1024).toFixed(0)}k context`
+                  : "Unlimited context"}
+              </p>
+            </div>
+          </>
+        )}
       </div>
 
       {error && (
