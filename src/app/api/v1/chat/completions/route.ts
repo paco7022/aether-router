@@ -132,6 +132,32 @@ export async function POST(req: NextRequest) {
   // 5.5b. Premium plan limits (requests/day + context cap) — applies to gameron AND lightningzeus
   const isPremiumProvider = model.provider === "gameron" || model.provider === "lightningzeus";
   if (isPremiumProvider) {
+    // Rate limit: 1 request per minute per user on premium models
+    const oneMinuteAgo = new Date(Date.now() - 60_000).toISOString();
+    const { data: recentPremium } = await supabase
+      .from("usage_logs")
+      .select("created_at")
+      .eq("user_id", keyInfo.userId)
+      .or("model_id.like.gm/%,model_id.like.c/%")
+      .gte("created_at", oneMinuteAgo)
+      .limit(1)
+      .maybeSingle();
+
+    if (recentPremium) {
+      const retryAfter = Math.ceil(
+        (new Date(recentPremium.created_at).getTime() + 60_000 - Date.now()) / 1000
+      );
+      return NextResponse.json(
+        {
+          error: {
+            message: `Premium model rate limit: 1 request per minute. Try again in ${retryAfter}s.`,
+            type: "rate_limit",
+          },
+        },
+        { status: 429, headers: { "Retry-After": String(Math.max(retryAfter, 1)) } }
+      );
+    }
+
     // Block gm/ models for free and basic ($3) tiers — they only get c/ models
     if (model.provider === "gameron" && (keyInfo.planId === "free" || keyInfo.planId === "basic")) {
       return NextResponse.json(
