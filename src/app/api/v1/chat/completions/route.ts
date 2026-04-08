@@ -8,11 +8,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
-const TEMP_AIRFORCE_ALLOWED_MODELS = new Set(["gemini-3-flash", "deepseek-v3.2", "kimi-k2-0905"]);
-
-function normalizeAirforceModelId(id: string): string {
-  return String(id || "").replace(/^a\//, "");
-}
+const DEEPSEEK_DAILY_TOKEN_LIMIT = 200_000;
 
 function extractCompletionText(payload: unknown): string {
   const data = payload as { choices?: Array<{ message?: { content?: unknown } }> };
@@ -318,34 +314,46 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 5.6. Pre-check credits before forwarding
-  if (keyInfo.isCustom && keyInfo.customCredits !== null) {
-    // Already checked above
-  } else {
-    const totalCredits = keyInfo.credits + keyInfo.dailyCredits;
-    if (totalCredits <= 0) {
-      return NextResponse.json(
-        { error: { message: "Insufficient credits", type: "billing_error", credits_available: totalCredits } },
-        { status: 402 }
-      );
+  // 6. Forward to provider (use upstream_model_id for the real provider name)
+  const upstreamModel = model.upstream_model_id || modelId;
+  const isFreePool = upstreamModel === "deepseek-v3.2";
+
+  // 5.6. Pre-check credits before forwarding (skip for free-pool models)
+  if (!isFreePool) {
+    if (keyInfo.isCustom && keyInfo.customCredits !== null) {
+      // Already checked above
+    } else {
+      const totalCredits = keyInfo.credits + keyInfo.dailyCredits;
+      if (totalCredits <= 0) {
+        return NextResponse.json(
+          { error: { message: "Insufficient credits", type: "billing_error", credits_available: totalCredits } },
+          { status: 402 }
+        );
+      }
     }
   }
 
-  // 6. Forward to provider (use upstream_model_id for the real provider name)
-  const upstreamModel = model.upstream_model_id || modelId;
+  // Deepseek-v3.2: 200k tokens/day free pool for all users
+  if (upstreamModel === "deepseek-v3.2") {
+    const todayStart = new Date();
+    todayStart.setUTCHours(0, 0, 0, 0);
+    const { data: dsUsage } = await supabase
+      .from("usage_logs")
+      .select("total_tokens")
+      .eq("user_id", keyInfo.userId)
+      .eq("model_id", modelId)
+      .gte("created_at", todayStart.toISOString());
 
-  if (model.provider === "airforce") {
-    const allowedModel = normalizeAirforceModelId(upstreamModel);
-    if (!TEMP_AIRFORCE_ALLOWED_MODELS.has(allowedModel)) {
+    const tokensUsedToday = (dsUsage || []).reduce((sum, r) => sum + (r.total_tokens || 0), 0);
+    if (tokensUsedToday >= DEEPSEEK_DAILY_TOKEN_LIMIT) {
       return NextResponse.json(
         {
           error: {
-            message:
-              "Airforce temporary pool only allows: gemini-3-flash, deepseek-v3.2, kimi-k2-0905",
-            type: "invalid_request",
+            message: `Daily deepseek-v3.2 token limit reached (${(DEEPSEEK_DAILY_TOKEN_LIMIT / 1000).toFixed(0)}k tokens/day). Resets at midnight UTC.`,
+            type: "rate_limit",
           },
         },
-        { status: 403 }
+        { status: 429 }
       );
     }
   }
@@ -397,7 +405,8 @@ export async function POST(req: NextRequest) {
         keyInfo,
         model,
         startTime,
-        estPrompt
+        estPrompt,
+        isFreePool
       );
     }
 
@@ -430,51 +439,53 @@ export async function POST(req: NextRequest) {
       }
     );
 
-    const finalCredits = Math.max(credits, 1);
+    const finalCredits = isFreePool ? 0 : Math.max(credits, 1);
 
-    // 9. Deduct credits
-    let newBalance: number;
-    if (keyInfo.isCustom && keyInfo.customCredits !== null) {
-      // Deduct from key's own credit pool
-      const { data: updated, error: keyErr } = await supabase
-        .from("api_keys")
-        .update({ custom_credits: keyInfo.customCredits - finalCredits })
-        .eq("id", keyInfo.keyId)
-        .gte("custom_credits", finalCredits)
-        .select("custom_credits")
-        .single();
+    // 9. Deduct credits (skip for free-pool models)
+    let newBalance = 0;
+    if (!isFreePool) {
+      if (keyInfo.isCustom && keyInfo.customCredits !== null) {
+        // Deduct from key's own credit pool
+        const { data: updated, error: keyErr } = await supabase
+          .from("api_keys")
+          .update({ custom_credits: keyInfo.customCredits - finalCredits })
+          .eq("id", keyInfo.keyId)
+          .gte("custom_credits", finalCredits)
+          .select("custom_credits")
+          .single();
 
-      if (keyErr || !updated) {
-        return NextResponse.json(
-          { error: { message: "Insufficient key credits", type: "billing_error", credits_available: keyInfo.customCredits } },
-          { status: 402 }
-        );
+        if (keyErr || !updated) {
+          return NextResponse.json(
+            { error: { message: "Insufficient key credits", type: "billing_error", credits_available: keyInfo.customCredits } },
+            { status: 402 }
+          );
+        }
+        newBalance = updated.custom_credits;
+      } else {
+        // Deduct from user's credit pool
+        const { data: rpcBalance, error: deductError } = await supabase.rpc("deduct_credits", {
+          p_user_id: keyInfo.userId,
+          p_amount: finalCredits,
+        });
+
+        if (deductError) {
+          return NextResponse.json(
+            { error: { message: "Failed to deduct credits", type: "billing_error" } },
+            { status: 500 }
+          );
+        }
+
+        if (rpcBalance === -1) {
+          return NextResponse.json(
+            { error: { message: "Insufficient credits", type: "billing_error", credits_required: finalCredits, credits_available: keyInfo.credits + keyInfo.dailyCredits } },
+            { status: 402 }
+          );
+        }
+        newBalance = rpcBalance as number;
       }
-      newBalance = updated.custom_credits;
-    } else {
-      // Deduct from user's credit pool
-      const { data: rpcBalance, error: deductError } = await supabase.rpc("deduct_credits", {
-        p_user_id: keyInfo.userId,
-        p_amount: finalCredits,
-      });
-
-      if (deductError) {
-        return NextResponse.json(
-          { error: { message: "Failed to deduct credits", type: "billing_error" } },
-          { status: 500 }
-        );
-      }
-
-      if (rpcBalance === -1) {
-        return NextResponse.json(
-          { error: { message: "Insufficient credits", type: "billing_error", credits_required: finalCredits, credits_available: keyInfo.credits + keyInfo.dailyCredits } },
-          { status: 402 }
-        );
-      }
-      newBalance = rpcBalance as number;
     }
 
-    // 10. Log usage
+    // 10. Log usage (always log, even for free-pool — needed for token tracking)
     const durationMs = Date.now() - startTime;
     await supabase.from("usage_logs").insert({
       user_id: keyInfo.userId,
@@ -489,13 +500,15 @@ export async function POST(req: NextRequest) {
       duration_ms: durationMs,
     });
 
-    await supabase.from("transactions").insert({
-      user_id: keyInfo.userId,
-      amount: -finalCredits,
-      balance: newBalance,
-      type: keyInfo.isCustom ? "custom_key_usage" : "usage",
-      description: `${modelId} - ${usage.total_tokens} tokens`,
-    });
+    if (!isFreePool) {
+      await supabase.from("transactions").insert({
+        user_id: keyInfo.userId,
+        amount: -finalCredits,
+        balance: newBalance,
+        type: keyInfo.isCustom ? "custom_key_usage" : "usage",
+        description: `${modelId} - ${usage.total_tokens} tokens`,
+      });
+    }
 
     // Increment lightningzeus global pool counter
     if (model.provider === "lightningzeus") {
@@ -516,7 +529,8 @@ async function handleStreamingResponse(
   keyInfo: { userId: string; keyId: string; credits: number; isCustom: boolean; customCredits: number | null },
   model: { id: string; provider: string; cost_per_m_input: number; cost_per_m_output: number; margin: number },
   startTime: number,
-  estimatedPromptTokens: number = 0
+  estimatedPromptTokens: number = 0,
+  isFreePool: boolean = false
 ) {
   const supabase = createAdminClient();
   let totalPromptTokens = 0;
@@ -562,7 +576,6 @@ async function handleStreamingResponse(
         totalCompletionTokens = estimateTokens(completionText);
       }
 
-      // Always deduct credits (even if tokens are estimated)
       const totalTokens = totalPromptTokens + totalCompletionTokens;
       const { credits, costUsd } = calculateCredits(
         totalPromptTokens,
@@ -574,29 +587,30 @@ async function handleStreamingResponse(
         }
       );
 
-      // Minimum 1 credit per request
-      const finalCredits = Math.max(credits, 1);
+      const finalCredits = isFreePool ? 0 : Math.max(credits, 1);
 
-      let wasCharged = false;
+      let wasCharged = isFreePool; // free pool is always "success" for logging
       let balanceAfter = 0;
 
-      if (keyInfo.isCustom && keyInfo.customCredits !== null) {
-        const { data: updated } = await supabase
-          .from("api_keys")
-          .update({ custom_credits: keyInfo.customCredits - finalCredits })
-          .eq("id", keyInfo.keyId)
-          .gte("custom_credits", finalCredits)
-          .select("custom_credits")
-          .single();
-        wasCharged = !!updated;
-        balanceAfter = updated?.custom_credits ?? 0;
-      } else {
-        const { data: newBalance, error: deductError } = await supabase.rpc("deduct_credits", {
-          p_user_id: keyInfo.userId,
-          p_amount: finalCredits,
-        });
-        wasCharged = !deductError && typeof newBalance === "number" && newBalance >= 0;
-        balanceAfter = (newBalance as number) ?? 0;
+      if (!isFreePool) {
+        if (keyInfo.isCustom && keyInfo.customCredits !== null) {
+          const { data: updated } = await supabase
+            .from("api_keys")
+            .update({ custom_credits: keyInfo.customCredits - finalCredits })
+            .eq("id", keyInfo.keyId)
+            .gte("custom_credits", finalCredits)
+            .select("custom_credits")
+            .single();
+          wasCharged = !!updated;
+          balanceAfter = updated?.custom_credits ?? 0;
+        } else {
+          const { data: newBalance, error: deductError } = await supabase.rpc("deduct_credits", {
+            p_user_id: keyInfo.userId,
+            p_amount: finalCredits,
+          });
+          wasCharged = !deductError && typeof newBalance === "number" && newBalance >= 0;
+          balanceAfter = (newBalance as number) ?? 0;
+        }
       }
 
       const durationMs = Date.now() - startTime;
@@ -607,13 +621,13 @@ async function handleStreamingResponse(
         prompt_tokens: totalPromptTokens,
         completion_tokens: totalCompletionTokens,
         total_tokens: totalTokens,
-        credits_charged: wasCharged ? finalCredits : 0,
+        credits_charged: finalCredits,
         cost_usd: costUsd,
         status: wasCharged ? "success" : "billing_failed",
         duration_ms: durationMs,
       });
 
-      if (wasCharged) {
+      if (wasCharged && !isFreePool) {
         await supabase.from("transactions").insert({
           user_id: keyInfo.userId,
           amount: -finalCredits,
