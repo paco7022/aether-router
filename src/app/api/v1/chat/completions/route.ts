@@ -262,7 +262,15 @@ export async function POST(req: NextRequest) {
         .eq("id", keyInfo.planId)
         .single();
 
-      const gmDailyRequests = plan?.gm_daily_requests ?? 15;
+      // Check if user has an active grandfathered override
+      const hasActiveOverride =
+        keyInfo.gmDailyOverride !== null &&
+        keyInfo.gmOverrideExpires &&
+        new Date(keyInfo.gmOverrideExpires) > new Date();
+
+      const gmDailyRequests = hasActiveOverride
+        ? keyInfo.gmDailyOverride!
+        : (plan?.gm_daily_requests ?? 15);
       const gmMaxContext = plan?.gm_max_context ?? 32768;
 
       if (gmDailyRequests > 0) {
