@@ -93,11 +93,25 @@ export function PlanCard({
       <div className="mb-4 space-y-1 text-sm">
         <p>
           <span className="font-semibold text-white/85">
-            {plan.gm_daily_requests > 0
-              ? `${plan.gm_daily_requests.toLocaleString()} requests/day`
-              : "Unlimited requests/day"}
-          </span>
+            {plan.credits_per_day > 0
+              ? `${plan.credits_per_day.toLocaleString()}`
+              : "Unlimited"}
+          </span>{" "}
+          <span className="text-[var(--text-muted)]">credits/day</span>
         </p>
+        <p className="text-xs text-[var(--text-muted)]">
+          1 credit = 1 request
+        </p>
+      </div>
+
+      {/* Deepseek free pool */}
+      <div className="mb-4 pt-3 border-t border-white/[0.04]">
+        <p className="text-xs font-semibold text-emerald-400/80 mb-1.5">
+          Deepseek v3.2 (free)
+        </p>
+        <div className="space-y-0.5 text-xs text-[var(--text-muted)]">
+          <p>200k tokens/day</p>
+        </div>
       </div>
 
       {/* Premium model limits */}
