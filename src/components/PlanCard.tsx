@@ -25,8 +25,6 @@ export function PlanCard({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const bonusLabel =
-    plan.bonus_pct > 0 ? `${plan.bonus_pct}% more value vs buying` : "";
 
   async function handleSubscribe() {
     if (plan.price_usd <= 0) return;
@@ -95,20 +93,11 @@ export function PlanCard({
       <div className="mb-4 space-y-1 text-sm">
         <p>
           <span className="font-semibold text-white/85">
-            {plan.credits_per_day.toLocaleString()}
-          </span>{" "}
-          <span className="text-[var(--text-muted)]">credits/day</span>
+            {plan.gm_daily_requests > 0
+              ? `${plan.gm_daily_requests.toLocaleString()} requests/day`
+              : "Unlimited requests/day"}
+          </span>
         </p>
-        <p>
-          <span className="text-[var(--text-muted)]">~</span>
-          <span className="font-semibold text-white/85">
-            {(plan.credits_per_month / 1000).toFixed(0)}K
-          </span>{" "}
-          <span className="text-[var(--text-muted)]">credits/month</span>
-        </p>
-        {bonusLabel && (
-          <p className="text-teal-400/80 text-xs mt-1">{bonusLabel}</p>
-        )}
       </div>
 
       {/* Premium model limits */}
