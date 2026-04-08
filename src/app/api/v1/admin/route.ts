@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isAdmin } from "@/lib/admin";
+import { hashApiKey } from "@/lib/auth";
+import { API_KEY_PREFIX } from "@/lib/constants";
 
 async function requireAdmin(req: NextRequest) {
   const supabase = await createServerSupabase();
@@ -138,6 +140,16 @@ export async function GET(req: NextRequest) {
         .order("created_at", { ascending: false });
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
       return NextResponse.json({ keys: data });
+    }
+
+    case "custom_keys": {
+      const { data, error } = await supabase
+        .from("api_keys")
+        .select("id, key_prefix, name, is_active, is_custom, custom_credits, max_context, allowed_providers, daily_request_limit, rate_limit_seconds, expires_at, note, user_id, created_at, last_used, profiles(email)")
+        .eq("is_custom", true)
+        .order("created_at", { ascending: false });
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ custom_keys: data });
     }
 
     case "fingerprints": {
@@ -286,6 +298,63 @@ export async function POST(req: NextRequest) {
       const { fingerprint } = body;
       if (!fingerprint) return NextResponse.json({ error: "fingerprint required" }, { status: 400 });
       const { error } = await supabase.from("banned_fingerprints").delete().eq("fingerprint", fingerprint);
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ ok: true });
+    }
+
+    // ── Custom key management ──
+    case "create_custom_key": {
+      const { user_id, name, custom_credits, max_context, allowed_providers, daily_request_limit, rate_limit_seconds, expires_at, note } = body;
+      if (!user_id) return NextResponse.json({ error: "user_id required" }, { status: 400 });
+
+      // Generate a random API key
+      const randomBytes = new Uint8Array(32);
+      crypto.getRandomValues(randomBytes);
+      const rawKey = API_KEY_PREFIX + Array.from(randomBytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+      const keyHash = await hashApiKey(rawKey);
+      const keyPrefix = rawKey.slice(0, 12);
+
+      const { data: inserted, error: insertErr } = await supabase.from("api_keys").insert({
+        user_id,
+        key_hash: keyHash,
+        key_prefix: keyPrefix,
+        name: name || "Custom Key",
+        is_active: true,
+        is_custom: true,
+        custom_credits: custom_credits ?? null,
+        max_context: max_context ?? null,
+        allowed_providers: allowed_providers?.length ? allowed_providers : null,
+        daily_request_limit: daily_request_limit ?? null,
+        rate_limit_seconds: rate_limit_seconds ?? null,
+        expires_at: expires_at || null,
+        note: note || null,
+      }).select("id").single();
+
+      if (insertErr) return NextResponse.json({ error: insertErr.message }, { status: 500 });
+
+      return NextResponse.json({ ok: true, key: rawKey, key_id: inserted.id });
+    }
+
+    case "update_custom_key": {
+      const { key_id, ...updates } = body;
+      delete updates.action;
+      if (!key_id) return NextResponse.json({ error: "key_id required" }, { status: 400 });
+
+      // Only allow updating safe fields
+      const allowed: Record<string, unknown> = {};
+      for (const field of ["name", "custom_credits", "max_context", "allowed_providers", "daily_request_limit", "rate_limit_seconds", "expires_at", "note", "is_active"]) {
+        if (updates[field] !== undefined) allowed[field] = updates[field];
+      }
+
+      const { error } = await supabase.from("api_keys").update(allowed).eq("id", key_id).eq("is_custom", true);
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ ok: true });
+    }
+
+    case "delete_custom_key": {
+      const { key_id } = body;
+      if (!key_id) return NextResponse.json({ error: "key_id required" }, { status: 400 });
+      const { error } = await supabase.from("api_keys").delete().eq("id", key_id).eq("is_custom", true);
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
       return NextResponse.json({ ok: true });
     }

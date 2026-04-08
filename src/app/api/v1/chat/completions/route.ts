@@ -129,117 +129,198 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 5.5b. Premium plan limits (requests/day + context cap) — applies to gameron AND lightningzeus
-  const isPremiumProvider = model.provider === "gameron" || model.provider === "lightningzeus";
-  if (isPremiumProvider) {
-    // Rate limit: 1 request per minute per user on premium models
-    const oneMinuteAgo = new Date(Date.now() - 60_000).toISOString();
-    const { data: recentPremium } = await supabase
-      .from("usage_logs")
-      .select("created_at")
-      .eq("user_id", keyInfo.userId)
-      .or("model_id.like.gm/%,model_id.like.c/%")
-      .gte("created_at", oneMinuteAgo)
-      .limit(1)
-      .maybeSingle();
-
-    if (recentPremium) {
-      const retryAfter = Math.ceil(
-        (new Date(recentPremium.created_at).getTime() + 60_000 - Date.now()) / 1000
-      );
+  // 5.5b. Custom key checks — custom keys bypass plan restrictions and use their own limits
+  if (keyInfo.isCustom) {
+    // Provider allowlist
+    if (keyInfo.allowedProviders && !keyInfo.allowedProviders.includes(model.provider)) {
       return NextResponse.json(
-        {
-          error: {
-            message: `Premium model rate limit: 1 request per minute. Try again in ${retryAfter}s.`,
-            type: "rate_limit",
-          },
-        },
-        { status: 429, headers: { "Retry-After": String(Math.max(retryAfter, 1)) } }
-      );
-    }
-
-    // Block gm/ models for free and basic ($3) tiers — they only get c/ models
-    if (model.provider === "gameron" && (keyInfo.planId === "free" || keyInfo.planId === "basic")) {
-      return NextResponse.json(
-        { error: { message: "Oops, it seems that something has gone wrong, you do not have access to this model, try with c/ or upgrade your plan.", type: "plan_restricted" } },
+        { error: { message: `This key does not have access to ${model.provider} models.`, type: "plan_restricted" } },
         { status: 403 }
       );
     }
 
-    // Gameron-only: require daily claim (only for plans that have gm/ access)
-    if (model.provider === "gameron") {
-      const today = new Date().toISOString().split("T")[0];
-      if (keyInfo.gmClaimedDate !== today) {
+    // Per-key rate limit (defaults to 60s for premium, no limit for non-premium)
+    const isPremium = model.provider === "gameron" || model.provider === "lightningzeus";
+    const rlSeconds = keyInfo.rateLimitSeconds ?? (isPremium ? 60 : 0);
+    if (rlSeconds > 0) {
+      const windowAgo = new Date(Date.now() - rlSeconds * 1000).toISOString();
+      const { data: recentReq } = await supabase
+        .from("usage_logs")
+        .select("created_at")
+        .eq("api_key_id", keyInfo.keyId)
+        .gte("created_at", windowAgo)
+        .limit(1)
+        .maybeSingle();
+
+      if (recentReq) {
+        const retryAfter = Math.ceil(
+          (new Date(recentReq.created_at).getTime() + rlSeconds * 1000 - Date.now()) / 1000
+        );
         return NextResponse.json(
-          { error: { message: "Claim your daily premium requests first at the billing page.", type: "claim_required" } },
-          { status: 403 }
+          { error: { message: `Rate limit: 1 request per ${rlSeconds}s. Try again in ${retryAfter}s.`, type: "rate_limit" } },
+          { status: 429, headers: { "Retry-After": String(Math.max(retryAfter, 1)) } }
         );
       }
     }
 
-    const { data: plan } = await supabase
-      .from("plans")
-      .select("gm_daily_requests, gm_max_context")
-      .eq("id", keyInfo.planId)
-      .single();
-
-    // Default to free-tier limits if plan not found (safe fallback)
-    const gmDailyRequests = plan?.gm_daily_requests ?? 15;
-    const gmMaxContext = plan?.gm_max_context ?? 32768;
-
-    // Check daily request limit (0 = unlimited) — count both gm/ and c/ usage
-    if (gmDailyRequests > 0) {
+    // Per-key daily request limit
+    if (keyInfo.dailyRequestLimit && keyInfo.dailyRequestLimit > 0) {
       const todayStart = new Date();
       todayStart.setUTCHours(0, 0, 0, 0);
-      const { count: gmCount, error: gmErr } = await supabase
+      const { count, error: countErr } = await supabase
         .from("usage_logs")
         .select("*", { count: "exact", head: true })
-        .eq("user_id", keyInfo.userId)
-        .like("model_id", "gm/%")
+        .eq("api_key_id", keyInfo.keyId)
         .gte("created_at", todayStart.toISOString());
 
-      const { count: cCount, error: cErr } = await supabase
-        .from("usage_logs")
-        .select("*", { count: "exact", head: true })
-        .eq("user_id", keyInfo.userId)
-        .like("model_id", "c/%")
-        .gte("created_at", todayStart.toISOString());
-
-      if (gmErr || cErr) {
+      if (countErr) {
         return NextResponse.json(
           { error: { message: "Failed to check rate limit", type: "server_error" } },
           { status: 500 }
         );
       }
-
-      const totalPremiumUsed = (gmCount ?? 0) + (cCount ?? 0);
-      if (totalPremiumUsed >= gmDailyRequests) {
+      if ((count ?? 0) >= keyInfo.dailyRequestLimit) {
         return NextResponse.json(
-          { error: { message: `Daily premium limit reached (${gmDailyRequests} requests/day for your plan). Upgrade for more.`, type: "rate_limit" } },
+          { error: { message: `Daily request limit reached (${keyInfo.dailyRequestLimit}/day for this key).`, type: "rate_limit" } },
           { status: 429 }
         );
       }
     }
 
-    // Check context length limit (0 = unlimited) — only applies to gm/ models, c/ has no context limit
-    if (gmMaxContext > 0 && model.provider === "gameron") {
+    // Per-key context limit
+    if (keyInfo.maxContext && keyInfo.maxContext > 0) {
       const estimatedContext = estimatePromptTokens(messages);
-      if (estimatedContext > gmMaxContext) {
+      if (estimatedContext > keyInfo.maxContext) {
         return NextResponse.json(
-          { error: { message: `Context too long (~${estimatedContext} tokens). Your plan allows ${gmMaxContext} tokens max. Upgrade for more.`, type: "context_limit" } },
+          { error: { message: `Context too long (~${estimatedContext} tokens). This key allows ${keyInfo.maxContext} tokens max.`, type: "context_limit" } },
           { status: 413 }
         );
       }
     }
+
+    // Per-key credit pool
+    if (keyInfo.customCredits !== null) {
+      if (keyInfo.customCredits <= 0) {
+        return NextResponse.json(
+          { error: { message: "This key has no credits remaining.", type: "billing_error", credits_available: 0 } },
+          { status: 402 }
+        );
+      }
+    }
+  } else {
+    // 5.5b-normal. Premium plan limits (requests/day + context cap) — applies to gameron AND lightningzeus
+    const isPremiumProvider = model.provider === "gameron" || model.provider === "lightningzeus";
+    if (isPremiumProvider) {
+      // Rate limit: 1 request per minute per user on premium models
+      const oneMinuteAgo = new Date(Date.now() - 60_000).toISOString();
+      const { data: recentPremium } = await supabase
+        .from("usage_logs")
+        .select("created_at")
+        .eq("user_id", keyInfo.userId)
+        .or("model_id.like.gm/%,model_id.like.c/%")
+        .gte("created_at", oneMinuteAgo)
+        .limit(1)
+        .maybeSingle();
+
+      if (recentPremium) {
+        const retryAfter = Math.ceil(
+          (new Date(recentPremium.created_at).getTime() + 60_000 - Date.now()) / 1000
+        );
+        return NextResponse.json(
+          {
+            error: {
+              message: `Premium model rate limit: 1 request per minute. Try again in ${retryAfter}s.`,
+              type: "rate_limit",
+            },
+          },
+          { status: 429, headers: { "Retry-After": String(Math.max(retryAfter, 1)) } }
+        );
+      }
+
+      // Block gm/ models for free and basic ($3) tiers — they only get c/ models
+      if (model.provider === "gameron" && (keyInfo.planId === "free" || keyInfo.planId === "basic")) {
+        return NextResponse.json(
+          { error: { message: "Oops, it seems that something has gone wrong, you do not have access to this model, try with c/ or upgrade your plan.", type: "plan_restricted" } },
+          { status: 403 }
+        );
+      }
+
+      // Gameron-only: require daily claim (only for plans that have gm/ access)
+      if (model.provider === "gameron") {
+        const today = new Date().toISOString().split("T")[0];
+        if (keyInfo.gmClaimedDate !== today) {
+          return NextResponse.json(
+            { error: { message: "Claim your daily premium requests first at the billing page.", type: "claim_required" } },
+            { status: 403 }
+          );
+        }
+      }
+
+      const { data: plan } = await supabase
+        .from("plans")
+        .select("gm_daily_requests, gm_max_context")
+        .eq("id", keyInfo.planId)
+        .single();
+
+      const gmDailyRequests = plan?.gm_daily_requests ?? 15;
+      const gmMaxContext = plan?.gm_max_context ?? 32768;
+
+      if (gmDailyRequests > 0) {
+        const todayStart = new Date();
+        todayStart.setUTCHours(0, 0, 0, 0);
+        const { count: gmCount, error: gmErr } = await supabase
+          .from("usage_logs")
+          .select("*", { count: "exact", head: true })
+          .eq("user_id", keyInfo.userId)
+          .like("model_id", "gm/%")
+          .gte("created_at", todayStart.toISOString());
+
+        const { count: cCount, error: cErr } = await supabase
+          .from("usage_logs")
+          .select("*", { count: "exact", head: true })
+          .eq("user_id", keyInfo.userId)
+          .like("model_id", "c/%")
+          .gte("created_at", todayStart.toISOString());
+
+        if (gmErr || cErr) {
+          return NextResponse.json(
+            { error: { message: "Failed to check rate limit", type: "server_error" } },
+            { status: 500 }
+          );
+        }
+
+        const totalPremiumUsed = (gmCount ?? 0) + (cCount ?? 0);
+        if (totalPremiumUsed >= gmDailyRequests) {
+          return NextResponse.json(
+            { error: { message: `Daily premium limit reached (${gmDailyRequests} requests/day for your plan). Upgrade for more.`, type: "rate_limit" } },
+            { status: 429 }
+          );
+        }
+      }
+
+      if (gmMaxContext > 0 && model.provider === "gameron") {
+        const estimatedContext = estimatePromptTokens(messages);
+        if (estimatedContext > gmMaxContext) {
+          return NextResponse.json(
+            { error: { message: `Context too long (~${estimatedContext} tokens). Your plan allows ${gmMaxContext} tokens max. Upgrade for more.`, type: "context_limit" } },
+            { status: 413 }
+          );
+        }
+      }
+    }
   }
 
-  // 5.6. Pre-check credits before forwarding (avoid free requests)
-  const totalCredits = keyInfo.credits + keyInfo.dailyCredits;
-  if (totalCredits <= 0) {
-    return NextResponse.json(
-      { error: { message: "Insufficient credits", type: "billing_error", credits_available: totalCredits } },
-      { status: 402 }
-    );
+  // 5.6. Pre-check credits before forwarding
+  if (keyInfo.isCustom && keyInfo.customCredits !== null) {
+    // Already checked above
+  } else {
+    const totalCredits = keyInfo.credits + keyInfo.dailyCredits;
+    if (totalCredits <= 0) {
+      return NextResponse.json(
+        { error: { message: "Insufficient credits", type: "billing_error", credits_available: totalCredits } },
+        { status: 402 }
+      );
+    }
   }
 
   // 6. Forward to provider (use upstream_model_id for the real provider name)
@@ -344,23 +425,45 @@ export async function POST(req: NextRequest) {
     const finalCredits = Math.max(credits, 1);
 
     // 9. Deduct credits
-    const { data: newBalance, error: deductError } = await supabase.rpc("deduct_credits", {
-      p_user_id: keyInfo.userId,
-      p_amount: finalCredits,
-    });
+    let newBalance: number;
+    if (keyInfo.isCustom && keyInfo.customCredits !== null) {
+      // Deduct from key's own credit pool
+      const { data: updated, error: keyErr } = await supabase
+        .from("api_keys")
+        .update({ custom_credits: keyInfo.customCredits - finalCredits })
+        .eq("id", keyInfo.keyId)
+        .gte("custom_credits", finalCredits)
+        .select("custom_credits")
+        .single();
 
-    if (deductError) {
-      return NextResponse.json(
-        { error: { message: "Failed to deduct credits", type: "billing_error" } },
-        { status: 500 }
-      );
-    }
+      if (keyErr || !updated) {
+        return NextResponse.json(
+          { error: { message: "Insufficient key credits", type: "billing_error", credits_available: keyInfo.customCredits } },
+          { status: 402 }
+        );
+      }
+      newBalance = updated.custom_credits;
+    } else {
+      // Deduct from user's credit pool
+      const { data: rpcBalance, error: deductError } = await supabase.rpc("deduct_credits", {
+        p_user_id: keyInfo.userId,
+        p_amount: finalCredits,
+      });
 
-    if (newBalance === -1) {
-      return NextResponse.json(
-        { error: { message: "Insufficient credits", type: "billing_error", credits_required: finalCredits, credits_available: keyInfo.credits + keyInfo.dailyCredits } },
-        { status: 402 }
-      );
+      if (deductError) {
+        return NextResponse.json(
+          { error: { message: "Failed to deduct credits", type: "billing_error" } },
+          { status: 500 }
+        );
+      }
+
+      if (rpcBalance === -1) {
+        return NextResponse.json(
+          { error: { message: "Insufficient credits", type: "billing_error", credits_required: finalCredits, credits_available: keyInfo.credits + keyInfo.dailyCredits } },
+          { status: 402 }
+        );
+      }
+      newBalance = rpcBalance as number;
     }
 
     // 10. Log usage
@@ -381,8 +484,8 @@ export async function POST(req: NextRequest) {
     await supabase.from("transactions").insert({
       user_id: keyInfo.userId,
       amount: -finalCredits,
-      balance: newBalance as number,
-      type: "usage",
+      balance: newBalance,
+      type: keyInfo.isCustom ? "custom_key_usage" : "usage",
       description: `${modelId} - ${usage.total_tokens} tokens`,
     });
 
@@ -402,7 +505,7 @@ export async function POST(req: NextRequest) {
 
 async function handleStreamingResponse(
   providerResponse: Response,
-  keyInfo: { userId: string; keyId: string; credits: number },
+  keyInfo: { userId: string; keyId: string; credits: number; isCustom: boolean; customCredits: number | null },
   model: { id: string; provider: string; cost_per_m_input: number; cost_per_m_output: number; margin: number },
   startTime: number,
   estimatedPromptTokens: number = 0
@@ -466,12 +569,27 @@ async function handleStreamingResponse(
       // Minimum 1 credit per request
       const finalCredits = Math.max(credits, 1);
 
-      const { data: newBalance, error: deductError } = await supabase.rpc("deduct_credits", {
-        p_user_id: keyInfo.userId,
-        p_amount: finalCredits,
-      });
+      let wasCharged = false;
+      let balanceAfter = 0;
 
-      const wasCharged = !deductError && typeof newBalance === "number" && newBalance >= 0;
+      if (keyInfo.isCustom && keyInfo.customCredits !== null) {
+        const { data: updated } = await supabase
+          .from("api_keys")
+          .update({ custom_credits: keyInfo.customCredits - finalCredits })
+          .eq("id", keyInfo.keyId)
+          .gte("custom_credits", finalCredits)
+          .select("custom_credits")
+          .single();
+        wasCharged = !!updated;
+        balanceAfter = updated?.custom_credits ?? 0;
+      } else {
+        const { data: newBalance, error: deductError } = await supabase.rpc("deduct_credits", {
+          p_user_id: keyInfo.userId,
+          p_amount: finalCredits,
+        });
+        wasCharged = !deductError && typeof newBalance === "number" && newBalance >= 0;
+        balanceAfter = (newBalance as number) ?? 0;
+      }
 
       const durationMs = Date.now() - startTime;
       await supabase.from("usage_logs").insert({
@@ -491,8 +609,8 @@ async function handleStreamingResponse(
         await supabase.from("transactions").insert({
           user_id: keyInfo.userId,
           amount: -finalCredits,
-          balance: newBalance as number,
-          type: "usage",
+          balance: balanceAfter,
+          type: keyInfo.isCustom ? "custom_key_usage" : "usage",
           description: `${model.id} - ${totalTokens} tokens (stream)`,
         });
 

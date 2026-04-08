@@ -7,6 +7,14 @@ export interface ApiKeyInfo {
   dailyCredits: number;
   planId: string;
   gmClaimedDate: string | null;
+  // Per-key overrides (custom/event keys)
+  isCustom: boolean;
+  customCredits: number | null;
+  maxContext: number | null;
+  allowedProviders: string[] | null;
+  dailyRequestLimit: number | null;
+  rateLimitSeconds: number | null;
+  expiresAt: string | null;
 }
 
 export async function validateApiKey(key: string): Promise<ApiKeyInfo | null> {
@@ -22,11 +30,16 @@ export async function validateApiKey(key: string): Promise<ApiKeyInfo | null> {
   // Look up key and join with profile for credits
   const { data: result, error } = await supabase
     .from("api_keys")
-    .select("id, user_id, is_active, profiles(credits, daily_credits, plan_id, gm_claimed_date)")
+    .select("id, user_id, is_active, is_custom, custom_credits, max_context, allowed_providers, daily_request_limit, rate_limit_seconds, expires_at, profiles(credits, daily_credits, plan_id, gm_claimed_date)")
     .eq("key_hash", keyHash)
     .single();
 
   if (error || !result || !result.is_active) {
+    return null;
+  }
+
+  // Check expiration for custom keys
+  if (result.expires_at && new Date(result.expires_at) < new Date()) {
     return null;
   }
 
@@ -45,6 +58,13 @@ export async function validateApiKey(key: string): Promise<ApiKeyInfo | null> {
     dailyCredits: profile?.daily_credits ?? 0,
     planId: profile?.plan_id ?? "free",
     gmClaimedDate: profile?.gm_claimed_date ?? null,
+    isCustom: result.is_custom ?? false,
+    customCredits: result.custom_credits ?? null,
+    maxContext: result.max_context ?? null,
+    allowedProviders: result.allowed_providers ?? null,
+    dailyRequestLimit: result.daily_request_limit ?? null,
+    rateLimitSeconds: result.rate_limit_seconds ?? null,
+    expiresAt: result.expires_at ?? null,
   };
 }
 

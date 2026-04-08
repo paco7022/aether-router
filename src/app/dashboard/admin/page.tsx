@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 
-type Tab = "stats" | "users" | "models" | "plans";
+type Tab = "stats" | "users" | "models" | "plans" | "custom_keys";
 
 interface UserProfile {
   id: string;
@@ -58,12 +58,33 @@ interface Plan {
   sort_order: number;
 }
 
+interface CustomKey {
+  id: string;
+  key_prefix: string;
+  name: string;
+  is_active: boolean;
+  is_custom: boolean;
+  custom_credits: number | null;
+  max_context: number | null;
+  allowed_providers: string[] | null;
+  daily_request_limit: number | null;
+  rate_limit_seconds: number | null;
+  expires_at: string | null;
+  note: string | null;
+  user_id: string;
+  created_at: string;
+  last_used: string | null;
+  profiles: { email: string } | null;
+}
+
 interface Stats {
   totalUsers: number;
   totalRequests: number;
   todayRequests: number;
   topUsersToday: { user_id: string; email: string; requests: number }[];
 }
+
+const ALL_PROVIDERS = ["gameron", "lightningzeus", "airforce", "gemini-cli"];
 
 async function api(method: "GET" | "POST", params?: Record<string, string>, body?: unknown) {
   if (method === "GET") {
@@ -104,6 +125,21 @@ export default function AdminPage() {
   // Plans
   const [plans, setPlans] = useState<Plan[]>([]);
 
+  // Custom Keys
+  const [customKeys, setCustomKeys] = useState<CustomKey[]>([]);
+  const [newKeyRevealed, setNewKeyRevealed] = useState<string | null>(null);
+  const [ckForm, setCkForm] = useState({
+    user_id: "",
+    name: "",
+    custom_credits: "",
+    max_context: "",
+    allowed_providers: [] as string[],
+    daily_request_limit: "",
+    rate_limit_seconds: "",
+    expires_at: "",
+    note: "",
+  });
+
   const loadStats = useCallback(async () => {
     setLoading(true);
     const data = await api("GET", { action: "stats" });
@@ -136,12 +172,21 @@ export default function AdminPage() {
     setLoading(false);
   }, []);
 
+  const loadCustomKeys = useCallback(async () => {
+    setLoading(true);
+    const data = await api("GET", { action: "custom_keys" });
+    if (data.error) setError(data.error);
+    else setCustomKeys(data.custom_keys || []);
+    setLoading(false);
+  }, []);
+
   useEffect(() => {
     if (tab === "stats") loadStats();
     else if (tab === "users") loadUsers();
     else if (tab === "models") loadModels();
     else if (tab === "plans") loadPlans();
-  }, [tab, loadStats, loadUsers, loadModels, loadPlans]);
+    else if (tab === "custom_keys") loadCustomKeys();
+  }, [tab, loadStats, loadUsers, loadModels, loadPlans, loadCustomKeys]);
 
   async function selectUser(u: UserProfile) {
     setSelectedUser(u);
@@ -230,11 +275,56 @@ export default function AdminPage() {
     setPlans((prev) => prev.map((p) => (p.id === planId ? { ...p, is_active: active } : p)));
   }
 
+  async function handleCreateCustomKey() {
+    const payload: Record<string, unknown> = {
+      action: "create_custom_key",
+      user_id: ckForm.user_id,
+      name: ckForm.name || "Custom Key",
+      note: ckForm.note || undefined,
+    };
+    if (ckForm.custom_credits) payload.custom_credits = Number(ckForm.custom_credits);
+    if (ckForm.max_context) payload.max_context = Number(ckForm.max_context);
+    if (ckForm.allowed_providers.length > 0) payload.allowed_providers = ckForm.allowed_providers;
+    if (ckForm.daily_request_limit) payload.daily_request_limit = Number(ckForm.daily_request_limit);
+    if (ckForm.rate_limit_seconds) payload.rate_limit_seconds = Number(ckForm.rate_limit_seconds);
+    if (ckForm.expires_at) payload.expires_at = new Date(ckForm.expires_at).toISOString();
+
+    const result = await api("POST", undefined, payload);
+    if (result.error) {
+      setError(result.error);
+    } else {
+      setNewKeyRevealed(result.key);
+      setCkForm({ user_id: "", name: "", custom_credits: "", max_context: "", allowed_providers: [], daily_request_limit: "", rate_limit_seconds: "", expires_at: "", note: "" });
+      loadCustomKeys();
+    }
+  }
+
+  async function handleToggleCustomKey(keyId: string, active: boolean) {
+    await api("POST", undefined, { action: "update_custom_key", key_id: keyId, is_active: active });
+    setCustomKeys((prev) => prev.map((k) => (k.id === keyId ? { ...k, is_active: active } : k)));
+  }
+
+  async function handleDeleteCustomKey(keyId: string) {
+    if (!confirm("Delete this custom key permanently?")) return;
+    await api("POST", undefined, { action: "delete_custom_key", key_id: keyId });
+    setCustomKeys((prev) => prev.filter((k) => k.id !== keyId));
+  }
+
+  function toggleProvider(p: string) {
+    setCkForm((prev) => ({
+      ...prev,
+      allowed_providers: prev.allowed_providers.includes(p)
+        ? prev.allowed_providers.filter((x) => x !== p)
+        : [...prev.allowed_providers, p],
+    }));
+  }
+
   const tabs: { id: Tab; label: string }[] = [
     { id: "stats", label: "Overview" },
     { id: "users", label: "Users" },
     { id: "models", label: "Models" },
     { id: "plans", label: "Plans" },
+    { id: "custom_keys", label: "Custom Keys" },
   ];
 
   return (
@@ -594,6 +684,198 @@ export default function AdminPage() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Custom Keys Tab */}
+      {tab === "custom_keys" && (
+        <div className="space-y-6">
+          {/* Revealed key banner */}
+          {newKeyRevealed && (
+            <div className="rounded-xl p-4" style={{
+              background: "rgba(34, 211, 238, 0.06)",
+              border: "1px solid rgba(34, 211, 238, 0.2)",
+            }}>
+              <p className="text-sm font-medium text-cyan-300 mb-1">New key created! Copy it now — it won't be shown again.</p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 text-xs font-mono text-cyan-200/80 bg-black/30 rounded-lg px-3 py-2 break-all select-all">
+                  {newKeyRevealed}
+                </code>
+                <button
+                  onClick={() => { navigator.clipboard.writeText(newKeyRevealed); }}
+                  className="shrink-0 text-xs font-medium px-3 py-2 rounded-lg transition-colors"
+                  style={{ background: "rgba(34, 211, 238, 0.15)", color: "#22d3ee" }}
+                >
+                  Copy
+                </button>
+                <button
+                  onClick={() => setNewKeyRevealed(null)}
+                  className="shrink-0 text-xs text-[var(--text-dim)] hover:text-white/70"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Create form */}
+          <div className="glass-card shimmer-line p-5">
+            <h3 className="font-semibold text-sm text-white/85 mb-4">Create Custom Key</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">User ID *</label>
+                <input type="text" value={ckForm.user_id} onChange={(e) => setCkForm((f) => ({ ...f, user_id: e.target.value }))}
+                  placeholder="UUID del usuario"
+                  className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-white/90 placeholder-[var(--text-dim)] font-mono" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Key Name</label>
+                <input type="text" value={ckForm.name} onChange={(e) => setCkForm((f) => ({ ...f, name: e.target.value }))}
+                  placeholder="e.g. Evento Discord Mayo"
+                  className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-white/90 placeholder-[var(--text-dim)]" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Credits (pool propio)</label>
+                <input type="number" value={ckForm.custom_credits} onChange={(e) => setCkForm((f) => ({ ...f, custom_credits: e.target.value }))}
+                  placeholder="e.g. 50000 (vacio = usa los del user)"
+                  className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-white/90 placeholder-[var(--text-dim)]" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Max Context (tokens)</label>
+                <input type="number" value={ckForm.max_context} onChange={(e) => setCkForm((f) => ({ ...f, max_context: e.target.value }))}
+                  placeholder="e.g. 32768 (vacio = sin limite)"
+                  className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-white/90 placeholder-[var(--text-dim)]" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Daily Request Limit</label>
+                <input type="number" value={ckForm.daily_request_limit} onChange={(e) => setCkForm((f) => ({ ...f, daily_request_limit: e.target.value }))}
+                  placeholder="e.g. 50 (vacio = sin limite diario)"
+                  className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-white/90 placeholder-[var(--text-dim)]" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Rate Limit (segundos entre requests)</label>
+                <input type="number" value={ckForm.rate_limit_seconds} onChange={(e) => setCkForm((f) => ({ ...f, rate_limit_seconds: e.target.value }))}
+                  placeholder="e.g. 30 (default 60 premium, 0 free)"
+                  className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-white/90 placeholder-[var(--text-dim)]" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Expira</label>
+                <input type="datetime-local" value={ckForm.expires_at} onChange={(e) => setCkForm((f) => ({ ...f, expires_at: e.target.value }))}
+                  className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-white/90" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Nota</label>
+                <input type="text" value={ckForm.note} onChange={(e) => setCkForm((f) => ({ ...f, note: e.target.value }))}
+                  placeholder="e.g. Giveaway Twitter abril"
+                  className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-white/90 placeholder-[var(--text-dim)]" />
+              </div>
+            </div>
+
+            {/* Provider toggles */}
+            <div className="mt-4 space-y-1.5">
+              <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">
+                Providers permitidos {ckForm.allowed_providers.length === 0 && <span className="text-cyan-300/50">(vacio = todos)</span>}
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {ALL_PROVIDERS.map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => toggleProvider(p)}
+                    className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-all ${
+                      ckForm.allowed_providers.includes(p)
+                        ? "text-white"
+                        : "text-[var(--text-muted)] hover:text-white/70"
+                    }`}
+                    style={ckForm.allowed_providers.includes(p) ? {
+                      background: "linear-gradient(135deg, rgba(139, 92, 246, 0.3), rgba(34, 211, 238, 0.15))",
+                      border: "1px solid rgba(139, 92, 246, 0.2)",
+                    } : {
+                      background: "rgba(15, 15, 35, 0.6)",
+                      border: "1px solid rgba(255, 255, 255, 0.06)",
+                    }}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <button onClick={handleCreateCustomKey}
+              className="mt-5 btn-aurora text-sm font-medium px-5 py-2.5 rounded-xl">
+              Crear Key
+            </button>
+          </div>
+
+          {/* Keys list */}
+          <div className="glass-card shimmer-line overflow-hidden">
+            <div className="p-4 border-b border-white/[0.04]">
+              <h3 className="font-semibold text-sm text-white/85">Custom Keys ({customKeys.length})</h3>
+            </div>
+            {customKeys.length === 0 ? (
+              <p className="p-4 text-sm text-[var(--text-dim)]">No custom keys yet.</p>
+            ) : (
+              <div className="divide-y divide-white/[0.04]">
+                {customKeys.map((k) => (
+                  <div key={k.id} className="px-4 py-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-medium text-white/85">{k.name}</p>
+                          {k.note && <span className="text-[10px] text-violet-300/60 bg-violet-500/10 px-1.5 py-0.5 rounded">{k.note}</span>}
+                        </div>
+                        <p className="text-xs text-cyan-300/50 font-mono">{k.key_prefix}...</p>
+                        <p className="text-xs text-[var(--text-dim)]">
+                          User: {(k.profiles as { email: string } | null)?.email || k.user_id.slice(0, 8)}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          onClick={() => handleToggleCustomKey(k.id, !k.is_active)}
+                          className={`text-[11px] px-2.5 py-1 rounded-lg font-medium transition-colors ${
+                            k.is_active ? "badge-success" : "badge-error"
+                          }`}
+                        >
+                          {k.is_active ? "Active" : "Inactive"}
+                        </button>
+                        <button
+                          onClick={() => handleDeleteCustomKey(k.id)}
+                          className="text-[11px] px-2.5 py-1 rounded-lg font-medium transition-colors"
+                          style={{ background: "rgba(239, 68, 68, 0.08)", border: "1px solid rgba(239, 68, 68, 0.15)", color: "#ef4444" }}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--text-muted)]">
+                      {k.custom_credits !== null && (
+                        <span>Credits: <span className="text-white/70">{k.custom_credits.toLocaleString()}</span></span>
+                      )}
+                      {k.max_context !== null && (
+                        <span>Context: <span className="text-white/70">{(k.max_context / 1024).toFixed(0)}k</span></span>
+                      )}
+                      {k.daily_request_limit !== null && (
+                        <span>Daily: <span className="text-white/70">{k.daily_request_limit}/day</span></span>
+                      )}
+                      {k.rate_limit_seconds !== null && (
+                        <span>Rate: <span className="text-white/70">{k.rate_limit_seconds}s</span></span>
+                      )}
+                      {k.allowed_providers && (
+                        <span>Providers: <span className="text-white/70">{k.allowed_providers.join(", ")}</span></span>
+                      )}
+                      {k.expires_at && (
+                        <span>Expires: <span className={`${new Date(k.expires_at) < new Date() ? "text-red-400" : "text-white/70"}`}>
+                          {new Date(k.expires_at).toLocaleDateString()}
+                        </span></span>
+                      )}
+                      {k.last_used && (
+                        <span>Last used: <span className="text-white/70">{new Date(k.last_used).toLocaleDateString()}</span></span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
