@@ -272,36 +272,22 @@ export async function POST(req: NextRequest) {
       if (gmDailyRequests > 0) {
         const todayStart = new Date();
         todayStart.setUTCHours(0, 0, 0, 0);
-        const { count: gmCount, error: gmErr } = await supabase
+        const { data: premiumSum, error: premiumErr } = await supabase
           .from("usage_logs")
-          .select("*", { count: "exact", head: true })
+          .select("premium_cost")
           .eq("user_id", keyInfo.userId)
-          .like("model_id", "gm/%")
+          .or("model_id.like.gm/%,model_id.like.c/%,model_id.like.an/%")
           .gte("created_at", todayStart.toISOString());
 
-        const { count: cCount, error: cErr } = await supabase
-          .from("usage_logs")
-          .select("*", { count: "exact", head: true })
-          .eq("user_id", keyInfo.userId)
-          .like("model_id", "c/%")
-          .gte("created_at", todayStart.toISOString());
-
-        const { count: anCount, error: anErr } = await supabase
-          .from("usage_logs")
-          .select("*", { count: "exact", head: true })
-          .eq("user_id", keyInfo.userId)
-          .like("model_id", "an/%")
-          .gte("created_at", todayStart.toISOString());
-
-        if (gmErr || cErr || anErr) {
+        if (premiumErr) {
           return NextResponse.json(
             { error: { message: "Failed to check rate limit", type: "server_error" } },
             { status: 500 }
           );
         }
 
-        const totalPremiumUsed = (gmCount ?? 0) + (cCount ?? 0) + (anCount ?? 0);
-        if (totalPremiumUsed >= gmDailyRequests) {
+        const totalPremiumUsed = (premiumSum ?? []).reduce((sum: number, row: { premium_cost: number }) => sum + Number(row.premium_cost), 0);
+        if (totalPremiumUsed + Number(model.premium_request_cost ?? 1) > gmDailyRequests) {
           return NextResponse.json(
             { error: { message: `Daily premium limit reached (${gmDailyRequests} requests/day for your plan). Upgrade for more.`, type: "rate_limit" } },
             { status: 429 }
@@ -493,6 +479,7 @@ export async function POST(req: NextRequest) {
 
     // 10. Log usage (always log, even for free-pool — needed for token tracking)
     const durationMs = Date.now() - startTime;
+    const premiumCost = isPremiumProvider ? Number(model.premium_request_cost ?? 1) : 0;
     await supabase.from("usage_logs").insert({
       user_id: keyInfo.userId,
       api_key_id: keyInfo.keyId,
@@ -504,6 +491,7 @@ export async function POST(req: NextRequest) {
       cost_usd: costUsd,
       status: "success",
       duration_ms: durationMs,
+      premium_cost: premiumCost,
     });
 
     if (!isFreePool) {
@@ -533,7 +521,7 @@ export async function POST(req: NextRequest) {
 async function handleStreamingResponse(
   providerResponse: Response,
   keyInfo: { userId: string; keyId: string; credits: number; isCustom: boolean; customCredits: number | null },
-  model: { id: string; provider: string; cost_per_m_input: number; cost_per_m_output: number; margin: number },
+  model: { id: string; provider: string; cost_per_m_input: number; cost_per_m_output: number; margin: number; premium_request_cost?: number },
   startTime: number,
   estimatedPromptTokens: number = 0,
   isFreePool: boolean = false
@@ -620,6 +608,8 @@ async function handleStreamingResponse(
       }
 
       const durationMs = Date.now() - startTime;
+      const isPremium = model.provider === "gameron" || model.provider === "lightningzeus" || model.provider === "antigravity";
+      const streamPremiumCost = isPremium ? Number(model.premium_request_cost ?? 1) : 0;
       await supabase.from("usage_logs").insert({
         user_id: keyInfo.userId,
         api_key_id: keyInfo.keyId,
@@ -631,6 +621,7 @@ async function handleStreamingResponse(
         cost_usd: costUsd,
         status: wasCharged ? "success" : "billing_failed",
         duration_ms: durationMs,
+        premium_cost: streamPremiumCost,
       });
 
       if (wasCharged && !isFreePool) {

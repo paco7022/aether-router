@@ -42,24 +42,12 @@ export default async function BillingPage() {
   const todayStart = new Date();
   todayStart.setUTCHours(0, 0, 0, 0);
 
-  const [{ count: gmUsedToday }, { count: cUsedToday }, { count: anUsedToday }, { data: currentPlan }] = await Promise.all([
+  const [{ data: premiumRows }, { data: currentPlan }] = await Promise.all([
     admin
       .from("usage_logs")
-      .select("*", { count: "exact", head: true })
+      .select("premium_cost")
       .eq("user_id", user!.id)
-      .like("model_id", "gm/%")
-      .gte("created_at", todayStart.toISOString()),
-    admin
-      .from("usage_logs")
-      .select("*", { count: "exact", head: true })
-      .eq("user_id", user!.id)
-      .like("model_id", "c/%")
-      .gte("created_at", todayStart.toISOString()),
-    admin
-      .from("usage_logs")
-      .select("*", { count: "exact", head: true })
-      .eq("user_id", user!.id)
-      .like("model_id", "an/%")
+      .or("model_id.like.gm/%,model_id.like.c/%,model_id.like.an/%")
       .gte("created_at", todayStart.toISOString()),
     admin
       .from("plans")
@@ -67,6 +55,7 @@ export default async function BillingPage() {
       .eq("id", profile?.plan_id || "free")
       .single(),
   ]);
+  const premiumUsedToday = (premiumRows ?? []).reduce((sum: number, row: { premium_cost: number }) => sum + Number(row.premium_cost), 0);
 
   const permanentCredits = profile?.credits || 0;
   const dailyCredits = profile?.daily_credits || 0;
@@ -135,7 +124,7 @@ export default async function BillingPage() {
       {/* GM Requests */}
       <div className="mb-8">
         <GmRequestsCard
-          used={(gmUsedToday ?? 0) + (cUsedToday ?? 0) + (anUsedToday ?? 0)}
+          used={premiumUsedToday}
           limit={currentPlan?.gm_daily_requests ?? 15}
           claimed={gmClaimedToday}
         />
