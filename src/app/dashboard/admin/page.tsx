@@ -245,12 +245,14 @@ export default function AdminPage() {
 
   async function handleSetPlan() {
     if (!selectedUser) return;
-    await api("POST", undefined, {
+    const result = await api("POST", undefined, {
       action: "set_plan",
       user_id: selectedUser.id,
       plan_id: planSelect,
     });
-    setSelectedUser({ ...selectedUser, plan_id: planSelect });
+    const newDailyCredits = result.daily_credits ?? selectedUser.daily_credits;
+    setSelectedUser({ ...selectedUser, plan_id: planSelect, daily_credits: newDailyCredits });
+    setDailyCreditInput(String(newDailyCredits));
     loadUsers(userSearch);
   }
 

@@ -6,25 +6,24 @@ const RETRY_DELAY_MS = 1000;
 /**
  * Key rotation system for Gameron.
  *
- * Primary key   (500M tokens): handles 5-15 concurrent users.
- * Secondary key (100M tokens): fallback, up to 5 concurrent users.
- *
- * Routing logic:
- *  - While primary has < 15 active requests  -> use primary.
- *  - If primary is at 15 and secondary has room (< 5) -> use secondary.
- *  - If both are full -> still use primary (best-effort, has the larger pool).
+ * Round-robin 1:1 between primary and secondary keys.
+ * If secondary reaches > 2 concurrent requests, overflow to primary.
+ * If only one key is configured, use it exclusively.
  */
 
 interface KeySlot {
   key: string;
   active: number;       // current in-flight requests
-  maxConcurrent: number; // soft cap
 }
+
+const SECONDARY_MAX_CONCURRENT = 2;
 
 const slots: { primary: KeySlot | null; secondary: KeySlot | null } = {
   primary: null,
   secondary: null,
 };
+
+let roundRobinNext: "primary" | "secondary" = "secondary";
 
 function initSlots() {
   if (slots.primary) return; // already initialised
@@ -33,10 +32,10 @@ function initSlots() {
   const secondaryKey = process.env.GAMERON_SECONDARY_KEY;
 
   if (primaryKey) {
-    slots.primary = { key: primaryKey, active: 0, maxConcurrent: 15 };
+    slots.primary = { key: primaryKey, active: 0 };
   }
   if (secondaryKey) {
-    slots.secondary = { key: secondaryKey, active: 0, maxConcurrent: 5 };
+    slots.secondary = { key: secondaryKey, active: 0 };
   }
 }
 
@@ -50,14 +49,16 @@ function pickSlot(): KeySlot {
   if (!p) return s!;
   if (!s) return p;
 
-  // Primary still has room -> use it
-  if (p.active < p.maxConcurrent) return p;
+  // Round-robin: alternate between primary and secondary
+  const candidate = roundRobinNext;
+  roundRobinNext = roundRobinNext === "primary" ? "secondary" : "primary";
 
-  // Primary full, secondary has room -> fallback
-  if (s.active < s.maxConcurrent) return s;
+  // If secondary was chosen but has > 2 concurrent, overflow to primary
+  if (candidate === "secondary" && s.active >= SECONDARY_MAX_CONCURRENT) {
+    return p;
+  }
 
-  // Both full -> best-effort on primary (larger token pool)
-  return p;
+  return candidate === "primary" ? p : s;
 }
 
 export const gameronProvider: Provider = {

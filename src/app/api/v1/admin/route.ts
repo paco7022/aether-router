@@ -245,9 +245,22 @@ export async function POST(req: NextRequest) {
     // ── User plan management ──
     case "set_plan": {
       const { user_id, plan_id } = body;
-      const { error } = await supabase.from("profiles").update({ plan_id }).eq("id", user_id);
+
+      // Fetch the plan to get its daily credits
+      const { data: plan } = await supabase
+        .from("plans")
+        .select("credits_per_day")
+        .eq("id", plan_id)
+        .single();
+
+      const update: Record<string, unknown> = { plan_id };
+      if (plan) {
+        update.daily_credits = plan.credits_per_day;
+      }
+
+      const { error } = await supabase.from("profiles").update(update).eq("id", user_id);
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-      return NextResponse.json({ ok: true });
+      return NextResponse.json({ ok: true, daily_credits: plan?.credits_per_day ?? null });
     }
 
     // ── API key management ──
