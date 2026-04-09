@@ -260,6 +260,14 @@ export async function POST(req: NextRequest) {
 
       const { error } = await supabase.from("profiles").update(update).eq("id", user_id);
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+      // Also update the active subscription so claim_daily_credits uses the correct plan
+      await supabase
+        .from("subscriptions")
+        .update({ plan_id })
+        .eq("user_id", user_id)
+        .eq("status", "active");
+
       return NextResponse.json({ ok: true, daily_credits: plan?.credits_per_day ?? null });
     }
 
