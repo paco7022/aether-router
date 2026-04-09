@@ -8,7 +8,7 @@ export async function GET() {
 
   const { data: models, error } = await supabase
     .from("models")
-    .select("id, display_name, provider, context_length")
+    .select("id")
     .eq("is_active", true)
     .order("id");
 
@@ -24,9 +24,7 @@ export async function GET() {
     id: m.id,
     object: "model",
     created: 0,
-    owned_by: m.provider,
-    name: m.display_name,
-    context_length: m.context_length,
+    owned_by: "aether-router",
   }));
 
   return NextResponse.json({
