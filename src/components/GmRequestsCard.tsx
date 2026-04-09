@@ -49,7 +49,7 @@ export function GmRequestsCard({
         <div>
           <h4 className="font-semibold text-sm text-white/85">Premium Model Requests</h4>
           <p className="text-xs text-[var(--text-muted)]">
-            Daily usage for premium models (gm/ and c/)
+            Daily usage for premium models (gm/, c/ and an/)
           </p>
         </div>
         <div className="flex gap-1">
@@ -73,13 +73,23 @@ export function GmRequestsCard({
           >
             c/
           </span>
+          <span
+            className="text-[10px] px-2.5 py-0.5 rounded-full font-medium"
+            style={{
+              background: "rgba(245, 158, 11, 0.1)",
+              border: "1px solid rgba(245, 158, 11, 0.15)",
+              color: "rgba(251, 191, 36, 0.9)",
+            }}
+          >
+            an/
+          </span>
         </div>
       </div>
 
       {needsClaim ? (
         <div className="text-center py-4">
           <p className="text-sm text-[var(--text-muted)] mb-3">
-            Claim your daily premium requests to use gm/ models.
+            Claim your daily premium requests to use gm/ and an/ models.
           </p>
           <button
             onClick={handleClaim}

@@ -84,7 +84,7 @@ interface Stats {
   topUsersToday: { user_id: string; email: string; requests: number }[];
 }
 
-const ALL_PROVIDERS = ["gameron", "lightningzeus", "airforce", "gemini-cli"];
+const ALL_PROVIDERS = ["gameron", "lightningzeus", "airforce", "gemini-cli", "antigravity"];
 
 async function api(method: "GET" | "POST", params?: Record<string, string>, body?: unknown) {
   if (method === "GET") {

@@ -42,7 +42,7 @@ export default async function BillingPage() {
   const todayStart = new Date();
   todayStart.setUTCHours(0, 0, 0, 0);
 
-  const [{ count: gmUsedToday }, { count: cUsedToday }, { data: currentPlan }] = await Promise.all([
+  const [{ count: gmUsedToday }, { count: cUsedToday }, { count: anUsedToday }, { data: currentPlan }] = await Promise.all([
     admin
       .from("usage_logs")
       .select("*", { count: "exact", head: true })
@@ -54,6 +54,12 @@ export default async function BillingPage() {
       .select("*", { count: "exact", head: true })
       .eq("user_id", user!.id)
       .like("model_id", "c/%")
+      .gte("created_at", todayStart.toISOString()),
+    admin
+      .from("usage_logs")
+      .select("*", { count: "exact", head: true })
+      .eq("user_id", user!.id)
+      .like("model_id", "an/%")
       .gte("created_at", todayStart.toISOString()),
     admin
       .from("plans")
@@ -129,7 +135,7 @@ export default async function BillingPage() {
       {/* GM Requests */}
       <div className="mb-8">
         <GmRequestsCard
-          used={(gmUsedToday ?? 0) + (cUsedToday ?? 0)}
+          used={(gmUsedToday ?? 0) + (cUsedToday ?? 0) + (anUsedToday ?? 0)}
           limit={currentPlan?.gm_daily_requests ?? 15}
           claimed={gmClaimedToday}
         />

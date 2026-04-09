@@ -98,7 +98,7 @@ export async function POST(req: NextRequest) {
   const provider = getProvider(model.provider);
   if (!provider) {
     return NextResponse.json(
-      { error: { message: `Provider '${model.provider}' not available`, type: "server_error" } },
+      { error: { message: "This model is currently unavailable.", type: "server_error" } },
       { status: 503 }
     );
   }
@@ -130,13 +130,13 @@ export async function POST(req: NextRequest) {
     // Provider allowlist
     if (keyInfo.allowedProviders && !keyInfo.allowedProviders.includes(model.provider)) {
       return NextResponse.json(
-        { error: { message: `This key does not have access to ${model.provider} models.`, type: "plan_restricted" } },
+        { error: { message: "This key does not have access to this model.", type: "plan_restricted" } },
         { status: 403 }
       );
     }
 
     // Per-key rate limit (defaults to 60s for premium, no limit for non-premium)
-    const isPremium = model.provider === "gameron" || model.provider === "lightningzeus";
+    const isPremium = model.provider === "gameron" || model.provider === "lightningzeus" || model.provider === "antigravity";
     const rlSeconds = keyInfo.rateLimitSeconds ?? (isPremium ? 60 : 0);
     if (rlSeconds > 0) {
       const windowAgo = new Date(Date.now() - rlSeconds * 1000).toISOString();
@@ -205,7 +205,7 @@ export async function POST(req: NextRequest) {
     }
   } else {
     // 5.5b-normal. Premium plan limits (requests/day + context cap) — applies to gameron AND lightningzeus
-    const isPremiumProvider = model.provider === "gameron" || model.provider === "lightningzeus";
+    const isPremiumProvider = model.provider === "gameron" || model.provider === "lightningzeus" || model.provider === "antigravity";
     if (isPremiumProvider) {
       // Rate limit: 1 request per minute per user on premium models
       const oneMinuteAgo = new Date(Date.now() - 60_000).toISOString();
@@ -213,7 +213,7 @@ export async function POST(req: NextRequest) {
         .from("usage_logs")
         .select("created_at")
         .eq("user_id", keyInfo.userId)
-        .or("model_id.like.gm/%,model_id.like.c/%")
+        .or("model_id.like.gm/%,model_id.like.c/%,model_id.like.an/%")
         .gte("created_at", oneMinuteAgo)
         .limit(1)
         .maybeSingle();
@@ -233,16 +233,16 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // Block gm/ models for free and basic ($3) tiers — they only get c/ models
-      if (model.provider === "gameron" && (keyInfo.planId === "free" || keyInfo.planId === "basic")) {
+      // Block gm/ and an/ models for free and basic ($3) tiers — they only get c/ models
+      if ((model.provider === "gameron" || model.provider === "antigravity") && (keyInfo.planId === "free" || keyInfo.planId === "basic")) {
         return NextResponse.json(
           { error: { message: "Oops, it seems that something has gone wrong, you do not have access to this model, try with c/ or upgrade your plan.", type: "plan_restricted" } },
           { status: 403 }
         );
       }
 
-      // Gameron-only: require daily claim (only for plans that have gm/ access)
-      if (model.provider === "gameron") {
+      // Gameron/Antigravity: require daily claim (only for plans that have gm/ access)
+      if (model.provider === "gameron" || model.provider === "antigravity") {
         const today = new Date().toISOString().split("T")[0];
         if (keyInfo.gmClaimedDate !== today) {
           return NextResponse.json(
@@ -286,14 +286,21 @@ export async function POST(req: NextRequest) {
           .like("model_id", "c/%")
           .gte("created_at", todayStart.toISOString());
 
-        if (gmErr || cErr) {
+        const { count: anCount, error: anErr } = await supabase
+          .from("usage_logs")
+          .select("*", { count: "exact", head: true })
+          .eq("user_id", keyInfo.userId)
+          .like("model_id", "an/%")
+          .gte("created_at", todayStart.toISOString());
+
+        if (gmErr || cErr || anErr) {
           return NextResponse.json(
             { error: { message: "Failed to check rate limit", type: "server_error" } },
             { status: 500 }
           );
         }
 
-        const totalPremiumUsed = (gmCount ?? 0) + (cCount ?? 0);
+        const totalPremiumUsed = (gmCount ?? 0) + (cCount ?? 0) + (anCount ?? 0);
         if (totalPremiumUsed >= gmDailyRequests) {
           return NextResponse.json(
             { error: { message: `Daily premium limit reached (${gmDailyRequests} requests/day for your plan). Upgrade for more.`, type: "rate_limit" } },
@@ -302,7 +309,7 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      if (gmMaxContext > 0 && model.provider === "gameron") {
+      if (gmMaxContext > 0 && (model.provider === "gameron" || model.provider === "antigravity")) {
         const estimatedContext = estimatePromptTokens(messages);
         if (estimatedContext > gmMaxContext) {
           return NextResponse.json(
@@ -383,14 +390,13 @@ export async function POST(req: NextRequest) {
         userMessage = `Model request failed (${status}). Please try again.`;
       }
 
-      console.error(`[${model.provider}] Upstream error ${status}: ${errorText}`);
+      console.error(`Upstream error ${status}: ${errorText}`);
 
       return NextResponse.json(
         {
           error: {
             message: userMessage,
             type: "upstream_error",
-            provider: model.provider,
           },
         },
         { status: status >= 500 ? 502 : status }

@@ -107,10 +107,10 @@ print(response.choices[0].message.content)`}
 
       {/* Gameron Models */}
       <section className="mb-10">
-        <h3 className="text-xl font-bold text-white/85 mb-4">Premium Models (gm/)</h3>
+        <h3 className="text-xl font-bold text-white/85 mb-4">Premium Models (gm/, an/)</h3>
         <div className="glass-card shimmer-line p-5 space-y-3">
           <p className="text-sm text-white/80">
-            Models prefixed with <code className="text-violet-400 font-mono text-xs">gm/</code> are premium models with additional restrictions:
+            Models prefixed with <code className="text-violet-400 font-mono text-xs">gm/</code> or <code className="text-amber-400 font-mono text-xs">an/</code> are premium models with additional restrictions:
           </p>
           <ul className="text-sm space-y-2 ml-4 list-disc text-[var(--text-muted)]">
             <li>You must <strong className="text-white/80">claim daily requests</strong> from the Billing page before using them each day.</li>

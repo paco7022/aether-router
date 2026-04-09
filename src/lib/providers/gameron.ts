@@ -6,8 +6,9 @@ const RETRY_DELAY_MS = 1000;
 /**
  * Key rotation system for Gameron.
  *
- * Round-robin 1:1 between primary and secondary keys.
- * If secondary reaches > 2 concurrent requests, overflow to primary.
+ * Primary key handles up to 5 simultaneous requests.
+ * If primary is full (>= 5 in-flight), overflow to secondary key.
+ * After secondary handles the request, traffic returns to primary.
  * If only one key is configured, use it exclusively.
  */
 
@@ -16,14 +17,13 @@ interface KeySlot {
   active: number;       // current in-flight requests
 }
 
+const PRIMARY_MAX_CONCURRENT = 5;
 const SECONDARY_MAX_CONCURRENT = 2;
 
 const slots: { primary: KeySlot | null; secondary: KeySlot | null } = {
   primary: null,
   secondary: null,
 };
-
-let roundRobinNext: "primary" | "secondary" = "secondary";
 
 function initSlots() {
   if (slots.primary) return; // already initialised
@@ -49,16 +49,12 @@ function pickSlot(): KeySlot {
   if (!p) return s!;
   if (!s) return p;
 
-  // Round-robin: alternate between primary and secondary
-  const candidate = roundRobinNext;
-  roundRobinNext = roundRobinNext === "primary" ? "secondary" : "primary";
-
-  // If secondary was chosen but has > 2 concurrent, overflow to primary
-  if (candidate === "secondary" && s.active >= SECONDARY_MAX_CONCURRENT) {
-    return p;
+  // Primary handles up to 5 concurrent requests; overflow to secondary if it has capacity
+  if (p.active >= PRIMARY_MAX_CONCURRENT && s.active < SECONDARY_MAX_CONCURRENT) {
+    return s;
   }
 
-  return candidate === "primary" ? p : s;
+  return p;
 }
 
 export const gameronProvider: Provider = {
