@@ -116,6 +116,12 @@ print(response.choices[0].message.content)`}
             <li>You must <strong className="text-white/80">claim daily requests</strong> from the Billing page before using them each day.</li>
             <li>Each plan has a <strong className="text-white/80">daily request limit</strong> — upgrade your plan for more.</li>
             <li>Each plan has a <strong className="text-white/80">max context length</strong> — longer conversations may be rejected.</li>
+            <li>
+              <strong className="text-white/80">Not all models cost the same:</strong>{" "}
+              Claude models use <span className="text-red-400">2 requests</span> per call,
+              Gemini Pro uses <span className="text-amber-400">1 request</span>,
+              and Gemini Flash uses <span className="text-green-400">0.5 requests</span>.
+            </li>
           </ul>
         </div>
       </section>

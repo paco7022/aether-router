@@ -25,6 +25,7 @@ export default async function ModelsPage() {
               <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider">Model</th>
               <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider text-right">Input / 1M tokens</th>
               <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider text-right">Output / 1M tokens</th>
+              <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider text-right">Premium Cost</th>
               <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider text-right">Credits/M (input)</th>
             </tr>
           </thead>
@@ -45,6 +46,19 @@ export default async function ModelsPage() {
                   </td>
                   <td className="px-5 py-3.5 text-right text-white/70">
                     ${priceOutput.toFixed(4)}
+                  </td>
+                  <td className="px-5 py-3.5 text-right text-white/70">
+                    {Number(model.premium_request_cost) > 0 ? (
+                      <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full" style={{
+                        background: Number(model.premium_request_cost) >= 2 ? "rgba(239, 68, 68, 0.1)" : Number(model.premium_request_cost) >= 1 ? "rgba(245, 158, 11, 0.1)" : "rgba(34, 197, 94, 0.1)",
+                        border: `1px solid ${Number(model.premium_request_cost) >= 2 ? "rgba(239, 68, 68, 0.2)" : Number(model.premium_request_cost) >= 1 ? "rgba(245, 158, 11, 0.2)" : "rgba(34, 197, 94, 0.2)"}`,
+                        color: Number(model.premium_request_cost) >= 2 ? "rgba(252, 165, 165, 0.9)" : Number(model.premium_request_cost) >= 1 ? "rgba(251, 191, 36, 0.9)" : "rgba(134, 239, 172, 0.9)",
+                      }}>
+                        {Number(model.premium_request_cost) === 1 ? "1 req" : `${Number(model.premium_request_cost)} req`}
+                      </span>
+                    ) : (
+                      <span className="text-[var(--text-muted)]">—</span>
+                    )}
                   </td>
                   <td className="px-5 py-3.5 text-right font-semibold aurora-text">
                     {creditsInput.toLocaleString()}

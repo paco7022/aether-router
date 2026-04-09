@@ -147,6 +147,10 @@ export function GmRequestsCard({
               <span className="text-violet-400 font-medium">{message}</span>
             )}
           </div>
+
+          <p className="text-[10px] text-[var(--text-muted)] mt-2 leading-relaxed">
+            Claude models use <span className="text-red-400/80 font-medium">2 requests</span> per call · Gemini Pro uses <span className="text-amber-400/80 font-medium">1 request</span> · Gemini Flash uses <span className="text-green-400/80 font-medium">0.5 requests</span>
+          </p>
         </>
       )}
     </div>
