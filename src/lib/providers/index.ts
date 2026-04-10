@@ -4,6 +4,7 @@ import { geminiCliProvider } from "./gemini-cli";
 import { gameronProvider } from "./gameron";
 import { lightningzeusProvider } from "./lightningzeus";
 import { antigravityProvider } from "./antigravity";
+import { nanoProvider } from "./nano";
 
 const providers: Record<string, Provider> = {
   airforce: airforceProvider,
@@ -11,6 +12,7 @@ const providers: Record<string, Provider> = {
   gameron: gameronProvider,
   lightningzeus: lightningzeusProvider,
   antigravity: antigravityProvider,
+  nano: nanoProvider,
 };
 
 export function getProvider(name: string): Provider | undefined {

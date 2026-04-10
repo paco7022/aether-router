@@ -9,6 +9,7 @@ export const runtime = "nodejs";
 export const maxDuration = 120;
 
 const DEEPSEEK_DAILY_TOKEN_LIMIT = 200_000;
+const NANO_FREE_TOKEN_ALLOWANCE = 200_000;
 
 function extractCompletionText(payload: unknown): string {
   const data = payload as { choices?: Array<{ message?: { content?: unknown } }> };
@@ -309,7 +310,29 @@ export async function POST(req: NextRequest) {
 
   // 6. Forward to provider (use upstream_model_id for the real provider name)
   const upstreamModel = model.upstream_model_id || modelId;
-  const isFreePool = upstreamModel === "deepseek-v3.2";
+  let isFreePool = upstreamModel === "deepseek-v3.2";
+
+  // Nano: every user gets 200k daily free tokens across all na/ models,
+  // resets at UTC midnight, then pay-as-you-go at the model's normal rate
+  // (5% margin over upstream).
+  if (model.provider === "nano") {
+    const todayStart = new Date();
+    todayStart.setUTCHours(0, 0, 0, 0);
+    const { data: nanoUsage } = await supabase
+      .from("usage_logs")
+      .select("total_tokens")
+      .eq("user_id", keyInfo.userId)
+      .like("model_id", "na/%")
+      .gte("created_at", todayStart.toISOString());
+
+    const nanoTokensUsed = (nanoUsage || []).reduce(
+      (sum, r) => sum + (r.total_tokens || 0),
+      0
+    );
+    if (nanoTokensUsed < NANO_FREE_TOKEN_ALLOWANCE) {
+      isFreePool = true;
+    }
+  }
 
   // 5.6. Pre-check credits before forwarding (skip for free-pool models)
   if (!isFreePool) {
