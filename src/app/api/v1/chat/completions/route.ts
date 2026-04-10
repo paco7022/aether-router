@@ -104,6 +104,11 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const isPremiumProvider =
+    model.provider === "gameron" ||
+    model.provider === "lightningzeus" ||
+    model.provider === "antigravity";
+
   // 5.5a. LightningZeus global pool check (c/ models)
   if (model.provider === "lightningzeus") {
     const today = new Date().toISOString().split("T")[0];
@@ -206,7 +211,6 @@ export async function POST(req: NextRequest) {
     }
   } else {
     // 5.5b-normal. Premium plan limits (requests/day + context cap) — applies to gameron AND lightningzeus
-    const isPremiumProvider = model.provider === "gameron" || model.provider === "lightningzeus" || model.provider === "antigravity";
     if (isPremiumProvider) {
       // Rate limit: 1 request per minute per user on premium models
       const oneMinuteAgo = new Date(Date.now() - 60_000).toISOString();
