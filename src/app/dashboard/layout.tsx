@@ -59,9 +59,8 @@ export default async function DashboardLayout({
           <p className="leading-relaxed">
             <span className="font-semibold text-amber-200/95">Heads up:</span>{" "}
             <code className="font-mono text-[11px] px-1 py-0.5 rounded bg-white/[0.04]">gm/</code>,{" "}
-            <code className="font-mono text-[11px] px-1 py-0.5 rounded bg-white/[0.04]">c/</code>,{" "}
-            <code className="font-mono text-[11px] px-1 py-0.5 rounded bg-white/[0.04]">an/</code> and{" "}
-            <code className="font-mono text-[11px] px-1 py-0.5 rounded bg-white/[0.04]">na/</code>{" "}
+            <code className="font-mono text-[11px] px-1 py-0.5 rounded bg-white/[0.04]">c/</code> and{" "}
+            <code className="font-mono text-[11px] px-1 py-0.5 rounded bg-white/[0.04]">an/</code>{" "}
             models are routed through third-party providers. They come with{" "}
             <span className="font-semibold">no uptime guarantee</span>, are{" "}
             <span className="font-semibold">not eligible for refunds</span>, and may stop working at any time
