@@ -18,6 +18,32 @@ export default async function ModelsPage() {
         </p>
       </div>
 
+      {/* Free daily allowance notice */}
+      <div
+        className="mb-6 rounded-lg px-4 py-3 text-xs flex items-start gap-3"
+        style={{
+          background: "linear-gradient(135deg, rgba(34, 197, 94, 0.08), rgba(34, 211, 238, 0.06))",
+          border: "1px solid rgba(34, 197, 94, 0.2)",
+          color: "rgba(167, 243, 208, 0.95)",
+        }}
+      >
+        <span aria-hidden className="font-mono text-emerald-300/90 pt-0.5">$</span>
+        <div className="leading-relaxed space-y-1">
+          <p>
+            <span className="font-semibold text-emerald-200/95">Free daily allowance:</span> the first{" "}
+            <span className="font-semibold">200,000 tokens per day</span> on{" "}
+            <code className="font-mono text-[11px] px-1 py-0.5 rounded bg-white/[0.04]">na/</code>{" "}
+            models are free for every user (backed by a shared 10M tokens/day global pool). Once
+            you cross that daily threshold, further requests are billed at the normal credit rates shown below.
+          </p>
+          <p>
+            <code className="font-mono text-[11px] px-1 py-0.5 rounded bg-white/[0.04]">a/deepseek-v3.2</code>{" "}
+            is fully free with a hard cap of 200k tokens/day per user and 10M tokens/day globally.
+          </p>
+          <p className="text-emerald-200/70">All daily counters reset at 00:00 UTC.</p>
+        </div>
+      </div>
+
       <div className="glass-card shimmer-line overflow-hidden">
         <table className="w-full text-sm aurora-table">
           <thead>

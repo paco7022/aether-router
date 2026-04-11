@@ -316,23 +316,28 @@ export async function POST(req: NextRequest) {
   // 6. Forward to provider (use upstream_model_id for the real provider name)
   const upstreamModel = model.upstream_model_id || modelId;
 
-  // Free pool gating: nano (na/) and airforce deepseek-v3.2 are fully free,
-  // capped at 200k tokens/day per user AND a 10M tokens/day global pool.
-  // Both reset at UTC midnight.
+  // Free pool gating.
+  //
+  // nano (na/):           first 200k tokens/day per user are free (under a
+  //                       10M/day global free pool). Once either cap is hit,
+  //                       the request falls through to pay-as-you-go at the
+  //                       model's normal rate.
+  // airforce deepseek-v3.2: fully free forever. Hard-capped at 200k/day per
+  //                       user and 10M/day globally — crossing either returns
+  //                       429. Never charges credits.
+  //
+  // All pools reset at UTC midnight.
   let freePoolName: string | null = null;
-  if (model.provider === "nano") {
-    freePoolName = "nano";
-  } else if (upstreamModel === "deepseek-v3.2") {
-    freePoolName = "deepseek-v3.2";
-  }
-  const isFreePool = freePoolName !== null;
+  let isFreePool = false;
 
-  if (freePoolName) {
+  if (model.provider === "nano" || upstreamModel === "deepseek-v3.2") {
+    freePoolName = model.provider === "nano" ? "nano" : "deepseek-v3.2";
+
     const todayStart = new Date();
     todayStart.setUTCHours(0, 0, 0, 0);
     const today = todayStart.toISOString().split("T")[0];
 
-    // Global daily pool check
+    // Global daily pool
     const { data: pool } = await supabase
       .from("daily_token_pools")
       .select("used, pool_limit")
@@ -342,20 +347,9 @@ export async function POST(req: NextRequest) {
 
     const globalLimit = Number(pool?.pool_limit ?? GLOBAL_DAILY_TOKEN_POOL);
     const globalUsed = Number(pool?.used ?? 0);
+    const globalExhausted = globalUsed >= globalLimit;
 
-    if (globalUsed >= globalLimit) {
-      return NextResponse.json(
-        {
-          error: {
-            message: `Daily global pool exhausted for ${freePoolName} (${(globalLimit / 1_000_000).toFixed(0)}M tokens/day). Resets at midnight UTC.`,
-            type: "rate_limit",
-          },
-        },
-        { status: 429 }
-      );
-    }
-
-    // Per-user daily cap
+    // Per-user tokens used today against this pool
     let userUsageQuery = supabase
       .from("usage_logs")
       .select("total_tokens")
@@ -372,17 +366,36 @@ export async function POST(req: NextRequest) {
       (sum, r) => sum + (r.total_tokens || 0),
       0
     );
+    const userExhausted = userTokensUsed >= PER_USER_DAILY_TOKEN_LIMIT;
 
-    if (userTokensUsed >= PER_USER_DAILY_TOKEN_LIMIT) {
-      return NextResponse.json(
-        {
-          error: {
-            message: `Daily ${freePoolName} token limit reached (${(PER_USER_DAILY_TOKEN_LIMIT / 1000).toFixed(0)}k tokens/day per user). Resets at midnight UTC.`,
-            type: "rate_limit",
+    if (freePoolName === "deepseek-v3.2") {
+      // Hard caps — 429 when exceeded.
+      if (globalExhausted) {
+        return NextResponse.json(
+          {
+            error: {
+              message: `Daily global pool exhausted for deepseek-v3.2 (${(globalLimit / 1_000_000).toFixed(0)}M tokens/day). Resets at midnight UTC.`,
+              type: "rate_limit",
+            },
           },
-        },
-        { status: 429 }
-      );
+          { status: 429 }
+        );
+      }
+      if (userExhausted) {
+        return NextResponse.json(
+          {
+            error: {
+              message: `Daily deepseek-v3.2 token limit reached (${(PER_USER_DAILY_TOKEN_LIMIT / 1000).toFixed(0)}k tokens/day per user). Resets at midnight UTC.`,
+              type: "rate_limit",
+            },
+          },
+          { status: 429 }
+        );
+      }
+      isFreePool = true;
+    } else {
+      // nano — soft caps. Free when under both limits, otherwise paid.
+      isFreePool = !globalExhausted && !userExhausted;
     }
   }
 
@@ -560,8 +573,10 @@ export async function POST(req: NextRequest) {
       await incrementLightningzeusPool(supabase);
     }
 
-    // Increment daily token pool for free-pool models (nano, deepseek-v3.2)
-    if (freePoolName) {
+    // Increment daily token pool only when the request was actually free.
+    // Paid nano requests (after a user crosses their 200k free threshold)
+    // shouldn't eat into the global free pool.
+    if (freePoolName && isFreePool) {
       await incrementDailyTokenPool(supabase, freePoolName, usage.total_tokens);
     }
 
@@ -696,8 +711,8 @@ async function handleStreamingResponse(
         }
       }
 
-      // Increment daily token pool for free-pool models (nano, deepseek-v3.2)
-      if (freePoolName) {
+      // Increment daily token pool only for requests that were actually free.
+      if (freePoolName && isFreePool) {
         await incrementDailyTokenPool(supabase, freePoolName, totalTokens);
       }
     },
