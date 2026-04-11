@@ -167,6 +167,13 @@ export default function LoginPage() {
         <p className="text-center text-xs text-[var(--text-dim)] mt-6">
           Aether Router is a model proxy. We don&apos;t control model availability or stability.
         </p>
+        <p className="text-center text-xs text-[var(--text-dim)] mt-2">
+          By signing in you agree to our{" "}
+          <Link href="/policies" className="text-violet-400/80 hover:text-violet-300 transition-colors underline">
+            policies
+          </Link>
+          .
+        </p>
       </div>
     </div>
   );

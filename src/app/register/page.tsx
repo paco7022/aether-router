@@ -195,6 +195,14 @@ export default function RegisterPage() {
             </Link>
           </p>
         </form>
+
+        <p className="text-center text-xs text-[var(--text-dim)] mt-6">
+          By creating an account you agree to our{" "}
+          <Link href="/policies" className="text-violet-400/80 hover:text-violet-300 transition-colors underline">
+            policies
+          </Link>
+          , including the no-refund, no-key-sharing, and no-multi-account rules.
+        </p>
       </div>
     </div>
   );

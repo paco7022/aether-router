@@ -1,5 +1,6 @@
 import { createServerSupabase } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { Sidebar } from "@/components/Sidebar";
 import { FingerprintCapture } from "@/components/FingerprintCapture";
 import { isAdmin } from "@/lib/admin";
@@ -64,7 +65,11 @@ export default async function DashboardLayout({
             models are routed through third-party providers. They come with{" "}
             <span className="font-semibold">no uptime guarantee</span>, are{" "}
             <span className="font-semibold">not eligible for refunds</span>, and may stop working at any time
-            without notice. Use them at your own risk.
+            without notice. Use them at your own risk. See the full{" "}
+            <Link href="/policies" className="underline hover:text-amber-100">
+              policies
+            </Link>
+            .
           </p>
         </div>
         {children}
