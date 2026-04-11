@@ -8,8 +8,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
-const DEEPSEEK_DAILY_TOKEN_LIMIT = 200_000;
-const NANO_FREE_TOKEN_ALLOWANCE = 200_000;
+// Free-pool limits shared by nano (na/) and airforce deepseek-v3.2.
+const PER_USER_DAILY_TOKEN_LIMIT = 200_000;
+const GLOBAL_DAILY_TOKEN_POOL = 10_000_000;
 
 function extractCompletionText(payload: unknown): string {
   const data = payload as { choices?: Array<{ message?: { content?: unknown } }> };
@@ -314,27 +315,74 @@ export async function POST(req: NextRequest) {
 
   // 6. Forward to provider (use upstream_model_id for the real provider name)
   const upstreamModel = model.upstream_model_id || modelId;
-  let isFreePool = upstreamModel === "deepseek-v3.2";
 
-  // Nano: every user gets 200k daily free tokens across all na/ models,
-  // resets at UTC midnight, then pay-as-you-go at the model's normal rate
-  // (5% margin over upstream).
+  // Free pool gating: nano (na/) and airforce deepseek-v3.2 are fully free,
+  // capped at 200k tokens/day per user AND a 10M tokens/day global pool.
+  // Both reset at UTC midnight.
+  let freePoolName: string | null = null;
   if (model.provider === "nano") {
+    freePoolName = "nano";
+  } else if (upstreamModel === "deepseek-v3.2") {
+    freePoolName = "deepseek-v3.2";
+  }
+  const isFreePool = freePoolName !== null;
+
+  if (freePoolName) {
     const todayStart = new Date();
     todayStart.setUTCHours(0, 0, 0, 0);
-    const { data: nanoUsage } = await supabase
+    const today = todayStart.toISOString().split("T")[0];
+
+    // Global daily pool check
+    const { data: pool } = await supabase
+      .from("daily_token_pools")
+      .select("used, pool_limit")
+      .eq("pool_name", freePoolName)
+      .eq("pool_date", today)
+      .maybeSingle();
+
+    const globalLimit = Number(pool?.pool_limit ?? GLOBAL_DAILY_TOKEN_POOL);
+    const globalUsed = Number(pool?.used ?? 0);
+
+    if (globalUsed >= globalLimit) {
+      return NextResponse.json(
+        {
+          error: {
+            message: `Daily global pool exhausted for ${freePoolName} (${(globalLimit / 1_000_000).toFixed(0)}M tokens/day). Resets at midnight UTC.`,
+            type: "rate_limit",
+          },
+        },
+        { status: 429 }
+      );
+    }
+
+    // Per-user daily cap
+    let userUsageQuery = supabase
       .from("usage_logs")
       .select("total_tokens")
       .eq("user_id", keyInfo.userId)
-      .like("model_id", "na/%")
       .gte("created_at", todayStart.toISOString());
 
-    const nanoTokensUsed = (nanoUsage || []).reduce(
+    userUsageQuery =
+      freePoolName === "nano"
+        ? userUsageQuery.like("model_id", "na/%")
+        : userUsageQuery.eq("model_id", modelId);
+
+    const { data: userUsage } = await userUsageQuery;
+    const userTokensUsed = (userUsage || []).reduce(
       (sum, r) => sum + (r.total_tokens || 0),
       0
     );
-    if (nanoTokensUsed < NANO_FREE_TOKEN_ALLOWANCE) {
-      isFreePool = true;
+
+    if (userTokensUsed >= PER_USER_DAILY_TOKEN_LIMIT) {
+      return NextResponse.json(
+        {
+          error: {
+            message: `Daily ${freePoolName} token limit reached (${(PER_USER_DAILY_TOKEN_LIMIT / 1000).toFixed(0)}k tokens/day per user). Resets at midnight UTC.`,
+            type: "rate_limit",
+          },
+        },
+        { status: 429 }
+      );
     }
   }
 
@@ -350,31 +398,6 @@ export async function POST(req: NextRequest) {
           { status: 402 }
         );
       }
-    }
-  }
-
-  // Deepseek-v3.2: 200k tokens/day free pool for all users
-  if (upstreamModel === "deepseek-v3.2") {
-    const todayStart = new Date();
-    todayStart.setUTCHours(0, 0, 0, 0);
-    const { data: dsUsage } = await supabase
-      .from("usage_logs")
-      .select("total_tokens")
-      .eq("user_id", keyInfo.userId)
-      .eq("model_id", modelId)
-      .gte("created_at", todayStart.toISOString());
-
-    const tokensUsedToday = (dsUsage || []).reduce((sum, r) => sum + (r.total_tokens || 0), 0);
-    if (tokensUsedToday >= DEEPSEEK_DAILY_TOKEN_LIMIT) {
-      return NextResponse.json(
-        {
-          error: {
-            message: `Daily deepseek-v3.2 token limit reached (${(DEEPSEEK_DAILY_TOKEN_LIMIT / 1000).toFixed(0)}k tokens/day). Resets at midnight UTC.`,
-            type: "rate_limit",
-          },
-        },
-        { status: 429 }
-      );
     }
   }
 
@@ -425,7 +448,8 @@ export async function POST(req: NextRequest) {
         model,
         startTime,
         estPrompt,
-        isFreePool
+        isFreePool,
+        freePoolName
       );
     }
 
@@ -536,6 +560,11 @@ export async function POST(req: NextRequest) {
       await incrementLightningzeusPool(supabase);
     }
 
+    // Increment daily token pool for free-pool models (nano, deepseek-v3.2)
+    if (freePoolName) {
+      await incrementDailyTokenPool(supabase, freePoolName, usage.total_tokens);
+    }
+
     return NextResponse.json(data);
   } catch (error) {
     return NextResponse.json(
@@ -551,7 +580,8 @@ async function handleStreamingResponse(
   model: { id: string; provider: string; cost_per_m_input: number; cost_per_m_output: number; margin: number; premium_request_cost?: number },
   startTime: number,
   estimatedPromptTokens: number = 0,
-  isFreePool: boolean = false
+  isFreePool: boolean = false,
+  freePoolName: string | null = null
 ) {
   const supabase = createAdminClient();
   let totalPromptTokens = 0;
@@ -665,6 +695,11 @@ async function handleStreamingResponse(
           await incrementLightningzeusPool(supabase);
         }
       }
+
+      // Increment daily token pool for free-pool models (nano, deepseek-v3.2)
+      if (freePoolName) {
+        await incrementDailyTokenPool(supabase, freePoolName, totalTokens);
+      }
     },
   });
 
@@ -705,5 +740,38 @@ async function incrementLightningzeusPool(supabase: ReturnType<typeof createAdmi
     await supabase
       .from("lightningzeus_daily_pool")
       .insert({ pool_date: today, used: 1, pool_limit: 3000 });
+  }
+}
+
+async function incrementDailyTokenPool(
+  supabase: ReturnType<typeof createAdminClient>,
+  poolName: string,
+  tokens: number
+) {
+  if (tokens <= 0) return;
+  const today = new Date().toISOString().split("T")[0];
+
+  const { data: existing } = await supabase
+    .from("daily_token_pools")
+    .select("used")
+    .eq("pool_name", poolName)
+    .eq("pool_date", today)
+    .maybeSingle();
+
+  if (existing) {
+    await supabase
+      .from("daily_token_pools")
+      .update({ used: Number(existing.used) + tokens })
+      .eq("pool_name", poolName)
+      .eq("pool_date", today);
+  } else {
+    await supabase
+      .from("daily_token_pools")
+      .insert({
+        pool_name: poolName,
+        pool_date: today,
+        used: tokens,
+        pool_limit: GLOBAL_DAILY_TOKEN_POOL,
+      });
   }
 }
