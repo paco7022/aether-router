@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 
-type Tab = "stats" | "users" | "models" | "plans" | "custom_keys";
+type Tab = "stats" | "users" | "models" | "plans" | "custom_keys" | "events";
 
 interface UserProfile {
   id: string;
@@ -77,6 +77,23 @@ interface CustomKey {
   profiles: { email: string } | null;
 }
 
+interface FreeEvent {
+  id: string;
+  name: string;
+  model_prefix: string;
+  target_plan_ids: string[] | null;
+  starts_at: string;
+  ends_at: string;
+  token_pool_limit: number;
+  token_pool_used: number;
+  per_user_msg_limit: number;
+  max_context: number;
+  rate_limit_seconds: number;
+  is_active: boolean;
+  created_by: string | null;
+  created_at: string;
+}
+
 interface Stats {
   totalUsers: number;
   totalRequests: number;
@@ -124,6 +141,19 @@ export default function AdminPage() {
 
   // Plans
   const [plans, setPlans] = useState<Plan[]>([]);
+
+  // Events
+  const [events, setEvents] = useState<FreeEvent[]>([]);
+  const [evForm, setEvForm] = useState({
+    name: "",
+    model_prefix: "gm/",
+    target_plan_ids: ["free"] as string[],
+    duration_minutes: "120",
+    token_pool_limit: "5000000",
+    per_user_msg_limit: "20",
+    max_context: "32768",
+    rate_limit_seconds: "120",
+  });
 
   // Custom Keys
   const [customKeys, setCustomKeys] = useState<CustomKey[]>([]);
@@ -180,13 +210,22 @@ export default function AdminPage() {
     setLoading(false);
   }, []);
 
+  const loadEvents = useCallback(async () => {
+    setLoading(true);
+    const data = await api("GET", { action: "events" });
+    if (data.error) setError(data.error);
+    else setEvents(data.events || []);
+    setLoading(false);
+  }, []);
+
   useEffect(() => {
     if (tab === "stats") loadStats();
     else if (tab === "users") loadUsers();
     else if (tab === "models") loadModels();
     else if (tab === "plans") loadPlans();
     else if (tab === "custom_keys") loadCustomKeys();
-  }, [tab, loadStats, loadUsers, loadModels, loadPlans, loadCustomKeys]);
+    else if (tab === "events") loadEvents();
+  }, [tab, loadStats, loadUsers, loadModels, loadPlans, loadCustomKeys, loadEvents]);
 
   async function selectUser(u: UserProfile) {
     setSelectedUser(u);
@@ -312,6 +351,63 @@ export default function AdminPage() {
     setCustomKeys((prev) => prev.filter((k) => k.id !== keyId));
   }
 
+  async function handleCreateEvent() {
+    if (!evForm.name.trim() || !evForm.model_prefix.trim()) {
+      setError("name and model_prefix are required");
+      return;
+    }
+    const payload: Record<string, unknown> = {
+      action: "create_event",
+      name: evForm.name.trim(),
+      model_prefix: evForm.model_prefix.trim(),
+      duration_minutes: Number(evForm.duration_minutes) || 120,
+      token_pool_limit: Number(evForm.token_pool_limit) || 5_000_000,
+      per_user_msg_limit: Number(evForm.per_user_msg_limit) || 0,
+      max_context: Number(evForm.max_context) || 0,
+      rate_limit_seconds: Number(evForm.rate_limit_seconds) || 0,
+    };
+    if (evForm.target_plan_ids.length > 0) {
+      payload.target_plan_ids = evForm.target_plan_ids;
+    }
+    const result = await api("POST", undefined, payload);
+    if (result.error) {
+      setError(result.error);
+    } else {
+      setEvForm({
+        name: "",
+        model_prefix: "gm/",
+        target_plan_ids: ["free"],
+        duration_minutes: "120",
+        token_pool_limit: "5000000",
+        per_user_msg_limit: "20",
+        max_context: "32768",
+        rate_limit_seconds: "120",
+      });
+      loadEvents();
+    }
+  }
+
+  async function handleEndEvent(eventId: string) {
+    if (!confirm("End this event now? Users will lose free access immediately.")) return;
+    await api("POST", undefined, { action: "end_event", event_id: eventId });
+    loadEvents();
+  }
+
+  async function handleDeleteEvent(eventId: string) {
+    if (!confirm("Delete this event permanently?")) return;
+    await api("POST", undefined, { action: "delete_event", event_id: eventId });
+    loadEvents();
+  }
+
+  function toggleEventPlan(p: string) {
+    setEvForm((prev) => ({
+      ...prev,
+      target_plan_ids: prev.target_plan_ids.includes(p)
+        ? prev.target_plan_ids.filter((x) => x !== p)
+        : [...prev.target_plan_ids, p],
+    }));
+  }
+
   function toggleProvider(p: string) {
     setCkForm((prev) => ({
       ...prev,
@@ -327,7 +423,10 @@ export default function AdminPage() {
     { id: "models", label: "Models" },
     { id: "plans", label: "Plans" },
     { id: "custom_keys", label: "Custom Keys" },
+    { id: "events", label: "Events" },
   ];
+
+  const ALL_PLANS = ["free", "basic", "pro", "creator", "master", "ultra", "ultimate"];
 
   return (
     <div>
@@ -875,6 +974,190 @@ export default function AdminPage() {
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Events Tab */}
+      {tab === "events" && (
+        <div className="space-y-6">
+          {/* Create form */}
+          <div className="glass-card shimmer-line p-5">
+            <h3 className="font-semibold text-sm text-white/85 mb-1">Create Free Event</h3>
+            <p className="text-xs text-[var(--text-muted)] mb-4">
+              Abre temporalmente un pool gratis para un prefix de modelo. Los usuarios del plan seleccionado lo usan sin consumir credits hasta que el pool de tokens se agote.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Nombre *</label>
+                <input type="text" value={evForm.name} onChange={(e) => setEvForm((f) => ({ ...f, name: e.target.value }))}
+                  placeholder="e.g. Gameron Free Night"
+                  className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-white/90 placeholder-[var(--text-dim)]" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Model Prefix *</label>
+                <input type="text" value={evForm.model_prefix} onChange={(e) => setEvForm((f) => ({ ...f, model_prefix: e.target.value }))}
+                  placeholder="e.g. gm/, c/, an/, na/ o model-id exacto"
+                  className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-white/90 placeholder-[var(--text-dim)] font-mono" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Duración (minutos)</label>
+                <input type="number" value={evForm.duration_minutes} onChange={(e) => setEvForm((f) => ({ ...f, duration_minutes: e.target.value }))}
+                  placeholder="120 = 2h"
+                  className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-white/90 placeholder-[var(--text-dim)]" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Token Pool Global</label>
+                <input type="number" value={evForm.token_pool_limit} onChange={(e) => setEvForm((f) => ({ ...f, token_pool_limit: e.target.value }))}
+                  placeholder="5000000 = 5M tokens"
+                  className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-white/90 placeholder-[var(--text-dim)]" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Msgs por usuario (0 = ilimitado)</label>
+                <input type="number" value={evForm.per_user_msg_limit} onChange={(e) => setEvForm((f) => ({ ...f, per_user_msg_limit: e.target.value }))}
+                  placeholder="20"
+                  className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-white/90 placeholder-[var(--text-dim)]" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Max Context (0 = sin límite)</label>
+                <input type="number" value={evForm.max_context} onChange={(e) => setEvForm((f) => ({ ...f, max_context: e.target.value }))}
+                  placeholder="32768"
+                  className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-white/90 placeholder-[var(--text-dim)]" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Rate limit (seg, 0 = off)</label>
+                <input type="number" value={evForm.rate_limit_seconds} onChange={(e) => setEvForm((f) => ({ ...f, rate_limit_seconds: e.target.value }))}
+                  placeholder="120 = 1 req / 2 min"
+                  className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-white/90 placeholder-[var(--text-dim)]" />
+              </div>
+            </div>
+
+            {/* Target plans */}
+            <div className="mt-4 space-y-1.5">
+              <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">
+                Planes con acceso {evForm.target_plan_ids.length === 0 && <span className="text-cyan-300/50">(vacío = todos)</span>}
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {ALL_PLANS.map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => toggleEventPlan(p)}
+                    className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-all ${
+                      evForm.target_plan_ids.includes(p)
+                        ? "text-white"
+                        : "text-[var(--text-muted)] hover:text-white/70"
+                    }`}
+                    style={evForm.target_plan_ids.includes(p) ? {
+                      background: "linear-gradient(135deg, rgba(139, 92, 246, 0.3), rgba(34, 211, 238, 0.15))",
+                      border: "1px solid rgba(139, 92, 246, 0.2)",
+                    } : {
+                      background: "rgba(15, 15, 35, 0.6)",
+                      border: "1px solid rgba(255, 255, 255, 0.06)",
+                    }}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <button onClick={handleCreateEvent}
+              className="mt-5 btn-aurora text-sm font-medium px-5 py-2.5 rounded-xl">
+              Crear Evento
+            </button>
+          </div>
+
+          {/* Events list */}
+          <div className="glass-card shimmer-line overflow-hidden">
+            <div className="p-4 border-b border-white/[0.04]">
+              <h3 className="font-semibold text-sm text-white/85">Events ({events.length})</h3>
+            </div>
+            {events.length === 0 ? (
+              <p className="p-4 text-sm text-[var(--text-dim)]">No events yet.</p>
+            ) : (
+              <div className="divide-y divide-white/[0.04]">
+                {events.map((ev) => {
+                  const now = Date.now();
+                  const start = new Date(ev.starts_at).getTime();
+                  const end = new Date(ev.ends_at).getTime();
+                  const isLive = ev.is_active && now >= start && now <= end;
+                  const isPending = ev.is_active && now < start;
+                  const pct = ev.token_pool_limit > 0
+                    ? Math.min(100, (Number(ev.token_pool_used) / Number(ev.token_pool_limit)) * 100)
+                    : 0;
+                  const status = isLive ? "LIVE" : isPending ? "SCHEDULED" : "ENDED";
+                  const statusBg = isLive ? "rgba(34, 197, 94, 0.15)" : isPending ? "rgba(251, 191, 36, 0.15)" : "rgba(148, 163, 184, 0.1)";
+                  const statusColor = isLive ? "#22c55e" : isPending ? "#fbbf24" : "#94a3b8";
+                  return (
+                    <div key={ev.id} className="px-4 py-3 space-y-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="text-sm font-medium text-white/85">{ev.name}</p>
+                            <span className="text-[10px] font-medium px-2 py-0.5 rounded" style={{ background: statusBg, color: statusColor }}>
+                              {status}
+                            </span>
+                            <span className="text-[10px] text-cyan-300/60 font-mono bg-cyan-500/10 px-1.5 py-0.5 rounded">
+                              {ev.model_prefix}
+                            </span>
+                            {ev.target_plan_ids && (
+                              <span className="text-[10px] text-violet-300/70 bg-violet-500/10 px-1.5 py-0.5 rounded">
+                                {ev.target_plan_ids.join(", ")}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-[var(--text-dim)] mt-0.5">
+                            {new Date(ev.starts_at).toLocaleString()} → {new Date(ev.ends_at).toLocaleString()}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {ev.is_active && isLive && (
+                            <button
+                              onClick={() => handleEndEvent(ev.id)}
+                              className="text-[11px] px-2.5 py-1 rounded-lg font-medium transition-colors"
+                              style={{ background: "rgba(251, 191, 36, 0.08)", border: "1px solid rgba(251, 191, 36, 0.15)", color: "#fbbf24" }}
+                            >
+                              End now
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleDeleteEvent(ev.id)}
+                            className="text-[11px] px-2.5 py-1 rounded-lg font-medium transition-colors"
+                            style={{ background: "rgba(239, 68, 68, 0.08)", border: "1px solid rgba(239, 68, 68, 0.15)", color: "#ef4444" }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Token pool progress */}
+                      <div>
+                        <div className="flex justify-between text-[10px] text-[var(--text-dim)] mb-1">
+                          <span>Pool: {Number(ev.token_pool_used).toLocaleString()} / {Number(ev.token_pool_limit).toLocaleString()} tokens</span>
+                          <span>{pct.toFixed(1)}%</span>
+                        </div>
+                        <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.05)" }}>
+                          <div
+                            className="h-full transition-all"
+                            style={{
+                              width: `${pct}%`,
+                              background: pct >= 90 ? "linear-gradient(90deg, #ef4444, #f59e0b)" : "linear-gradient(90deg, #8b5cf6, #22d3ee)",
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--text-muted)]">
+                        <span>Msgs/user: <span className="text-white/70">{ev.per_user_msg_limit > 0 ? ev.per_user_msg_limit : "\u221e"}</span></span>
+                        <span>Context: <span className="text-white/70">{ev.max_context > 0 ? `${(ev.max_context / 1024).toFixed(0)}k` : "\u221e"}</span></span>
+                        <span>Rate: <span className="text-white/70">{ev.rate_limit_seconds > 0 ? `${ev.rate_limit_seconds}s` : "off"}</span></span>
+                        {ev.created_by && <span>by <span className="text-white/70">{ev.created_by}</span></span>}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>

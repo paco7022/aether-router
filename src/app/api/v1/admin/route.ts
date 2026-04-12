@@ -152,6 +152,20 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ custom_keys: data });
     }
 
+    case "events": {
+      const scope = req.nextUrl.searchParams.get("scope") || "all"; // all | active | past
+      let query = supabase.from("free_events").select("*").order("starts_at", { ascending: false });
+      const nowIso = new Date().toISOString();
+      if (scope === "active") {
+        query = query.eq("is_active", true).lte("starts_at", nowIso).gte("ends_at", nowIso);
+      } else if (scope === "past") {
+        query = query.lt("ends_at", nowIso);
+      }
+      const { data, error } = await query.limit(100);
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ events: data });
+    }
+
     case "fingerprints": {
       const userId = req.nextUrl.searchParams.get("user_id");
       if (!userId) return NextResponse.json({ error: "user_id required" }, { status: 400 });
@@ -376,6 +390,101 @@ export async function POST(req: NextRequest) {
       const { key_id } = body;
       if (!key_id) return NextResponse.json({ error: "key_id required" }, { status: 400 });
       const { error } = await supabase.from("api_keys").delete().eq("id", key_id).eq("is_custom", true);
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ ok: true });
+    }
+
+    // ── Free event management ──
+    case "create_event": {
+      const {
+        name,
+        model_prefix,
+        target_plan_ids,
+        starts_at,
+        duration_minutes,
+        ends_at,
+        token_pool_limit,
+        per_user_msg_limit,
+        max_context,
+        rate_limit_seconds,
+      } = body;
+
+      if (!name || !model_prefix) {
+        return NextResponse.json({ error: "name and model_prefix required" }, { status: 400 });
+      }
+
+      const startIso = starts_at ? new Date(starts_at).toISOString() : new Date().toISOString();
+      let endIso: string;
+      if (ends_at) {
+        endIso = new Date(ends_at).toISOString();
+      } else if (duration_minutes) {
+        endIso = new Date(new Date(startIso).getTime() + Number(duration_minutes) * 60_000).toISOString();
+      } else {
+        return NextResponse.json({ error: "ends_at or duration_minutes required" }, { status: 400 });
+      }
+
+      const { data, error } = await supabase
+        .from("free_events")
+        .insert({
+          name,
+          model_prefix,
+          target_plan_ids: Array.isArray(target_plan_ids) && target_plan_ids.length > 0 ? target_plan_ids : null,
+          starts_at: startIso,
+          ends_at: endIso,
+          token_pool_limit: token_pool_limit ?? 5_000_000,
+          per_user_msg_limit: per_user_msg_limit ?? 20,
+          max_context: max_context ?? 32768,
+          rate_limit_seconds: rate_limit_seconds ?? 120,
+          created_by: user.email,
+        })
+        .select("*")
+        .single();
+
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ ok: true, event: data });
+    }
+
+    case "update_event": {
+      const { event_id, ...updates } = body;
+      delete updates.action;
+      if (!event_id) return NextResponse.json({ error: "event_id required" }, { status: 400 });
+
+      const allowed: Record<string, unknown> = {};
+      for (const field of [
+        "name",
+        "model_prefix",
+        "target_plan_ids",
+        "starts_at",
+        "ends_at",
+        "token_pool_limit",
+        "per_user_msg_limit",
+        "max_context",
+        "rate_limit_seconds",
+        "is_active",
+      ]) {
+        if (updates[field] !== undefined) allowed[field] = updates[field];
+      }
+
+      const { error } = await supabase.from("free_events").update(allowed).eq("id", event_id);
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ ok: true });
+    }
+
+    case "end_event": {
+      const { event_id } = body;
+      if (!event_id) return NextResponse.json({ error: "event_id required" }, { status: 400 });
+      const { error } = await supabase
+        .from("free_events")
+        .update({ is_active: false, ends_at: new Date().toISOString() })
+        .eq("id", event_id);
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ ok: true });
+    }
+
+    case "delete_event": {
+      const { event_id } = body;
+      if (!event_id) return NextResponse.json({ error: "event_id required" }, { status: 400 });
+      const { error } = await supabase.from("free_events").delete().eq("id", event_id);
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
       return NextResponse.json({ ok: true });
     }

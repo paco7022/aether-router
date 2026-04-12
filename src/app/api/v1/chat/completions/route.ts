@@ -110,8 +110,117 @@ export async function POST(req: NextRequest) {
     model.provider === "lightningzeus" ||
     model.provider === "antigravity";
 
-  // 5.5a. LightningZeus global pool check (c/ models)
-  if (model.provider === "lightningzeus") {
+  // 5.4. Active free event lookup (admin-created pools that make a model
+  // prefix free for a set of plans, with their own per-user limits).
+  // Custom keys have their own quotas and are not eligible for events.
+  type FreeEvent = {
+    id: string;
+    model_prefix: string;
+    starts_at: string;
+    ends_at: string;
+    token_pool_limit: number;
+    token_pool_used: number;
+    per_user_msg_limit: number;
+    max_context: number;
+    rate_limit_seconds: number;
+    target_plan_ids: string[] | null;
+  };
+  let activeEvent: FreeEvent | null = null;
+  let isFreePool = false;
+  let activeEventId: string | null = null;
+
+  if (!keyInfo.isCustom) {
+    const nowIso = new Date().toISOString();
+    const { data: events } = await supabase
+      .from("free_events")
+      .select("id, model_prefix, starts_at, ends_at, token_pool_limit, token_pool_used, per_user_msg_limit, max_context, rate_limit_seconds, target_plan_ids")
+      .eq("is_active", true)
+      .lte("starts_at", nowIso)
+      .gte("ends_at", nowIso)
+      .order("created_at", { ascending: false });
+
+    activeEvent =
+      (events || []).find(
+        (e) =>
+          modelId.startsWith(e.model_prefix) &&
+          (!e.target_plan_ids || e.target_plan_ids.includes(keyInfo.planId)) &&
+          Number(e.token_pool_used) < Number(e.token_pool_limit)
+      ) ?? null;
+  }
+
+  if (activeEvent) {
+    // Rate limit within event (per user, per prefix)
+    if (activeEvent.rate_limit_seconds > 0) {
+      const windowAgo = new Date(Date.now() - activeEvent.rate_limit_seconds * 1000).toISOString();
+      const { data: recent } = await supabase
+        .from("usage_logs")
+        .select("created_at")
+        .eq("user_id", keyInfo.userId)
+        .like("model_id", `${activeEvent.model_prefix}%`)
+        .gte("created_at", windowAgo)
+        .limit(1)
+        .maybeSingle();
+
+      if (recent) {
+        const retryAfter = Math.ceil(
+          (new Date(recent.created_at).getTime() + activeEvent.rate_limit_seconds * 1000 - Date.now()) / 1000
+        );
+        return NextResponse.json(
+          {
+            error: {
+              message: `Event rate limit: 1 request per ${activeEvent.rate_limit_seconds}s. Try again in ${retryAfter}s.`,
+              type: "rate_limit",
+            },
+          },
+          { status: 429, headers: { "Retry-After": String(Math.max(retryAfter, 1)) } }
+        );
+      }
+    }
+
+    // Per-user message cap for this event
+    if (activeEvent.per_user_msg_limit > 0) {
+      const { count } = await supabase
+        .from("usage_logs")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", keyInfo.userId)
+        .like("model_id", `${activeEvent.model_prefix}%`)
+        .gte("created_at", activeEvent.starts_at);
+
+      if ((count ?? 0) >= activeEvent.per_user_msg_limit) {
+        return NextResponse.json(
+          {
+            error: {
+              message: `Event message limit reached (${activeEvent.per_user_msg_limit} messages for this event).`,
+              type: "rate_limit",
+            },
+          },
+          { status: 429 }
+        );
+      }
+    }
+
+    // Context cap for this event
+    if (activeEvent.max_context > 0) {
+      const estimatedContext = estimatePromptTokens(messages);
+      if (estimatedContext > activeEvent.max_context) {
+        return NextResponse.json(
+          {
+            error: {
+              message: `Context too long (~${estimatedContext} tokens). This event allows ${activeEvent.max_context} tokens max.`,
+              type: "context_limit",
+            },
+          },
+          { status: 413 }
+        );
+      }
+    }
+
+    isFreePool = true;
+    activeEventId = activeEvent.id;
+  }
+
+  // 5.5a. LightningZeus global pool check (c/ models) — skipped when an event covers this model
+  if (!activeEvent && model.provider === "lightningzeus") {
     const today = new Date().toISOString().split("T")[0];
 
     // Check global pool
@@ -210,8 +319,9 @@ export async function POST(req: NextRequest) {
         );
       }
     }
-  } else {
-    // 5.5b-normal. Premium plan limits (requests/day + context cap) — applies to gameron AND lightningzeus
+  } else if (!activeEvent) {
+    // 5.5b-normal. Premium plan limits (requests/day + context cap) — applies to gameron AND lightningzeus.
+    // Skipped entirely when an active event covers this model for the user's plan.
     if (isPremiumProvider) {
       // Rate limit: 1 request per minute per user on premium models
       const oneMinuteAgo = new Date(Date.now() - 60_000).toISOString();
@@ -328,9 +438,8 @@ export async function POST(req: NextRequest) {
   //
   // All pools reset at UTC midnight.
   let freePoolName: string | null = null;
-  let isFreePool = false;
 
-  if (model.provider === "nano" || upstreamModel === "deepseek-v3.2") {
+  if (!activeEventId && (model.provider === "nano" || upstreamModel === "deepseek-v3.2")) {
     freePoolName = model.provider === "nano" ? "nano" : "deepseek-v3.2";
 
     const todayStart = new Date();
@@ -462,7 +571,8 @@ export async function POST(req: NextRequest) {
         startTime,
         estPrompt,
         isFreePool,
-        freePoolName
+        freePoolName,
+        activeEventId
       );
     }
 
@@ -543,7 +653,8 @@ export async function POST(req: NextRequest) {
 
     // 10. Log usage (always log, even for free-pool — needed for token tracking)
     const durationMs = Date.now() - startTime;
-    const premiumCost = isPremiumProvider ? Number(model.premium_request_cost ?? 1) : 0;
+    // Requests served under a free event don't cost premium-request budget.
+    const premiumCost = isPremiumProvider && !activeEventId ? Number(model.premium_request_cost ?? 1) : 0;
     await supabase.from("usage_logs").insert({
       user_id: keyInfo.userId,
       api_key_id: keyInfo.keyId,
@@ -568,8 +679,8 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Increment lightningzeus global pool counter
-    if (model.provider === "lightningzeus") {
+    // Increment lightningzeus global pool counter — skip while an event covers this model
+    if (!activeEventId && model.provider === "lightningzeus") {
       await incrementLightningzeusPool(supabase);
     }
 
@@ -578,6 +689,14 @@ export async function POST(req: NextRequest) {
     // shouldn't eat into the global free pool.
     if (freePoolName && isFreePool) {
       await incrementDailyTokenPool(supabase, freePoolName, usage.total_tokens);
+    }
+
+    // Increment active free event token pool
+    if (activeEventId) {
+      await supabase.rpc("increment_free_event_tokens", {
+        p_event_id: activeEventId,
+        p_tokens: usage.total_tokens,
+      });
     }
 
     return NextResponse.json(data);
@@ -596,7 +715,8 @@ async function handleStreamingResponse(
   startTime: number,
   estimatedPromptTokens: number = 0,
   isFreePool: boolean = false,
-  freePoolName: string | null = null
+  freePoolName: string | null = null,
+  activeEventId: string | null = null
 ) {
   const supabase = createAdminClient();
   let totalPromptTokens = 0;
@@ -681,7 +801,7 @@ async function handleStreamingResponse(
 
       const durationMs = Date.now() - startTime;
       const isPremium = model.provider === "gameron" || model.provider === "lightningzeus" || model.provider === "antigravity";
-      const streamPremiumCost = isPremium ? Number(model.premium_request_cost ?? 1) : 0;
+      const streamPremiumCost = isPremium && !activeEventId ? Number(model.premium_request_cost ?? 1) : 0;
       await supabase.from("usage_logs").insert({
         user_id: keyInfo.userId,
         api_key_id: keyInfo.keyId,
@@ -705,8 +825,8 @@ async function handleStreamingResponse(
           description: `${model.id} - ${totalTokens} tokens (stream)`,
         });
 
-        // Increment lightningzeus global pool counter
-        if (model.provider === "lightningzeus") {
+        // Increment lightningzeus global pool counter — skip under active event
+        if (!activeEventId && model.provider === "lightningzeus") {
           await incrementLightningzeusPool(supabase);
         }
       }
@@ -714,6 +834,14 @@ async function handleStreamingResponse(
       // Increment daily token pool only for requests that were actually free.
       if (freePoolName && isFreePool) {
         await incrementDailyTokenPool(supabase, freePoolName, totalTokens);
+      }
+
+      // Increment active free event token pool
+      if (activeEventId) {
+        await supabase.rpc("increment_free_event_tokens", {
+          p_event_id: activeEventId,
+          p_tokens: totalTokens,
+        });
       }
     },
   });
