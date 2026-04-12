@@ -25,167 +25,226 @@ export async function POST(req: NextRequest) {
 
   const admin = createAdminClient();
 
-  switch (event.type) {
-    // ── One-time credit purchase completed ──
-    case "checkout.session.completed": {
-      const session = event.data.object as Stripe.Checkout.Session;
+  // Idempotency: process each Stripe event only once.
+  const { error: lockError } = await admin
+    .from("stripe_webhook_events")
+    .insert({
+      event_id: event.id,
+      event_type: event.type,
+      success: false,
+    });
 
-      if (session.mode === "payment" && session.payment_status === "paid") {
-        const userId = session.metadata?.supabase_user_id;
-        const credits = Number(session.metadata?.credits);
-        const packageId = session.metadata?.package_id;
+  if (lockError) {
+    const maybeCode = (lockError as { code?: string }).code;
+    if (maybeCode === "23505") {
+      const { data: existing, error: existingErr } = await admin
+        .from("stripe_webhook_events")
+        .select("success")
+        .eq("event_id", event.id)
+        .maybeSingle();
 
-        if (userId && credits > 0) {
-          // Add permanent credits
-          await admin.rpc("add_credits", {
-            p_user_id: userId,
-            p_amount: credits,
-          });
-
-          // Log transaction
-          const { data: profile } = await admin
-            .from("profiles")
-            .select("credits")
-            .eq("id", userId)
-            .single();
-
-          await admin.from("transactions").insert({
-            user_id: userId,
-            amount: credits,
-            balance: profile?.credits || 0,
-            type: "purchase",
-            description: `Purchased ${packageId} (${credits.toLocaleString()} credits)`,
-          });
-        }
+      if (existingErr) {
+        console.error("Failed to read existing webhook event:", existingErr);
+        return NextResponse.json({ error: "Webhook idempotency check failed" }, { status: 500 });
       }
 
-      // For subscription checkouts, the subscription events below handle activation
-      if (session.mode === "subscription") {
-        const userId = session.metadata?.supabase_user_id;
-        const planId = session.metadata?.plan_id;
-        const stripeSubId =
-          typeof session.subscription === "string"
-            ? session.subscription
-            : session.subscription?.id;
-
-        if (userId && planId && stripeSubId) {
-          // Deactivate any existing subscriptions
-          await admin
-            .from("subscriptions")
-            .update({ status: "cancelled", updated_at: new Date().toISOString() })
-            .eq("user_id", userId)
-            .eq("status", "active");
-
-          // Create new subscription record
-          await admin.from("subscriptions").insert({
-            user_id: userId,
-            plan_id: planId,
-            status: "active",
-            stripe_subscription_id: stripeSubId,
-            current_period_start: new Date().toISOString(),
-            current_period_end: new Date(
-              Date.now() + 30 * 24 * 60 * 60 * 1000
-            ).toISOString(),
-          });
-
-          // Update user's plan
-          await admin
-            .from("profiles")
-            .update({ plan_id: planId })
-            .eq("id", userId);
-
-          // Don't auto-grant daily credits — user must click "Claim" button
-          // This ensures users know they've received their daily allowance
-        }
+      if (existing?.success) {
+        return NextResponse.json({ received: true, duplicate: true });
       }
-      break;
+
+      // Previous processing failed; allow retry and overwrite stale error state.
+      const { error: retryLockErr } = await admin
+        .from("stripe_webhook_events")
+        .update({ event_type: event.type, error: null, processed_at: null })
+        .eq("event_id", event.id);
+
+      if (retryLockErr) {
+        console.error("Failed to prepare failed webhook event for retry:", retryLockErr);
+        return NextResponse.json({ error: "Webhook retry lock failed" }, { status: 500 });
+      }
+    } else {
+      console.error("Failed to acquire webhook idempotency lock:", lockError);
+      return NextResponse.json({ error: "Webhook lock failed" }, { status: 500 });
     }
+  }
 
-    // ── Subscription renewed (recurring payment succeeded) ──
-    case "invoice.paid": {
-      const invoice = event.data.object as Stripe.Invoice;
-      const subRef = invoice.parent?.subscription_details?.subscription;
-      const stripeSubId =
-        typeof subRef === "string" ? subRef : subRef?.id;
+  try {
+    switch (event.type) {
+      // ── One-time credit purchase completed ──
+      case "checkout.session.completed": {
+        const session = event.data.object as Stripe.Checkout.Session;
 
-      // Skip the first invoice (handled by checkout.session.completed)
-      if (!stripeSubId || invoice.billing_reason === "subscription_create") {
+        if (session.mode === "payment" && session.payment_status === "paid") {
+          const userId = session.metadata?.supabase_user_id;
+          const credits = Number(session.metadata?.credits);
+          const packageId = session.metadata?.package_id;
+
+          if (userId && credits > 0) {
+            // Add permanent credits
+            await admin.rpc("add_credits", {
+              p_user_id: userId,
+              p_amount: credits,
+            });
+
+            // Log transaction
+            const { data: profile } = await admin
+              .from("profiles")
+              .select("credits")
+              .eq("id", userId)
+              .single();
+
+            await admin.from("transactions").insert({
+              user_id: userId,
+              amount: credits,
+              balance: profile?.credits || 0,
+              type: "purchase",
+              description: `Purchased ${packageId} (${credits.toLocaleString()} credits)`,
+            });
+          }
+        }
+
+        // For subscription checkouts, the subscription events below handle activation
+        if (session.mode === "subscription") {
+          const userId = session.metadata?.supabase_user_id;
+          const planId = session.metadata?.plan_id;
+          const stripeSubId =
+            typeof session.subscription === "string"
+              ? session.subscription
+              : session.subscription?.id;
+
+          if (userId && planId && stripeSubId) {
+            // Deactivate any existing subscriptions
+            await admin
+              .from("subscriptions")
+              .update({ status: "cancelled", updated_at: new Date().toISOString() })
+              .eq("user_id", userId)
+              .eq("status", "active");
+
+            // Create new subscription record
+            await admin.from("subscriptions").insert({
+              user_id: userId,
+              plan_id: planId,
+              status: "active",
+              stripe_subscription_id: stripeSubId,
+              current_period_start: new Date().toISOString(),
+              current_period_end: new Date(
+                Date.now() + 30 * 24 * 60 * 60 * 1000
+              ).toISOString(),
+            });
+
+            // Update user's plan
+            await admin
+              .from("profiles")
+              .update({ plan_id: planId })
+              .eq("id", userId);
+
+            // Don't auto-grant daily credits — user must click "Claim" button
+            // This ensures users know they've received their daily allowance
+          }
+        }
         break;
       }
 
-      // Find the subscription in our DB
-      const { data: sub } = await admin
-        .from("subscriptions")
-        .select("*, plans(credits_per_day)")
-        .eq("stripe_subscription_id", stripeSubId)
-        .eq("status", "active")
-        .single();
+      // ── Subscription renewed (recurring payment succeeded) ──
+      case "invoice.paid": {
+        const invoice = event.data.object as Stripe.Invoice;
+        const subRef = invoice.parent?.subscription_details?.subscription;
+        const stripeSubId =
+          typeof subRef === "string" ? subRef : subRef?.id;
 
-      if (sub) {
-        // Update period
-        await admin
+        // Skip the first invoice (handled by checkout.session.completed)
+        if (!stripeSubId || invoice.billing_reason === "subscription_create") {
+          break;
+        }
+
+        // Find the subscription in our DB
+        const { data: sub } = await admin
           .from("subscriptions")
-          .update({
-            current_period_start: new Date().toISOString(),
-            current_period_end: new Date(
-              Date.now() + 30 * 24 * 60 * 60 * 1000
-            ).toISOString(),
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", sub.id);
+          .select("*, plans(credits_per_day)")
+          .eq("stripe_subscription_id", stripeSubId)
+          .eq("status", "active")
+          .single();
+
+        if (sub) {
+          // Update period
+          await admin
+            .from("subscriptions")
+            .update({
+              current_period_start: new Date().toISOString(),
+              current_period_end: new Date(
+                Date.now() + 30 * 24 * 60 * 60 * 1000
+              ).toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", sub.id);
+        }
+        break;
       }
-      break;
-    }
 
-    // ── Subscription cancelled or expired ──
-    case "customer.subscription.deleted": {
-      const subscription = event.data.object as Stripe.Subscription;
+      // ── Subscription cancelled or expired ──
+      case "customer.subscription.deleted": {
+        const subscription = event.data.object as Stripe.Subscription;
 
-      // Deactivate in our DB
-      const { data: sub } = await admin
-        .from("subscriptions")
-        .select("user_id")
-        .eq("stripe_subscription_id", subscription.id)
-        .single();
-
-      if (sub) {
-        await admin
+        // Deactivate in our DB
+        const { data: sub } = await admin
           .from("subscriptions")
-          .update({ status: "cancelled", updated_at: new Date().toISOString() })
-          .eq("stripe_subscription_id", subscription.id);
+          .select("user_id")
+          .eq("stripe_subscription_id", subscription.id)
+          .single();
 
-        // Revert to free plan
-        await admin
-          .from("profiles")
-          .update({ plan_id: "free" })
-          .eq("id", sub.user_id);
+        if (sub) {
+          await admin
+            .from("subscriptions")
+            .update({ status: "cancelled", updated_at: new Date().toISOString() })
+            .eq("stripe_subscription_id", subscription.id);
 
-        // Ensure they have a free subscription
-        await admin.from("subscriptions").insert({
-          user_id: sub.user_id,
-          plan_id: "free",
-          status: "active",
-        });
+          // Revert to free plan
+          await admin
+            .from("profiles")
+            .update({ plan_id: "free" })
+            .eq("id", sub.user_id);
+
+          // Ensure they have a free subscription
+          await admin.from("subscriptions").insert({
+            user_id: sub.user_id,
+            plan_id: "free",
+            status: "active",
+          });
+        }
+        break;
       }
-      break;
-    }
 
-    // ── Payment failed on renewal ──
-    case "invoice.payment_failed": {
-      const invoice = event.data.object as Stripe.Invoice;
-      const failedSubRef = invoice.parent?.subscription_details?.subscription;
-      const stripeSubId =
-        typeof failedSubRef === "string" ? failedSubRef : failedSubRef?.id;
+      // ── Payment failed on renewal ──
+      case "invoice.payment_failed": {
+        const invoice = event.data.object as Stripe.Invoice;
+        const failedSubRef = invoice.parent?.subscription_details?.subscription;
+        const stripeSubId =
+          typeof failedSubRef === "string" ? failedSubRef : failedSubRef?.id;
 
-      if (stripeSubId) {
-        await admin
-          .from("subscriptions")
-          .update({ status: "past_due", updated_at: new Date().toISOString() })
-          .eq("stripe_subscription_id", stripeSubId);
+        if (stripeSubId) {
+          await admin
+            .from("subscriptions")
+            .update({ status: "past_due", updated_at: new Date().toISOString() })
+            .eq("stripe_subscription_id", stripeSubId);
+        }
+        break;
       }
-      break;
     }
+  } catch (processingError) {
+    const message = processingError instanceof Error ? processingError.message : "Unknown webhook processing error";
+    await admin
+      .from("stripe_webhook_events")
+      .update({ success: false, error: message, processed_at: new Date().toISOString() })
+      .eq("event_id", event.id);
+
+    console.error("Webhook processing failed:", processingError);
+    return NextResponse.json({ error: "Webhook processing failed" }, { status: 500 });
   }
+
+  await admin
+    .from("stripe_webhook_events")
+    .update({ success: true, error: null, processed_at: new Date().toISOString() })
+    .eq("event_id", event.id);
 
   return NextResponse.json({ received: true });
 }

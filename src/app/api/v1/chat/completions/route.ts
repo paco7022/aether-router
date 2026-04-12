@@ -11,6 +11,13 @@ export const maxDuration = 120;
 // Free-pool limits shared by nano (na/) and airforce deepseek-v3.2.
 const PER_USER_DAILY_TOKEN_LIMIT = 200_000;
 const GLOBAL_DAILY_TOKEN_POOL = 10_000_000;
+const DEFAULT_STREAM_RESERVATION_COMPLETION_TOKENS = 1024;
+const MAX_STREAM_RESERVATION_COMPLETION_TOKENS = 32_768;
+
+type StreamChargeReservation = {
+  reservedCredits: number;
+  balanceAfterReserve: number;
+};
 
 function extractCompletionText(payload: unknown): string {
   const data = payload as { choices?: Array<{ message?: { content?: unknown } }> };
@@ -34,6 +41,24 @@ function extractCompletionText(payload: unknown): string {
   }
 
   return "";
+}
+
+function getRequestedCompletionTokens(body: Record<string, unknown>): number | null {
+  const candidates = [body.max_completion_tokens, body.max_tokens];
+
+  for (const value of candidates) {
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+      return Math.floor(value);
+    }
+    if (typeof value === "string") {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return Math.floor(parsed);
+      }
+    }
+  }
+
+  return null;
 }
 
 export async function POST(req: NextRequest) {
@@ -130,22 +155,16 @@ export async function POST(req: NextRequest) {
   let activeEventId: string | null = null;
 
   if (!keyInfo.isCustom) {
-    const nowIso = new Date().toISOString();
-    const { data: events } = await supabase
-      .from("free_events")
-      .select("id, model_prefix, starts_at, ends_at, token_pool_limit, token_pool_used, per_user_msg_limit, max_context, rate_limit_seconds, target_plan_ids")
-      .eq("is_active", true)
-      .lte("starts_at", nowIso)
-      .gte("ends_at", nowIso)
-      .order("created_at", { ascending: false });
+    const { data: eventRow, error: eventLookupError } = await supabase.rpc("find_active_free_event", {
+      p_model_id: modelId,
+      p_plan_id: keyInfo.planId,
+    });
 
-    activeEvent =
-      (events || []).find(
-        (e) =>
-          modelId.startsWith(e.model_prefix) &&
-          (!e.target_plan_ids || e.target_plan_ids.includes(keyInfo.planId)) &&
-          Number(e.token_pool_used) < Number(e.token_pool_limit)
-      ) ?? null;
+    if (eventLookupError) {
+      console.error("Failed to resolve active free event:", eventLookupError.message);
+    } else if (eventRow) {
+      activeEvent = eventRow as unknown as FreeEvent;
+    }
   }
 
   if (activeEvent) {
@@ -523,6 +542,9 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  const streamEstimatedPrompt = stream ? estimatePromptTokens(messages) : 0;
+  let streamReservation: StreamChargeReservation | null = null;
+
   try {
     // Ask upstream to include usage data in stream chunks (OpenAI-compatible)
     const forwardBody = { ...body, model: upstreamModel, stream };
@@ -530,9 +552,97 @@ export async function POST(req: NextRequest) {
       (forwardBody as Record<string, unknown>).stream_options = { include_usage: true };
     }
 
+    // Reserve a minimum charge before opening a non-free stream so we never
+    // send streamed content when billing cannot settle at all.
+    if (stream && !isFreePool) {
+      const requestedCompletionTokens = getRequestedCompletionTokens(body);
+      const reservedCompletionTokens = Math.min(
+        requestedCompletionTokens ?? DEFAULT_STREAM_RESERVATION_COMPLETION_TOKENS,
+        MAX_STREAM_RESERVATION_COMPLETION_TOKENS
+      );
+      const { credits: reservedCreditsRaw } = calculateCredits(
+        streamEstimatedPrompt,
+        reservedCompletionTokens,
+        {
+          cost_per_m_input: model.cost_per_m_input,
+          cost_per_m_output: model.cost_per_m_output,
+          margin: model.margin,
+        }
+      );
+      const reservedCredits = Math.max(reservedCreditsRaw, 1);
+
+      if (keyInfo.isCustom && keyInfo.customCredits !== null) {
+        const { data: keyBalance, error: reserveErr } = await supabase.rpc("deduct_custom_key_credits", {
+          p_key_id: keyInfo.keyId,
+          p_amount: reservedCredits,
+        });
+
+        if (reserveErr) {
+          return NextResponse.json(
+            { error: { message: "Failed to reserve key credits", type: "billing_error" } },
+            { status: 500 }
+          );
+        }
+        if (keyBalance === -1) {
+          return NextResponse.json(
+            { error: { message: "Insufficient key credits", type: "billing_error", credits_available: keyInfo.customCredits } },
+            { status: 402 }
+          );
+        }
+
+        streamReservation = {
+          reservedCredits,
+          balanceAfterReserve: keyBalance as number,
+        };
+      } else {
+        const { data: reserveBalance, error: reserveErr } = await supabase.rpc("deduct_credits", {
+          p_user_id: keyInfo.userId,
+          p_amount: reservedCredits,
+        });
+
+        if (reserveErr) {
+          return NextResponse.json(
+            { error: { message: "Failed to reserve credits", type: "billing_error" } },
+            { status: 500 }
+          );
+        }
+        if (reserveBalance === -1) {
+          return NextResponse.json(
+            { error: { message: "Insufficient credits", type: "billing_error", credits_required: reservedCredits, credits_available: keyInfo.credits + keyInfo.dailyCredits } },
+            { status: 402 }
+          );
+        }
+
+        streamReservation = {
+          reservedCredits,
+          balanceAfterReserve: reserveBalance as number,
+        };
+      }
+    }
+
     const providerResponse = await provider.forward(forwardBody as any);
 
     if (!providerResponse.ok) {
+      if (streamReservation && !isFreePool) {
+        if (keyInfo.isCustom && keyInfo.customCredits !== null) {
+          const { error: refundErr } = await supabase.rpc("add_custom_key_credits", {
+            p_key_id: keyInfo.keyId,
+            p_amount: streamReservation.reservedCredits,
+          });
+          if (refundErr) {
+            console.error("Failed to refund reserved custom-key credits after upstream error:", refundErr.message);
+          }
+        } else {
+          const { error: refundErr } = await supabase.rpc("add_credits", {
+            p_user_id: keyInfo.userId,
+            p_amount: streamReservation.reservedCredits,
+          });
+          if (refundErr) {
+            console.error("Failed to refund reserved credits after upstream error:", refundErr.message);
+          }
+        }
+      }
+
       const errorText = await providerResponse.text();
       const status = providerResponse.status;
 
@@ -563,16 +673,16 @@ export async function POST(req: NextRequest) {
 
     // 7. Handle streaming
     if (stream) {
-      const estPrompt = estimatePromptTokens(messages);
       return handleStreamingResponse(
         providerResponse,
         keyInfo,
         model,
         startTime,
-        estPrompt,
+        streamEstimatedPrompt,
         isFreePool,
         freePoolName,
-        activeEventId
+        activeEventId,
+        streamReservation
       );
     }
 
@@ -611,22 +721,26 @@ export async function POST(req: NextRequest) {
     let newBalance = 0;
     if (!isFreePool) {
       if (keyInfo.isCustom && keyInfo.customCredits !== null) {
-        // Deduct from key's own credit pool
-        const { data: updated, error: keyErr } = await supabase
-          .from("api_keys")
-          .update({ custom_credits: keyInfo.customCredits - finalCredits })
-          .eq("id", keyInfo.keyId)
-          .gte("custom_credits", finalCredits)
-          .select("custom_credits")
-          .single();
+        // Deduct from key's own credit pool atomically.
+        const { data: keyBalance, error: keyErr } = await supabase.rpc("deduct_custom_key_credits", {
+          p_key_id: keyInfo.keyId,
+          p_amount: finalCredits,
+        });
 
-        if (keyErr || !updated) {
+        if (keyErr) {
+          return NextResponse.json(
+            { error: { message: "Failed to deduct key credits", type: "billing_error" } },
+            { status: 500 }
+          );
+        }
+
+        if (keyBalance === -1) {
           return NextResponse.json(
             { error: { message: "Insufficient key credits", type: "billing_error", credits_available: keyInfo.customCredits } },
             { status: 402 }
           );
         }
-        newBalance = updated.custom_credits;
+        newBalance = keyBalance as number;
       } else {
         // Deduct from user's credit pool
         const { data: rpcBalance, error: deductError } = await supabase.rpc("deduct_credits", {
@@ -655,7 +769,7 @@ export async function POST(req: NextRequest) {
     const durationMs = Date.now() - startTime;
     // Requests served under a free event don't cost premium-request budget.
     const premiumCost = isPremiumProvider && !activeEventId ? Number(model.premium_request_cost ?? 1) : 0;
-    await supabase.from("usage_logs").insert({
+    const { error: usageLogError } = await supabase.from("usage_logs").insert({
       user_id: keyInfo.userId,
       api_key_id: keyInfo.keyId,
       model_id: modelId,
@@ -668,39 +782,66 @@ export async function POST(req: NextRequest) {
       duration_ms: durationMs,
       premium_cost: premiumCost,
     });
+    if (usageLogError) {
+      console.error("Failed to write usage log:", usageLogError.message);
+    }
 
     if (!isFreePool) {
-      await supabase.from("transactions").insert({
+      const { error: txError } = await supabase.from("transactions").insert({
         user_id: keyInfo.userId,
         amount: -finalCredits,
         balance: newBalance,
         type: keyInfo.isCustom ? "custom_key_usage" : "usage",
         description: `${modelId} - ${usage.total_tokens} tokens`,
       });
+      if (txError) {
+        console.error("Failed to write transaction log:", txError.message);
+      }
     }
 
-    // Increment lightningzeus global pool counter — skip while an event covers this model
-    if (!activeEventId && model.provider === "lightningzeus") {
-      await incrementLightningzeusPool(supabase);
-    }
+    try {
+      // Increment lightningzeus global pool counter — skip while an event covers this model
+      if (!activeEventId && model.provider === "lightningzeus") {
+        await incrementLightningzeusPool(supabase);
+      }
 
-    // Increment daily token pool only when the request was actually free.
-    // Paid nano requests (after a user crosses their 200k free threshold)
-    // shouldn't eat into the global free pool.
-    if (freePoolName && isFreePool) {
-      await incrementDailyTokenPool(supabase, freePoolName, usage.total_tokens);
-    }
+      // Increment daily token pool only when the request was actually free.
+      // Paid nano requests (after a user crosses their 200k free threshold)
+      // shouldn't eat into the global free pool.
+      if (freePoolName && isFreePool) {
+        await incrementDailyTokenPool(supabase, freePoolName, usage.total_tokens);
+      }
 
-    // Increment active free event token pool
-    if (activeEventId) {
-      await supabase.rpc("increment_free_event_tokens", {
-        p_event_id: activeEventId,
-        p_tokens: usage.total_tokens,
-      });
+      // Increment active free event token pool
+      if (activeEventId) {
+        await incrementFreeEventTokens(supabase, activeEventId, usage.total_tokens);
+      }
+    } catch (postAccountingError) {
+      console.error("Post-request pool accounting failed:", postAccountingError);
     }
 
     return NextResponse.json(data);
   } catch (error) {
+    if (streamReservation && !isFreePool) {
+      if (keyInfo.isCustom && keyInfo.customCredits !== null) {
+        const { error: refundErr } = await supabase.rpc("add_custom_key_credits", {
+          p_key_id: keyInfo.keyId,
+          p_amount: streamReservation.reservedCredits,
+        });
+        if (refundErr) {
+          console.error("Failed to refund reserved custom-key credits after exception:", refundErr.message);
+        }
+      } else {
+        const { error: refundErr } = await supabase.rpc("add_credits", {
+          p_user_id: keyInfo.userId,
+          p_amount: streamReservation.reservedCredits,
+        });
+        if (refundErr) {
+          console.error("Failed to refund reserved credits after exception:", refundErr.message);
+        }
+      }
+    }
+
     return NextResponse.json(
       { error: { message: (error as Error).message, type: "server_error" } },
       { status: 500 }
@@ -716,7 +857,8 @@ async function handleStreamingResponse(
   estimatedPromptTokens: number = 0,
   isFreePool: boolean = false,
   freePoolName: string | null = null,
-  activeEventId: string | null = null
+  activeEventId: string | null = null,
+  reservation: StreamChargeReservation | null = null
 ) {
   const supabase = createAdminClient();
   let totalPromptTokens = 0;
@@ -776,72 +918,147 @@ async function handleStreamingResponse(
       const finalCredits = isFreePool ? 0 : Math.max(credits, 1);
 
       let wasCharged = isFreePool; // free pool is always "success" for logging
-      let balanceAfter = 0;
+      let balanceAfter = reservation?.balanceAfterReserve ?? 0;
+      let chargedCredits = isFreePool ? 0 : finalCredits;
+      let billingStatus: "success" | "billing_failed" | "settlement_failed" = "success";
 
       if (!isFreePool) {
-        if (keyInfo.isCustom && keyInfo.customCredits !== null) {
-          const { data: updated } = await supabase
-            .from("api_keys")
-            .update({ custom_credits: keyInfo.customCredits - finalCredits })
-            .eq("id", keyInfo.keyId)
-            .gte("custom_credits", finalCredits)
-            .select("custom_credits")
-            .single();
-          wasCharged = !!updated;
-          balanceAfter = updated?.custom_credits ?? 0;
+        if (reservation) {
+          wasCharged = true;
+          chargedCredits = reservation.reservedCredits;
+
+          const settlementDelta = finalCredits - reservation.reservedCredits;
+          if (settlementDelta > 0) {
+            if (keyInfo.isCustom && keyInfo.customCredits !== null) {
+              const { data: keyBalance, error: settleErr } = await supabase.rpc("deduct_custom_key_credits", {
+                p_key_id: keyInfo.keyId,
+                p_amount: settlementDelta,
+              });
+
+              if (settleErr || keyBalance === -1) {
+                billingStatus = "settlement_failed";
+              } else {
+                chargedCredits += settlementDelta;
+                balanceAfter = keyBalance as number;
+              }
+            } else {
+              const { data: newBalance, error: settleErr } = await supabase.rpc("deduct_credits", {
+                p_user_id: keyInfo.userId,
+                p_amount: settlementDelta,
+              });
+
+              if (settleErr || newBalance === -1) {
+                billingStatus = "settlement_failed";
+              } else {
+                chargedCredits += settlementDelta;
+                balanceAfter = newBalance as number;
+              }
+            }
+          } else if (settlementDelta < 0) {
+            const refundAmount = Math.abs(settlementDelta);
+            if (keyInfo.isCustom && keyInfo.customCredits !== null) {
+              const { data: keyBalance, error: refundErr } = await supabase.rpc("add_custom_key_credits", {
+                p_key_id: keyInfo.keyId,
+                p_amount: refundAmount,
+              });
+
+              if (refundErr || keyBalance === -1) {
+                billingStatus = "settlement_failed";
+              } else {
+                chargedCredits -= refundAmount;
+                balanceAfter = keyBalance as number;
+              }
+            } else {
+              const { data: newBalance, error: refundErr } = await supabase.rpc("add_credits", {
+                p_user_id: keyInfo.userId,
+                p_amount: refundAmount,
+              });
+
+              if (refundErr || newBalance === -1) {
+                billingStatus = "settlement_failed";
+              } else {
+                chargedCredits -= refundAmount;
+                balanceAfter = newBalance as number;
+              }
+            }
+          }
         } else {
-          const { data: newBalance, error: deductError } = await supabase.rpc("deduct_credits", {
-            p_user_id: keyInfo.userId,
-            p_amount: finalCredits,
-          });
-          wasCharged = !deductError && typeof newBalance === "number" && newBalance >= 0;
-          balanceAfter = (newBalance as number) ?? 0;
+          if (keyInfo.isCustom && keyInfo.customCredits !== null) {
+            const { data: keyBalance, error: keyErr } = await supabase.rpc("deduct_custom_key_credits", {
+              p_key_id: keyInfo.keyId,
+              p_amount: finalCredits,
+            });
+            wasCharged = !keyErr && typeof keyBalance === "number" && keyBalance >= 0;
+            balanceAfter = (keyBalance as number) ?? 0;
+          } else {
+            const { data: newBalance, error: deductError } = await supabase.rpc("deduct_credits", {
+              p_user_id: keyInfo.userId,
+              p_amount: finalCredits,
+            });
+            wasCharged = !deductError && typeof newBalance === "number" && newBalance >= 0;
+            balanceAfter = (newBalance as number) ?? 0;
+          }
+
+          if (!wasCharged) {
+            billingStatus = "billing_failed";
+            chargedCredits = 0;
+          }
         }
       }
 
       const durationMs = Date.now() - startTime;
       const isPremium = model.provider === "gameron" || model.provider === "lightningzeus" || model.provider === "antigravity";
       const streamPremiumCost = isPremium && !activeEventId ? Number(model.premium_request_cost ?? 1) : 0;
-      await supabase.from("usage_logs").insert({
+      const { error: usageLogError } = await supabase.from("usage_logs").insert({
         user_id: keyInfo.userId,
         api_key_id: keyInfo.keyId,
         model_id: model.id,
         prompt_tokens: totalPromptTokens,
         completion_tokens: totalCompletionTokens,
         total_tokens: totalTokens,
-        credits_charged: finalCredits,
+        credits_charged: chargedCredits,
         cost_usd: costUsd,
-        status: wasCharged ? "success" : "billing_failed",
+        status: isFreePool ? "success" : billingStatus,
         duration_ms: durationMs,
         premium_cost: streamPremiumCost,
       });
+      if (usageLogError) {
+        console.error("Failed to write streaming usage log:", usageLogError.message);
+      }
 
-      if (wasCharged && !isFreePool) {
-        await supabase.from("transactions").insert({
+      if (!isFreePool && chargedCredits > 0) {
+        const settlementSuffix = billingStatus === "success" ? "" : ` [${billingStatus}]`;
+        const { error: txError } = await supabase.from("transactions").insert({
           user_id: keyInfo.userId,
-          amount: -finalCredits,
+          amount: -chargedCredits,
           balance: balanceAfter,
           type: keyInfo.isCustom ? "custom_key_usage" : "usage",
-          description: `${model.id} - ${totalTokens} tokens (stream)`,
+          description: `${model.id} - ${totalTokens} tokens (stream)${settlementSuffix}`,
         });
-
-        // Increment lightningzeus global pool counter — skip under active event
-        if (!activeEventId && model.provider === "lightningzeus") {
-          await incrementLightningzeusPool(supabase);
+        if (txError) {
+          console.error("Failed to write streaming transaction log:", txError.message);
         }
       }
 
-      // Increment daily token pool only for requests that were actually free.
-      if (freePoolName && isFreePool) {
-        await incrementDailyTokenPool(supabase, freePoolName, totalTokens);
-      }
+      try {
+        if (wasCharged && !isFreePool) {
+          // Increment lightningzeus global pool counter — skip under active event
+          if (!activeEventId && model.provider === "lightningzeus") {
+            await incrementLightningzeusPool(supabase);
+          }
+        }
 
-      // Increment active free event token pool
-      if (activeEventId) {
-        await supabase.rpc("increment_free_event_tokens", {
-          p_event_id: activeEventId,
-          p_tokens: totalTokens,
-        });
+        // Increment daily token pool only for requests that were actually free.
+        if (freePoolName && isFreePool) {
+          await incrementDailyTokenPool(supabase, freePoolName, totalTokens);
+        }
+
+        // Increment active free event token pool
+        if (activeEventId) {
+          await incrementFreeEventTokens(supabase, activeEventId, totalTokens);
+        }
+      } catch (postAccountingError) {
+        console.error("Post-stream pool accounting failed:", postAccountingError);
       }
     },
   });
@@ -854,7 +1071,9 @@ async function handleStreamingResponse(
     );
   }
 
-  body.pipeTo(transformStream.writable).catch(() => {});
+  body.pipeTo(transformStream.writable).catch((streamPipeError) => {
+    console.error("Streaming pipeline failed:", streamPipeError);
+  });
 
   return new Response(transformStream.readable, {
     headers: {
@@ -866,23 +1085,13 @@ async function handleStreamingResponse(
 }
 
 async function incrementLightningzeusPool(supabase: ReturnType<typeof createAdminClient>) {
-  const today = new Date().toISOString().split("T")[0];
+  const { error } = await supabase.rpc("increment_lightningzeus_pool", {
+    p_increment: 1,
+    p_default_limit: 3000,
+  });
 
-  const { data: existing } = await supabase
-    .from("lightningzeus_daily_pool")
-    .select("used")
-    .eq("pool_date", today)
-    .maybeSingle();
-
-  if (existing) {
-    await supabase
-      .from("lightningzeus_daily_pool")
-      .update({ used: existing.used + 1 })
-      .eq("pool_date", today);
-  } else {
-    await supabase
-      .from("lightningzeus_daily_pool")
-      .insert({ pool_date: today, used: 1, pool_limit: 3000 });
+  if (error) {
+    throw new Error(`Failed to increment lightningzeus pool: ${error.message}`);
   }
 }
 
@@ -892,29 +1101,30 @@ async function incrementDailyTokenPool(
   tokens: number
 ) {
   if (tokens <= 0) return;
-  const today = new Date().toISOString().split("T")[0];
+  const { error } = await supabase.rpc("increment_daily_token_pool", {
+    p_pool_name: poolName,
+    p_tokens: tokens,
+    p_default_limit: GLOBAL_DAILY_TOKEN_POOL,
+  });
 
-  const { data: existing } = await supabase
-    .from("daily_token_pools")
-    .select("used")
-    .eq("pool_name", poolName)
-    .eq("pool_date", today)
-    .maybeSingle();
+  if (error) {
+    throw new Error(`Failed to increment daily token pool '${poolName}': ${error.message}`);
+  }
+}
 
-  if (existing) {
-    await supabase
-      .from("daily_token_pools")
-      .update({ used: Number(existing.used) + tokens })
-      .eq("pool_name", poolName)
-      .eq("pool_date", today);
-  } else {
-    await supabase
-      .from("daily_token_pools")
-      .insert({
-        pool_name: poolName,
-        pool_date: today,
-        used: tokens,
-        pool_limit: GLOBAL_DAILY_TOKEN_POOL,
-      });
+async function incrementFreeEventTokens(
+  supabase: ReturnType<typeof createAdminClient>,
+  eventId: string,
+  tokens: number
+) {
+  if (tokens <= 0) return;
+
+  const { error } = await supabase.rpc("increment_free_event_tokens", {
+    p_event_id: eventId,
+    p_tokens: tokens,
+  });
+
+  if (error) {
+    throw new Error(`Failed to increment free event tokens: ${error.message}`);
   }
 }
