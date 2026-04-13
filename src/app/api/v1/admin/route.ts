@@ -340,7 +340,9 @@ export async function POST(req: NextRequest) {
     // ── Custom key management ──
     case "create_custom_key": {
       const { user_id, name, custom_credits, max_context, allowed_providers, daily_request_limit, rate_limit_seconds, expires_at, note } = body;
-      if (!user_id) return NextResponse.json({ error: "user_id required" }, { status: 400 });
+      // user_id defaults to the admin creating the key — admin-managed custom
+      // keys don't need a target user, the admin owns them.
+      const ownerId = user_id || user.id;
 
       // Generate a random API key
       const randomBytes = new Uint8Array(32);
@@ -350,7 +352,7 @@ export async function POST(req: NextRequest) {
       const keyPrefix = rawKey.slice(0, 12);
 
       const { data: inserted, error: insertErr } = await supabase.from("api_keys").insert({
-        user_id,
+        user_id: ownerId,
         key_hash: keyHash,
         key_prefix: keyPrefix,
         name: name || "Custom Key",

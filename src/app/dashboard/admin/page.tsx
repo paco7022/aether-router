@@ -159,7 +159,6 @@ export default function AdminPage() {
   const [customKeys, setCustomKeys] = useState<CustomKey[]>([]);
   const [newKeyRevealed, setNewKeyRevealed] = useState<string | null>(null);
   const [ckForm, setCkForm] = useState({
-    user_id: "",
     name: "",
     custom_credits: "",
     max_context: "",
@@ -319,7 +318,6 @@ export default function AdminPage() {
   async function handleCreateCustomKey() {
     const payload: Record<string, unknown> = {
       action: "create_custom_key",
-      user_id: ckForm.user_id,
       name: ckForm.name || "Custom Key",
       note: ckForm.note || undefined,
     };
@@ -335,7 +333,7 @@ export default function AdminPage() {
       setError(result.error);
     } else {
       setNewKeyRevealed(result.key);
-      setCkForm({ user_id: "", name: "", custom_credits: "", max_context: "", allowed_providers: [], daily_request_limit: "", rate_limit_seconds: "", expires_at: "", note: "" });
+      setCkForm({ name: "", custom_credits: "", max_context: "", allowed_providers: [], daily_request_limit: "", rate_limit_seconds: "", expires_at: "", note: "" });
       loadCustomKeys();
     }
   }
@@ -823,12 +821,6 @@ export default function AdminPage() {
           <div className="glass-card shimmer-line p-5">
             <h3 className="font-semibold text-sm text-white/85 mb-4">Create Custom Key</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">User ID *</label>
-                <input type="text" value={ckForm.user_id} onChange={(e) => setCkForm((f) => ({ ...f, user_id: e.target.value }))}
-                  placeholder="UUID del usuario"
-                  className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-white/90 placeholder-[var(--text-dim)] font-mono" />
-              </div>
               <div className="space-y-1.5">
                 <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Key Name</label>
                 <input type="text" value={ckForm.name} onChange={(e) => setCkForm((f) => ({ ...f, name: e.target.value }))}
