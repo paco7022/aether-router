@@ -133,7 +133,16 @@ export async function POST(req: NextRequest) {
   const isPremiumProvider =
     model.provider === "gameron" ||
     model.provider === "lightningzeus" ||
-    model.provider === "antigravity";
+    model.provider === "antigravity" ||
+    model.provider === "webproxy";
+
+  // Beta gate: webproxy is in testing — only custom keys (admin-created) may use it.
+  if (model.provider === "webproxy" && !keyInfo.isCustom) {
+    return NextResponse.json(
+      { error: { message: `Model '${modelId}' is in private beta.`, type: "access_denied" } },
+      { status: 403 }
+    );
+  }
 
   // 5.4. Active free event lookup (admin-created pools that make a model
   // prefix free for a set of plans, with their own per-user limits).
@@ -1007,7 +1016,7 @@ async function handleStreamingResponse(
       }
 
       const durationMs = Date.now() - startTime;
-      const isPremium = model.provider === "gameron" || model.provider === "lightningzeus" || model.provider === "antigravity";
+      const isPremium = model.provider === "gameron" || model.provider === "lightningzeus" || model.provider === "antigravity" || model.provider === "webproxy";
       const streamPremiumCost = isPremium && !activeEventId ? Number(model.premium_request_cost ?? 1) : 0;
       const { error: usageLogError } = await supabase.from("usage_logs").insert({
         user_id: keyInfo.userId,
