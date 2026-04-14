@@ -101,7 +101,7 @@ interface Stats {
   topUsersToday: { user_id: string; email: string; requests: number }[];
 }
 
-const ALL_PROVIDERS = ["gameron", "lightningzeus", "airforce", "gemini-cli", "antigravity"];
+const ALL_PROVIDERS = ["lightningzeus", "airforce", "gemini-cli", "antigravity", "webproxy"];
 
 async function api(method: "GET" | "POST", params?: Record<string, string>, body?: unknown) {
   if (method === "GET") {
@@ -146,7 +146,7 @@ export default function AdminPage() {
   const [events, setEvents] = useState<FreeEvent[]>([]);
   const [evForm, setEvForm] = useState({
     name: "",
-    model_prefix: "gm/",
+    model_prefix: "w/",
     target_plan_ids: ["free"] as string[],
     duration_minutes: "120",
     token_pool_limit: "5000000",
@@ -373,7 +373,7 @@ export default function AdminPage() {
     } else {
       setEvForm({
         name: "",
-        model_prefix: "gm/",
+        model_prefix: "w/",
         target_plan_ids: ["free"],
         duration_minutes: "120",
         token_pool_limit: "5000000",
@@ -991,7 +991,7 @@ export default function AdminPage() {
               <div className="space-y-1.5">
                 <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Model Prefix *</label>
                 <input type="text" value={evForm.model_prefix} onChange={(e) => setEvForm((f) => ({ ...f, model_prefix: e.target.value }))}
-                  placeholder="e.g. gm/, c/, an/, na/ o model-id exacto"
+                  placeholder="e.g. w/, c/, an/, na/ o model-id exacto"
                   className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-white/90 placeholder-[var(--text-dim)] font-mono" />
               </div>
               <div className="space-y-1.5">

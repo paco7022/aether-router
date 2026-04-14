@@ -105,16 +105,16 @@ print(response.choices[0].message.content)`}
         </div>
       </section>
 
-      {/* Gameron Models */}
+      {/* Premium Models */}
       <section className="mb-10">
-        <h3 className="text-xl font-bold text-white/85 mb-4">Premium Models (gm/, an/)</h3>
+        <h3 className="text-xl font-bold text-white/85 mb-4">Premium Models (w/, an/)</h3>
         <div className="glass-card shimmer-line p-5 space-y-3">
           <p className="text-sm text-white/80">
-            Models prefixed with <code className="text-violet-400 font-mono text-xs">gm/</code> or <code className="text-amber-400 font-mono text-xs">an/</code> are premium models with additional restrictions:
+            Models prefixed with <code className="text-violet-400 font-mono text-xs">w/</code> or <code className="text-amber-400 font-mono text-xs">an/</code> are premium models with additional restrictions:
           </p>
           <ul className="text-sm space-y-2 ml-4 list-disc text-[var(--text-muted)]">
-            <li>You must <strong className="text-white/80">claim daily requests</strong> from the Billing page before using them each day.</li>
-            <li>Each plan has a <strong className="text-white/80">daily request limit</strong> — upgrade your plan for more.</li>
+            <li><code className="text-amber-400 font-mono text-xs">an/</code> models require you to <strong className="text-white/80">claim daily requests</strong> from the Billing page. <code className="text-violet-400 font-mono text-xs">w/</code> models do not.</li>
+            <li>Each plan has a <strong className="text-white/80">daily premium request limit</strong> — upgrade for more.</li>
             <li>Each plan has a <strong className="text-white/80">max context length</strong> — longer conversations may be rejected.</li>
             <li>
               <strong className="text-white/80">Not all models cost the same:</strong>{" "}
@@ -153,7 +153,7 @@ print(response.choices[0].message.content)`}
               <ErrorRow status={400} type="invalid_request" cause="Missing or malformed request body." fix='Check that "model" and "messages" fields are present and valid JSON.' />
               <ErrorRow status={401} type="auth_error" cause="Missing or invalid API key." fix="Ensure your Authorization header is: Bearer sk-aether-..." />
               <ErrorRow status={402} type="billing_error" cause="Not enough credits to complete the request." fix="Buy more credits or claim daily credits from the Billing page." />
-              <ErrorRow status={403} type="claim_required" cause="Premium model (gm/) used without claiming daily requests." fix='Go to Billing > "Claim Daily GM Requests" before making requests.' />
+              <ErrorRow status={403} type="claim_required" cause="Premium model (an/) used without claiming daily requests." fix='Go to Billing > "Claim Daily Premium Requests" before making requests.' />
               <ErrorRow status={403} type="invalid_request" cause="Model is restricted or not in the allowed pool." fix="Check the Models page for currently available models." />
               <ErrorRow status={404} type="invalid_request" cause="The requested model ID doesn't exist or is disabled." fix="Check exact model ID on the Models page (IDs are case-sensitive)." />
               <ErrorRow status={413} type="context_limit" cause="Your prompt exceeds the max context length for your plan." fix="Shorten your messages or upgrade your plan for a higher context limit." />

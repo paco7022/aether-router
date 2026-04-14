@@ -37,7 +37,7 @@ export default async function BillingPage() {
       .limit(50),
   ]);
 
-  // Fetch gm/ usage for today and plan limits
+  // Fetch premium model usage (w/, c/, an/) for today and plan limits
   const admin = createAdminClient();
   const todayStart = new Date();
   todayStart.setUTCHours(0, 0, 0, 0);
@@ -47,7 +47,7 @@ export default async function BillingPage() {
       .from("usage_logs")
       .select("premium_cost")
       .eq("user_id", user!.id)
-      .or("model_id.like.gm/%,model_id.like.c/%,model_id.like.an/%")
+      .or("model_id.like.c/%,model_id.like.an/%,model_id.like.w/%")
       .gte("created_at", todayStart.toISOString()),
     admin
       .from("plans")

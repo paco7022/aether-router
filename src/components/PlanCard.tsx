@@ -133,7 +133,7 @@ export function PlanCard({
         ) : (
           <>
             <p className="text-xs font-semibold text-violet-400/80 mb-1.5">
-              Premium Models (gm/)
+              Premium Models (w/, c/, an/)
             </p>
             <div className="space-y-0.5 text-xs text-[var(--text-muted)]">
               <p>

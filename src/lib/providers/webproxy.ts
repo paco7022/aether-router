@@ -30,7 +30,9 @@ export const webproxyProvider: Provider = {
         signal,
       });
 
-      if (res.ok || (res.status >= 400 && res.status < 403) || res.status === 404) {
+      // Pass through success, client errors, and 429 (capacity) without retry.
+      // Only retry transient upstream failures (500/502/504).
+      if (res.ok || res.status < 500 || res.status === 503) {
         return res;
       }
 

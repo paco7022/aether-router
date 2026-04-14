@@ -131,18 +131,9 @@ export async function POST(req: NextRequest) {
   }
 
   const isPremiumProvider =
-    model.provider === "gameron" ||
     model.provider === "lightningzeus" ||
     model.provider === "antigravity" ||
     model.provider === "webproxy";
-
-  // Beta gate: webproxy is in testing — only custom keys (admin-created) may use it.
-  if (model.provider === "webproxy" && !keyInfo.isCustom) {
-    return NextResponse.json(
-      { error: { message: `Model '${modelId}' is in private beta.`, type: "access_denied" } },
-      { status: 403 }
-    );
-  }
 
   // 5.4. Active free event lookup (admin-created pools that make a model
   // prefix free for a set of plans, with their own per-user limits).
@@ -263,7 +254,7 @@ export async function POST(req: NextRequest) {
 
     if (used >= limit) {
       return NextResponse.json(
-        { error: { message: `Daily pool exhausted (${limit} requests/day). Try gm/ models instead.`, type: "rate_limit" } },
+        { error: { message: `Daily pool exhausted (${limit} requests/day). Try w/ models instead.`, type: "rate_limit" } },
         { status: 429 }
       );
     }
@@ -280,7 +271,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Per-key rate limit (defaults to 60s for premium, no limit for non-premium)
-    const isPremium = model.provider === "gameron" || model.provider === "lightningzeus" || model.provider === "antigravity";
+    const isPremium = model.provider === "lightningzeus" || model.provider === "antigravity" || model.provider === "webproxy";
     const rlSeconds = keyInfo.rateLimitSeconds ?? (isPremium ? 60 : 0);
     if (rlSeconds > 0) {
       const windowAgo = new Date(Date.now() - rlSeconds * 1000).toISOString();
@@ -348,7 +339,7 @@ export async function POST(req: NextRequest) {
       }
     }
   } else if (!activeEvent) {
-    // 5.5b-normal. Premium plan limits (requests/day + context cap) — applies to gameron AND lightningzeus.
+    // 5.5b-normal. Premium plan limits (requests/day + context cap) — applies to lightningzeus, antigravity, webproxy.
     // Skipped entirely when an active event covers this model for the user's plan.
     if (isPremiumProvider) {
       // Rate limit: 1 request per minute per user on premium models
@@ -357,7 +348,7 @@ export async function POST(req: NextRequest) {
         .from("usage_logs")
         .select("created_at")
         .eq("user_id", keyInfo.userId)
-        .or("model_id.like.gm/%,model_id.like.c/%,model_id.like.an/%")
+        .or("model_id.like.c/%,model_id.like.an/%,model_id.like.w/%")
         .gte("created_at", oneMinuteAgo)
         .limit(1)
         .maybeSingle();
@@ -377,16 +368,16 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // Block gm/ and an/ models for free and basic ($3) tiers — they only get c/ models
-      if ((model.provider === "gameron" || model.provider === "antigravity") && (keyInfo.planId === "free" || keyInfo.planId === "basic")) {
+      // Block an/ models for free and basic ($3) tiers — they only get c/ and w/ models
+      if (model.provider === "antigravity" && (keyInfo.planId === "free" || keyInfo.planId === "basic")) {
         return NextResponse.json(
-          { error: { message: "Oops, it seems that something has gone wrong, you do not have access to this model, try with c/ or upgrade your plan.", type: "plan_restricted" } },
+          { error: { message: "Oops, it seems that something has gone wrong, you do not have access to this model, try with c/ or w/ or upgrade your plan.", type: "plan_restricted" } },
           { status: 403 }
         );
       }
 
-      // Gameron/Antigravity: require daily claim (only for plans that have gm/ access)
-      if (model.provider === "gameron" || model.provider === "antigravity") {
+      // Antigravity: require daily claim
+      if (model.provider === "antigravity") {
         const today = new Date().toISOString().split("T")[0];
         if (keyInfo.gmClaimedDate !== today) {
           return NextResponse.json(
@@ -420,7 +411,7 @@ export async function POST(req: NextRequest) {
           .from("usage_logs")
           .select("premium_cost")
           .eq("user_id", keyInfo.userId)
-          .or("model_id.like.gm/%,model_id.like.c/%,model_id.like.an/%")
+          .or("model_id.like.c/%,model_id.like.an/%,model_id.like.w/%")
           .gte("created_at", todayStart.toISOString());
 
         if (premiumErr) {
@@ -439,7 +430,7 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      if (gmMaxContext > 0 && (model.provider === "gameron" || model.provider === "antigravity")) {
+      if (gmMaxContext > 0 && model.provider === "antigravity") {
         const estimatedContext = estimatePromptTokens(messages);
         if (estimatedContext > gmMaxContext) {
           return NextResponse.json(
@@ -1016,7 +1007,7 @@ async function handleStreamingResponse(
       }
 
       const durationMs = Date.now() - startTime;
-      const isPremium = model.provider === "gameron" || model.provider === "lightningzeus" || model.provider === "antigravity" || model.provider === "webproxy";
+      const isPremium = model.provider === "lightningzeus" || model.provider === "antigravity" || model.provider === "webproxy";
       const streamPremiumCost = isPremium && !activeEventId ? Number(model.premium_request_cost ?? 1) : 0;
       const { error: usageLogError } = await supabase.from("usage_logs").insert({
         user_id: keyInfo.userId,

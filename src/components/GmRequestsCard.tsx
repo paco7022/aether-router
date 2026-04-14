@@ -40,7 +40,7 @@ export function GmRequestsCard({
     setLoading(false);
   }
 
-  // ALL users must claim daily to unlock gm/ models
+  // ALL users must claim daily to unlock an/ models (w/ and c/ work without claim)
   const needsClaim = !hasClaimed;
 
   return (
@@ -49,7 +49,7 @@ export function GmRequestsCard({
         <div>
           <h4 className="font-semibold text-sm text-white/85">Premium Model Requests</h4>
           <p className="text-xs text-[var(--text-muted)]">
-            Daily usage for premium models (gm/, c/ and an/)
+            Daily usage for premium models (w/, c/ and an/)
           </p>
         </div>
         <div className="flex gap-1">
@@ -61,7 +61,7 @@ export function GmRequestsCard({
               color: "rgba(167, 139, 250, 0.9)",
             }}
           >
-            gm/
+            w/
           </span>
           <span
             className="text-[10px] px-2.5 py-0.5 rounded-full font-medium"
@@ -89,7 +89,7 @@ export function GmRequestsCard({
       {needsClaim ? (
         <div className="text-center py-4">
           <p className="text-sm text-[var(--text-muted)] mb-3">
-            Claim your daily premium requests to use gm/ and an/ models.
+            Claim your daily premium requests to use an/ models (w/ and c/ work without claim).
           </p>
           <button
             onClick={handleClaim}

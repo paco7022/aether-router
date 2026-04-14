@@ -59,7 +59,7 @@ export default async function DashboardLayout({
           <span aria-hidden className="font-mono text-amber-300/90 pt-0.5">!</span>
           <p className="leading-relaxed">
             <span className="font-semibold text-amber-200/95">Heads up:</span>{" "}
-            <code className="font-mono text-[11px] px-1 py-0.5 rounded bg-white/[0.04]">gm/</code>,{" "}
+            <code className="font-mono text-[11px] px-1 py-0.5 rounded bg-white/[0.04]">w/</code>,{" "}
             <code className="font-mono text-[11px] px-1 py-0.5 rounded bg-white/[0.04]">c/</code> and{" "}
             <code className="font-mono text-[11px] px-1 py-0.5 rounded bg-white/[0.04]">an/</code>{" "}
             models are routed through third-party providers. They come with{" "}

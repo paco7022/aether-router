@@ -115,7 +115,7 @@ export default function PoliciesPage() {
           <p>
             The reason is structural: the models exposed under the{" "}
             <code className="font-mono text-[12px] px-1 py-0.5 rounded bg-white/[0.04]">
-              gm/
+              w/
             </code>
             ,{" "}
             <code className="font-mono text-[12px] px-1 py-0.5 rounded bg-white/[0.04]">

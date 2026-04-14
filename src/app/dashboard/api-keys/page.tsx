@@ -189,7 +189,7 @@ export default function ApiKeysPage() {
   -H "Authorization: Bearer ak_your_key_here" \\
   -H "Content-Type: application/json" \\
   -d '{
-    "model": "gm/gemini-3.1-pro-preview",
+    "model": "w/gemini",
     "messages": [{"role": "user", "content": "Hello!"}]
   }'`}
         </pre>
