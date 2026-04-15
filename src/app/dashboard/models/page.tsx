@@ -112,7 +112,7 @@ export default async function ModelsPage() {
                     )}
                   </td>
                   <td className="px-5 py-3.5 text-right font-semibold aurora-text">
-                    {isPremium ? "1 / req" : creditsInput.toLocaleString()}
+                    {isPremium ? "1 credit" : creditsInput.toLocaleString()}
                   </td>
                 </tr>
               );
