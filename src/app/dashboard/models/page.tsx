@@ -44,6 +44,27 @@ export default async function ModelsPage() {
         </div>
       </div>
 
+      <div
+        className="mb-6 rounded-lg px-4 py-3 text-xs flex items-start gap-3"
+        style={{
+          background: "linear-gradient(135deg, rgba(139, 92, 246, 0.08), rgba(34, 211, 238, 0.06))",
+          border: "1px solid rgba(139, 92, 246, 0.2)",
+          color: "rgba(196, 181, 253, 0.95)",
+        }}
+      >
+        <span aria-hidden className="font-mono text-violet-300/90 pt-0.5">★</span>
+        <div className="leading-relaxed space-y-1">
+          <p>
+            <span className="font-semibold text-violet-200/95">Premium-request models</span>{" "}
+            (<code className="font-mono text-[11px] px-1 py-0.5 rounded bg-white/[0.04]">t/</code>,{" "}
+            <code className="font-mono text-[11px] px-1 py-0.5 rounded bg-white/[0.04]">an/</code>,{" "}
+            <code className="font-mono text-[11px] px-1 py-0.5 rounded bg-white/[0.04]">w/</code>)
+            are flat-rate: <span className="font-semibold">1 credit per request</span>, plus they consume the
+            number of premium requests shown in the &quot;Premium Cost&quot; column from your daily premium pool.
+          </p>
+        </div>
+      </div>
+
       <div className="glass-card shimmer-line overflow-hidden">
         <table className="w-full text-sm aurora-table">
           <thead>
@@ -57,6 +78,10 @@ export default async function ModelsPage() {
           </thead>
           <tbody>
             {(models || []).map((model) => {
+              const isPremium =
+                model.provider === "trolllm" ||
+                model.provider === "antigravity" ||
+                model.provider === "webproxy";
               const creditsInput = pricePerMTokens(model.cost_per_m_input, model.margin);
               const creditsOutput = pricePerMTokens(model.cost_per_m_output, model.margin);
               const priceInput = creditsToUsd(creditsInput);
@@ -68,10 +93,10 @@ export default async function ModelsPage() {
                     <p className="text-[11px] text-cyan-300/50 font-mono mt-0.5">{model.id}</p>
                   </td>
                   <td className="px-5 py-3.5 text-right text-white/70">
-                    ${priceInput.toFixed(4)}
+                    {isPremium ? <span className="text-[var(--text-muted)]">—</span> : `$${priceInput.toFixed(4)}`}
                   </td>
                   <td className="px-5 py-3.5 text-right text-white/70">
-                    ${priceOutput.toFixed(4)}
+                    {isPremium ? <span className="text-[var(--text-muted)]">—</span> : `$${priceOutput.toFixed(4)}`}
                   </td>
                   <td className="px-5 py-3.5 text-right text-white/70">
                     {Number(model.premium_request_cost) > 0 ? (
@@ -87,7 +112,7 @@ export default async function ModelsPage() {
                     )}
                   </td>
                   <td className="px-5 py-3.5 text-right font-semibold aurora-text">
-                    {creditsInput.toLocaleString()}
+                    {isPremium ? "1 / req" : creditsInput.toLocaleString()}
                   </td>
                 </tr>
               );
