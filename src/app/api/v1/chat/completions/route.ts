@@ -578,7 +578,7 @@ export async function POST(req: NextRequest) {
           margin: model.margin,
         }
       );
-      const reservedCredits = Math.max(reservedCreditsRaw, 1);
+      const reservedCredits = isPremiumProvider ? 1 : Math.max(reservedCreditsRaw, 1);
 
       if (keyInfo.isCustom && keyInfo.customCredits !== null) {
         const { data: keyBalance, error: reserveErr } = await supabase.rpc("deduct_custom_key_credits", {
@@ -733,7 +733,8 @@ export async function POST(req: NextRequest) {
       cacheTokens
     );
 
-    const finalCredits = isFreePool ? 0 : Math.max(credits, 1);
+    // Premium-request models (t/, an/, w/) are flat-rate: 1 credit + N premium-request budget.
+    const finalCredits = isFreePool ? 0 : isPremiumProvider ? 1 : Math.max(credits, 1);
 
     // 9. Deduct credits (skip for free-pool models)
     let newBalance = 0;
@@ -938,7 +939,9 @@ async function handleStreamingResponse(
         { read: cacheReadTokens, write: cacheWriteTokens }
       );
 
-      const finalCredits = isFreePool ? 0 : Math.max(credits, 1);
+      const isPremiumModel = model.provider === "trolllm" || model.provider === "antigravity" || model.provider === "webproxy";
+      // Premium-request models (t/, an/, w/) are flat-rate: 1 credit + N premium-request budget.
+      const finalCredits = isFreePool ? 0 : isPremiumModel ? 1 : Math.max(credits, 1);
 
       let wasCharged = isFreePool; // free pool is always "success" for logging
       let balanceAfter = reservation?.balanceAfterReserve ?? 0;
