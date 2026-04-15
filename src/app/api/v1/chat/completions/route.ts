@@ -19,6 +19,35 @@ type StreamChargeReservation = {
   balanceAfterReserve: number;
 };
 
+type UsageLike = {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+  prompt_tokens_details?: {
+    cached_tokens?: number;
+    cache_creation_tokens?: number;
+  };
+};
+
+// TrollLLM (and other Anthropic-fronting gateways) may expose cache counters
+// either in OpenAI's `prompt_tokens_details.cached_tokens` shape or in
+// Anthropic's `cache_read_input_tokens` / `cache_creation_input_tokens` shape.
+// Accept both so billing matches whichever upstream format leaks through.
+function extractCacheTokens(usage: UsageLike | undefined): { read: number; write: number } {
+  if (!usage) return { read: 0, write: 0 };
+  const read =
+    Number(usage.cache_read_input_tokens) ||
+    Number(usage.prompt_tokens_details?.cached_tokens) ||
+    0;
+  const write =
+    Number(usage.cache_creation_input_tokens) ||
+    Number(usage.prompt_tokens_details?.cache_creation_tokens) ||
+    0;
+  return { read: read > 0 ? read : 0, write: write > 0 ? write : 0 };
+}
+
 function extractCompletionText(payload: unknown): string {
   const data = payload as { choices?: Array<{ message?: { content?: unknown } }> };
   const text = data?.choices?.[0]?.message?.content;
@@ -131,7 +160,7 @@ export async function POST(req: NextRequest) {
   }
 
   const isPremiumProvider =
-    model.provider === "lightningzeus" ||
+    model.provider === "trolllm" ||
     model.provider === "antigravity" ||
     model.provider === "webproxy";
 
@@ -238,28 +267,6 @@ export async function POST(req: NextRequest) {
     activeEventId = activeEvent.id;
   }
 
-  // 5.5a. LightningZeus global pool check (c/ models) — skipped when an event covers this model
-  if (!activeEvent && model.provider === "lightningzeus") {
-    const today = new Date().toISOString().split("T")[0];
-
-    // Check global pool
-    const { data: pool } = await supabase
-      .from("lightningzeus_daily_pool")
-      .select("used, pool_limit")
-      .eq("pool_date", today)
-      .maybeSingle();
-
-    const used = pool?.used ?? 0;
-    const limit = pool?.pool_limit ?? 3000;
-
-    if (used >= limit) {
-      return NextResponse.json(
-        { error: { message: `Daily pool exhausted (${limit} requests/day). Try w/ models instead.`, type: "rate_limit" } },
-        { status: 429 }
-      );
-    }
-  }
-
   // 5.5b. Custom key checks — custom keys bypass plan restrictions and use their own limits
   if (keyInfo.isCustom) {
     // Provider allowlist
@@ -271,7 +278,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Per-key rate limit (defaults to 60s for premium, no limit for non-premium)
-    const isPremium = model.provider === "lightningzeus" || model.provider === "antigravity" || model.provider === "webproxy";
+    const isPremium = model.provider === "trolllm" || model.provider === "antigravity" || model.provider === "webproxy";
     const rlSeconds = keyInfo.rateLimitSeconds ?? (isPremium ? 60 : 0);
     if (rlSeconds > 0) {
       const windowAgo = new Date(Date.now() - rlSeconds * 1000).toISOString();
@@ -339,7 +346,7 @@ export async function POST(req: NextRequest) {
       }
     }
   } else if (!activeEvent) {
-    // 5.5b-normal. Premium plan limits (requests/day + context cap) — applies to lightningzeus, antigravity, webproxy.
+    // 5.5b-normal. Premium plan limits (requests/day + context cap) — applies to trolllm, antigravity, webproxy.
     // Skipped entirely when an active event covers this model for the user's plan.
     if (isPremiumProvider) {
       // Rate limit: 1 request per minute per user on premium models
@@ -348,7 +355,7 @@ export async function POST(req: NextRequest) {
         .from("usage_logs")
         .select("created_at")
         .eq("user_id", keyInfo.userId)
-        .or("model_id.like.c/%,model_id.like.an/%,model_id.like.w/%")
+        .or("model_id.like.t/%,model_id.like.an/%,model_id.like.w/%")
         .gte("created_at", oneMinuteAgo)
         .limit(1)
         .maybeSingle();
@@ -368,10 +375,10 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // Block an/ models for free and basic ($3) tiers — they only get c/ and w/ models
+      // Block an/ models for free and basic ($3) tiers — they only get t/ and w/ models
       if (model.provider === "antigravity" && (keyInfo.planId === "free" || keyInfo.planId === "basic")) {
         return NextResponse.json(
-          { error: { message: "Oops, it seems that something has gone wrong, you do not have access to this model, try with c/ or w/ or upgrade your plan.", type: "plan_restricted" } },
+          { error: { message: "Oops, it seems that something has gone wrong, you do not have access to this model, try with t/ or w/ or upgrade your plan.", type: "plan_restricted" } },
           { status: 403 }
         );
       }
@@ -411,7 +418,7 @@ export async function POST(req: NextRequest) {
           .from("usage_logs")
           .select("premium_cost")
           .eq("user_id", keyInfo.userId)
-          .or("model_id.like.c/%,model_id.like.an/%,model_id.like.w/%")
+          .or("model_id.like.t/%,model_id.like.an/%,model_id.like.w/%")
           .gte("created_at", todayStart.toISOString());
 
         if (premiumErr) {
@@ -566,6 +573,8 @@ export async function POST(req: NextRequest) {
         {
           cost_per_m_input: model.cost_per_m_input,
           cost_per_m_output: model.cost_per_m_output,
+          cost_per_m_cache_read: model.cost_per_m_cache_read ?? 0,
+          cost_per_m_cache_write: model.cost_per_m_cache_write ?? 0,
           margin: model.margin,
         }
       );
@@ -688,11 +697,12 @@ export async function POST(req: NextRequest) {
 
     // 8. Handle non-streaming
     const data = await providerResponse.json() as {
-      usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+      usage?: UsageLike;
       [key: string]: unknown;
     };
 
-    let usage = data.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+    let usage: UsageLike = data.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+    let cacheTokens = extractCacheTokens(usage);
 
     // Some providers omit usage on non-stream responses; estimate to avoid zero-charge responses.
     if (!usage.total_tokens || usage.total_tokens <= 0) {
@@ -703,16 +713,24 @@ export async function POST(req: NextRequest) {
         completion_tokens: estimatedCompletion,
         total_tokens: estimatedPrompt + estimatedCompletion,
       };
+      cacheTokens = { read: 0, write: 0 };
     }
 
+    const promptTokens = usage.prompt_tokens ?? 0;
+    const completionTokens = usage.completion_tokens ?? 0;
+    const totalTokens = usage.total_tokens ?? promptTokens + completionTokens;
+
     const { credits, costUsd } = calculateCredits(
-      usage.prompt_tokens,
-      usage.completion_tokens,
+      promptTokens,
+      completionTokens,
       {
         cost_per_m_input: model.cost_per_m_input,
         cost_per_m_output: model.cost_per_m_output,
+        cost_per_m_cache_read: model.cost_per_m_cache_read ?? 0,
+        cost_per_m_cache_write: model.cost_per_m_cache_write ?? 0,
         margin: model.margin,
-      }
+      },
+      cacheTokens
     );
 
     const finalCredits = isFreePool ? 0 : Math.max(credits, 1);
@@ -773,9 +791,11 @@ export async function POST(req: NextRequest) {
       user_id: keyInfo.userId,
       api_key_id: keyInfo.keyId,
       model_id: modelId,
-      prompt_tokens: usage.prompt_tokens,
-      completion_tokens: usage.completion_tokens,
-      total_tokens: usage.total_tokens,
+      prompt_tokens: promptTokens,
+      completion_tokens: completionTokens,
+      total_tokens: totalTokens,
+      cache_read_tokens: cacheTokens.read,
+      cache_write_tokens: cacheTokens.write,
       credits_charged: finalCredits,
       cost_usd: costUsd,
       status: "success",
@@ -792,7 +812,7 @@ export async function POST(req: NextRequest) {
         amount: -finalCredits,
         balance: newBalance,
         type: keyInfo.isCustom ? "custom_key_usage" : "usage",
-        description: `${modelId} - ${usage.total_tokens} tokens`,
+        description: `${modelId} - ${totalTokens} tokens`,
       });
       if (txError) {
         console.error("Failed to write transaction log:", txError.message);
@@ -800,21 +820,16 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-      // Increment lightningzeus global pool counter — skip while an event covers this model
-      if (!activeEventId && model.provider === "lightningzeus") {
-        await incrementLightningzeusPool(supabase);
-      }
-
       // Increment daily token pool only when the request was actually free.
       // Paid nano requests (after a user crosses their 200k free threshold)
       // shouldn't eat into the global free pool.
       if (freePoolName && isFreePool) {
-        await incrementDailyTokenPool(supabase, freePoolName, usage.total_tokens);
+        await incrementDailyTokenPool(supabase, freePoolName, totalTokens);
       }
 
       // Increment active free event token pool
       if (activeEventId) {
-        await incrementFreeEventTokens(supabase, activeEventId, usage.total_tokens);
+        await incrementFreeEventTokens(supabase, activeEventId, totalTokens);
       }
     } catch (postAccountingError) {
       console.error("Post-request pool accounting failed:", postAccountingError);
@@ -852,7 +867,7 @@ export async function POST(req: NextRequest) {
 async function handleStreamingResponse(
   providerResponse: Response,
   keyInfo: { userId: string; keyId: string; credits: number; isCustom: boolean; customCredits: number | null },
-  model: { id: string; provider: string; cost_per_m_input: number; cost_per_m_output: number; margin: number; premium_request_cost?: number },
+  model: { id: string; provider: string; cost_per_m_input: number; cost_per_m_output: number; cost_per_m_cache_read?: number; cost_per_m_cache_write?: number; margin: number; premium_request_cost?: number },
   startTime: number,
   estimatedPromptTokens: number = 0,
   isFreePool: boolean = false,
@@ -863,6 +878,8 @@ async function handleStreamingResponse(
   const supabase = createAdminClient();
   let totalPromptTokens = 0;
   let totalCompletionTokens = 0;
+  let cacheReadTokens = 0;
+  let cacheWriteTokens = 0;
   let completionText = "";
   let hasUsageData = false;
 
@@ -885,6 +902,9 @@ async function handleStreamingResponse(
             hasUsageData = true;
             totalPromptTokens = parsed.usage.prompt_tokens ?? totalPromptTokens;
             totalCompletionTokens = parsed.usage.completion_tokens ?? totalCompletionTokens;
+            const streamCache = extractCacheTokens(parsed.usage);
+            if (streamCache.read > 0) cacheReadTokens = streamCache.read;
+            if (streamCache.write > 0) cacheWriteTokens = streamCache.write;
           }
           // Accumulate completion text for fallback estimation
           const delta = parsed.choices?.[0]?.delta?.content;
@@ -911,8 +931,11 @@ async function handleStreamingResponse(
         {
           cost_per_m_input: model.cost_per_m_input,
           cost_per_m_output: model.cost_per_m_output,
+          cost_per_m_cache_read: model.cost_per_m_cache_read ?? 0,
+          cost_per_m_cache_write: model.cost_per_m_cache_write ?? 0,
           margin: model.margin,
-        }
+        },
+        { read: cacheReadTokens, write: cacheWriteTokens }
       );
 
       const finalCredits = isFreePool ? 0 : Math.max(credits, 1);
@@ -1007,7 +1030,7 @@ async function handleStreamingResponse(
       }
 
       const durationMs = Date.now() - startTime;
-      const isPremium = model.provider === "lightningzeus" || model.provider === "antigravity" || model.provider === "webproxy";
+      const isPremium = model.provider === "trolllm" || model.provider === "antigravity" || model.provider === "webproxy";
       const streamPremiumCost = isPremium && !activeEventId ? Number(model.premium_request_cost ?? 1) : 0;
       const { error: usageLogError } = await supabase.from("usage_logs").insert({
         user_id: keyInfo.userId,
@@ -1016,6 +1039,8 @@ async function handleStreamingResponse(
         prompt_tokens: totalPromptTokens,
         completion_tokens: totalCompletionTokens,
         total_tokens: totalTokens,
+        cache_read_tokens: cacheReadTokens,
+        cache_write_tokens: cacheWriteTokens,
         credits_charged: chargedCredits,
         cost_usd: costUsd,
         status: isFreePool ? "success" : billingStatus,
@@ -1041,13 +1066,6 @@ async function handleStreamingResponse(
       }
 
       try {
-        if (wasCharged && !isFreePool) {
-          // Increment lightningzeus global pool counter — skip under active event
-          if (!activeEventId && model.provider === "lightningzeus") {
-            await incrementLightningzeusPool(supabase);
-          }
-        }
-
         // Increment daily token pool only for requests that were actually free.
         if (freePoolName && isFreePool) {
           await incrementDailyTokenPool(supabase, freePoolName, totalTokens);
@@ -1082,17 +1100,6 @@ async function handleStreamingResponse(
       Connection: "keep-alive",
     },
   });
-}
-
-async function incrementLightningzeusPool(supabase: ReturnType<typeof createAdminClient>) {
-  const { error } = await supabase.rpc("increment_lightningzeus_pool", {
-    p_increment: 1,
-    p_default_limit: 3000,
-  });
-
-  if (error) {
-    throw new Error(`Failed to increment lightningzeus pool: ${error.message}`);
-  }
 }
 
 async function incrementDailyTokenPool(

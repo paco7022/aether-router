@@ -1,7 +1,7 @@
 import type { Provider } from "./types";
 import { airforceProvider } from "./airforce";
 import { geminiCliProvider } from "./gemini-cli";
-import { lightningzeusProvider } from "./lightningzeus";
+import { trolllmProvider } from "./trolllm";
 import { antigravityProvider } from "./antigravity";
 import { nanoProvider } from "./nano";
 import { webproxyProvider } from "./webproxy";
@@ -9,7 +9,7 @@ import { webproxyProvider } from "./webproxy";
 const providers: Record<string, Provider> = {
   airforce: airforceProvider,
   "gemini-cli": geminiCliProvider,
-  lightningzeus: lightningzeusProvider,
+  trolllm: trolllmProvider,
   antigravity: antigravityProvider,
   nano: nanoProvider,
   webproxy: webproxyProvider,

@@ -3,14 +3,18 @@ import type { Provider, ProviderRequest } from "./types";
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 1000;
 
-export const lightningzeusProvider: Provider = {
-  name: "lightningzeus",
-  baseUrl: process.env.LIGHTNINGZEUS_BASE_URL || "https://lightningzeus.com/v1",
+// TrollLLM (t/): pay-per-token OpenAI-compatible reseller fronting
+// Anthropic, OpenAI, and Google. Upstream already applies prompt caching
+// for Anthropic models, so billing reads cache_read/cache_write tokens
+// out of the returned usage object (see chat/completions route).
+export const trolllmProvider: Provider = {
+  name: "trolllm",
+  baseUrl: process.env.TROLLLLM_BASE_URL || "https://chat.trollllm.xyz/v1",
 
   async forward(request: ProviderRequest, signal?: AbortSignal): Promise<Response> {
-    const apiKey = process.env.LIGHTNINGZEUS_API_KEY;
+    const apiKey = process.env.TROLLLLM_API_KEY;
     if (!apiKey) {
-      throw new Error("LIGHTNINGZEUS_API_KEY not configured");
+      throw new Error("TROLLLLM_API_KEY not configured");
     }
 
     let lastResponse: Response | null = null;
@@ -30,7 +34,9 @@ export const lightningzeusProvider: Provider = {
         signal,
       });
 
-      if (res.ok || (res.status >= 400 && res.status < 403) || res.status === 404) {
+      // Pass through success, client errors, and 429 without retry.
+      // Only retry transient upstream failures (500/502/504).
+      if (res.ok || res.status < 500 || res.status === 503) {
         return res;
       }
 
