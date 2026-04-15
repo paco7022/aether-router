@@ -424,7 +424,7 @@ export default function AdminPage() {
     { id: "events", label: "Events" },
   ];
 
-  const ALL_PLANS = ["free", "basic", "pro", "creator", "master", "ultra", "ultimate"];
+  const ALL_PLANS = ["free", "pro", "creator", "master", "ultra", "ultimate"];
 
   return (
     <div>
@@ -584,7 +584,6 @@ export default function AdminPage() {
                     <select value={planSelect} onChange={(e) => setPlanSelect(e.target.value)}
                       className="flex-1 bg-[var(--bg-input)] border border-white/[0.06] rounded-lg px-3 py-1.5 text-sm text-white/90">
                       <option value="free">free</option>
-                      <option value="basic">basic</option>
                       <option value="pro">pro</option>
                       <option value="creator">creator</option>
                       <option value="master">master</option>

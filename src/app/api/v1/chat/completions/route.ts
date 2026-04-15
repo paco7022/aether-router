@@ -375,8 +375,8 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // Block an/ models for free and basic ($3) tiers — they only get t/ and w/ models
-      if (model.provider === "antigravity" && (keyInfo.planId === "free" || keyInfo.planId === "basic")) {
+      // Block an/ models for free tier — they only get t/ and w/ models
+      if (model.provider === "antigravity" && keyInfo.planId === "free") {
         return NextResponse.json(
           { error: { message: "Oops, it seems that something has gone wrong, you do not have access to this model, try with t/ or w/ or upgrade your plan.", type: "plan_restricted" } },
           { status: 403 }
@@ -437,7 +437,10 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      if (gmMaxContext > 0 && model.provider === "antigravity") {
+      // Context cap applies to all premium providers (t/, an/, w/). Free
+      // tier only has t/ and w/ access — the previous antigravity-only check
+      // meant their plan-level context cap was never actually enforced.
+      if (gmMaxContext > 0) {
         const estimatedContext = estimatePromptTokens(messages);
         if (estimatedContext > gmMaxContext) {
           return NextResponse.json(

@@ -116,10 +116,10 @@ export function PlanCard({
 
       {/* Premium model limits */}
       <div className="mb-4 pt-3 border-t border-white/[0.04]">
-        {plan.id === "free" || plan.id === "basic" ? (
+        {plan.id === "free" ? (
           <>
             <p className="text-xs font-semibold text-cyan-400/80 mb-1.5">
-              Premium Models (c/)
+              Premium Models (t/, w/)
             </p>
             <div className="space-y-0.5 text-xs text-[var(--text-muted)]">
               <p>
@@ -127,13 +127,17 @@ export function PlanCard({
                   ? `${plan.gm_daily_requests} requests/day`
                   : "Unlimited requests"}
               </p>
-              <p>Unlimited context</p>
+              <p>
+                {plan.gm_max_context > 0
+                  ? `${(plan.gm_max_context / 1024).toFixed(0)}k context`
+                  : "Unlimited context"}
+              </p>
             </div>
           </>
         ) : (
           <>
             <p className="text-xs font-semibold text-violet-400/80 mb-1.5">
-              Premium Models (w/, c/, an/)
+              Premium Models (t/, w/, an/)
             </p>
             <div className="space-y-0.5 text-xs text-[var(--text-muted)]">
               <p>
