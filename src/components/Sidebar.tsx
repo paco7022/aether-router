@@ -57,6 +57,12 @@ const icons = {
       <circle cx="12" cy="12" r="3" />
     </svg>
   ),
+  analytics: (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 3v18h18" />
+      <path d="M18 17V9" /><path d="M13 17V5" /><path d="M8 17v-3" />
+    </svg>
+  ),
   logout: (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
@@ -71,6 +77,7 @@ const nav = [
   { href: "/dashboard/api-keys", label: "API Keys", icon: icons.key },
   { href: "/dashboard/models", label: "Models", icon: icons.models },
   { href: "/dashboard/usage", label: "Usage", icon: icons.usage },
+  { href: "/dashboard/analytics", label: "Analytics", icon: icons.analytics },
   { href: "/dashboard/billing", label: "Billing", icon: icons.billing },
   { href: "/dashboard/docs", label: "Docs", icon: icons.docs },
   { href: "/policies", label: "Policies", icon: icons.policies },

@@ -45,7 +45,30 @@ interface Model {
   cost_per_m_output: number;
   margin: number;
   context_length: number;
+  capabilities: string[];
 }
+
+const ALL_CAPABILITIES = [
+  "tool_calling",
+  "vision",
+  "web_search",
+  "streaming",
+  "json_mode",
+  "system_message",
+  "reasoning",
+  "pdf_input",
+] as const;
+
+const CAPABILITY_LABELS: Record<string, string> = {
+  tool_calling: "Tools",
+  vision: "Vision",
+  web_search: "Search",
+  streaming: "Stream",
+  json_mode: "JSON",
+  system_message: "System",
+  reasoning: "Reasoning",
+  pdf_input: "PDF",
+};
 
 interface Plan {
   id: string;
@@ -308,6 +331,25 @@ export default function AdminPage() {
   async function handleToggleModel(modelId: string, active: boolean) {
     await api("POST", undefined, { action: "toggle_model", model_id: modelId, is_active: active });
     setModels((prev) => prev.map((m) => (m.id === modelId ? { ...m, is_active: active } : m)));
+  }
+
+  async function handleToggleCapability(modelId: string, capability: string) {
+    const model = models.find((m) => m.id === modelId);
+    if (!model) return;
+    const current = model.capabilities || [];
+    const updated = current.includes(capability)
+      ? current.filter((c) => c !== capability)
+      : [...current, capability];
+    const result = await api("POST", undefined, {
+      action: "update_model_capabilities",
+      model_id: modelId,
+      capabilities: updated,
+    });
+    if (result.ok) {
+      setModels((prev) =>
+        prev.map((m) => (m.id === modelId ? { ...m, capabilities: updated } : m))
+      );
+    }
   }
 
   async function handleTogglePlan(planId: string, active: boolean) {
@@ -706,41 +748,65 @@ export default function AdminPage() {
       {/* Models Tab */}
       {tab === "models" && (
         <div className="glass-card shimmer-line overflow-hidden">
-          <table className="w-full text-sm aurora-table">
-            <thead>
-              <tr className="text-[var(--text-muted)] text-left">
-                <th className="px-4 py-3.5 font-medium text-xs uppercase tracking-wider">Model ID</th>
-                <th className="px-4 py-3.5 font-medium text-xs uppercase tracking-wider">Provider</th>
-                <th className="px-4 py-3.5 font-medium text-xs uppercase tracking-wider">Upstream</th>
-                <th className="px-4 py-3.5 font-medium text-xs uppercase tracking-wider">Input $/M</th>
-                <th className="px-4 py-3.5 font-medium text-xs uppercase tracking-wider">Output $/M</th>
-                <th className="px-4 py-3.5 font-medium text-xs uppercase tracking-wider">Margin</th>
-                <th className="px-4 py-3.5 font-medium text-xs uppercase tracking-wider text-center">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {models.map((m) => (
-                <tr key={m.id}>
-                  <td className="px-4 py-3 font-mono text-xs text-cyan-300/60">{m.id}</td>
-                  <td className="px-4 py-3 text-white/70">{m.provider}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-[var(--text-muted)]">{m.upstream_model_id}</td>
-                  <td className="px-4 py-3 text-white/70">${m.cost_per_m_input}</td>
-                  <td className="px-4 py-3 text-white/70">${m.cost_per_m_output}</td>
-                  <td className="px-4 py-3 text-white/70">{m.margin}x</td>
-                  <td className="px-4 py-3 text-center">
-                    <button
-                      onClick={() => handleToggleModel(m.id, !m.is_active)}
-                      className={`text-[11px] px-3 py-1 rounded-full font-medium transition-colors ${
-                        m.is_active ? "badge-success" : "badge-error"
-                      }`}
-                    >
-                      {m.is_active ? "Active" : "Inactive"}
-                    </button>
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm aurora-table">
+              <thead>
+                <tr className="text-[var(--text-muted)] text-left">
+                  <th className="px-4 py-3.5 font-medium text-xs uppercase tracking-wider">Model ID</th>
+                  <th className="px-4 py-3.5 font-medium text-xs uppercase tracking-wider">Provider</th>
+                  <th className="px-4 py-3.5 font-medium text-xs uppercase tracking-wider">Upstream</th>
+                  <th className="px-4 py-3.5 font-medium text-xs uppercase tracking-wider">Input $/M</th>
+                  <th className="px-4 py-3.5 font-medium text-xs uppercase tracking-wider">Output $/M</th>
+                  <th className="px-4 py-3.5 font-medium text-xs uppercase tracking-wider">Margin</th>
+                  <th className="px-4 py-3.5 font-medium text-xs uppercase tracking-wider">Capabilities</th>
+                  <th className="px-4 py-3.5 font-medium text-xs uppercase tracking-wider text-center">Status</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {models.map((m) => (
+                  <tr key={m.id}>
+                    <td className="px-4 py-3 font-mono text-xs text-cyan-300/60">{m.id}</td>
+                    <td className="px-4 py-3 text-white/70">{m.provider}</td>
+                    <td className="px-4 py-3 font-mono text-xs text-[var(--text-muted)]">{m.upstream_model_id}</td>
+                    <td className="px-4 py-3 text-white/70">${m.cost_per_m_input}</td>
+                    <td className="px-4 py-3 text-white/70">${m.cost_per_m_output}</td>
+                    <td className="px-4 py-3 text-white/70">{m.margin}x</td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-wrap gap-1">
+                        {ALL_CAPABILITIES.map((cap) => {
+                          const isActive = (m.capabilities || []).includes(cap);
+                          return (
+                            <button
+                              key={cap}
+                              onClick={() => handleToggleCapability(m.id, cap)}
+                              title={`Toggle ${CAPABILITY_LABELS[cap]}`}
+                              className={`text-[9px] px-1.5 py-0.5 rounded font-medium transition-all cursor-pointer border ${
+                                isActive
+                                  ? "bg-cyan-400/15 text-cyan-300/90 border-cyan-400/30"
+                                  : "bg-white/[0.02] text-white/20 border-white/[0.06] hover:text-white/40 hover:border-white/10"
+                              }`}
+                            >
+                              {CAPABILITY_LABELS[cap]}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <button
+                        onClick={() => handleToggleModel(m.id, !m.is_active)}
+                        className={`text-[11px] px-3 py-1 rounded-full font-medium transition-colors ${
+                          m.is_active ? "badge-success" : "badge-error"
+                        }`}
+                      >
+                        {m.is_active ? "Active" : "Inactive"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

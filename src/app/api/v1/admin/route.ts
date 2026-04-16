@@ -314,6 +314,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
+    case "update_model_capabilities": {
+      const { model_id, capabilities } = body;
+      if (!model_id) return NextResponse.json({ error: "model_id required" }, { status: 400 });
+      if (!Array.isArray(capabilities)) return NextResponse.json({ error: "capabilities must be an array" }, { status: 400 });
+
+      const validCaps = ["tool_calling", "vision", "web_search", "streaming", "json_mode", "system_message", "reasoning", "pdf_input"];
+      const filtered = capabilities.filter((c: string) => validCaps.includes(c));
+
+      const { error } = await supabase.from("models").update({ capabilities: filtered }).eq("id", model_id);
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ ok: true });
+    }
+
     // ── Plan management ──
     case "toggle_plan": {
       const { plan_id, is_active } = body;

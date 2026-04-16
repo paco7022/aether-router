@@ -8,7 +8,7 @@ export async function GET() {
 
   const { data: models, error } = await supabase
     .from("models")
-    .select("id")
+    .select("id, capabilities")
     .eq("is_active", true)
     .order("id");
 
@@ -19,12 +19,13 @@ export async function GET() {
     );
   }
 
-  // OpenAI-compatible /v1/models response format
+  // OpenAI-compatible /v1/models response format, extended with capabilities
   const data = (models || []).map((m) => ({
     id: m.id,
     object: "model",
     created: 0,
     owned_by: "aether-router",
+    capabilities: m.capabilities ?? ["streaming", "system_message"],
   }));
 
   return NextResponse.json({

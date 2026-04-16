@@ -1,6 +1,20 @@
 import { createServerSupabase } from "@/lib/supabase/server";
 import { pricePerMTokens, creditsToUsd } from "@/lib/credits";
 
+const CAPABILITY_META: Record<string, { label: string; color: string; icon: string }> = {
+  tool_calling:    { label: "Tools",     color: "rgba(59, 130, 246, 0.85)",  icon: "T" },
+  vision:          { label: "Vision",    color: "rgba(168, 85, 247, 0.85)",  icon: "V" },
+  web_search:      { label: "Search",    color: "rgba(34, 197, 94, 0.85)",   icon: "S" },
+  streaming:       { label: "Stream",    color: "rgba(107, 114, 128, 0.60)", icon: "St" },
+  json_mode:       { label: "JSON",      color: "rgba(245, 158, 11, 0.85)",  icon: "J" },
+  system_message:  { label: "System",    color: "rgba(107, 114, 128, 0.60)", icon: "Sy" },
+  reasoning:       { label: "Reasoning", color: "rgba(239, 68, 68, 0.85)",   icon: "R" },
+  pdf_input:       { label: "PDF",       color: "rgba(236, 72, 153, 0.85)",  icon: "P" },
+};
+
+// Capabilities worth highlighting (skip ubiquitous ones like streaming/system_message)
+const HIGHLIGHTED_CAPABILITIES = ["tool_calling", "vision", "web_search", "json_mode", "reasoning", "pdf_input"];
+
 export default async function ModelsPage() {
   const supabase = await createServerSupabase();
   const { data: models } = await supabase
@@ -75,6 +89,7 @@ export default async function ModelsPage() {
             <thead>
               <tr className="text-[var(--text-muted)] text-left">
                 <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider">Model</th>
+                <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider">Capabilities</th>
                 <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider text-right">Input / 1M tokens</th>
                 <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider text-right">Output / 1M tokens</th>
                 <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider text-right">Premium Cost</th>
@@ -91,6 +106,10 @@ export default async function ModelsPage() {
                 const creditsOutput = pricePerMTokens(model.cost_per_m_output, model.margin);
                 const priceInput = creditsToUsd(creditsInput);
                 const priceOutput = creditsToUsd(creditsOutput);
+                const caps: string[] = Array.isArray(model.capabilities)
+                  ? model.capabilities
+                  : ["streaming", "system_message"];
+                const highlightedCaps = caps.filter((c: string) => HIGHLIGHTED_CAPABILITIES.includes(c));
                 return (
                   <tr key={model.id} className="group">
                     <td className="px-5 py-3.5">
@@ -99,6 +118,30 @@ export default async function ModelsPage() {
                           <p className="font-medium text-white/85">{model.display_name}</p>
                           <p className="text-[11px] text-cyan-300/50 font-mono mt-0.5">{model.id}</p>
                         </div>
+                      </div>
+                    </td>
+                    <td className="px-5 py-3.5">
+                      <div className="flex flex-wrap gap-1">
+                        {highlightedCaps.length > 0 ? highlightedCaps.map((cap: string) => {
+                          const meta = CAPABILITY_META[cap];
+                          if (!meta) return null;
+                          return (
+                            <span
+                              key={cap}
+                              title={meta.label}
+                              className="inline-flex items-center text-[10px] font-medium px-1.5 py-0.5 rounded-md"
+                              style={{
+                                background: meta.color.replace(/[\d.]+\)$/, "0.12)"),
+                                color: meta.color,
+                                border: `1px solid ${meta.color.replace(/[\d.]+\)$/, "0.20)")}`,
+                              }}
+                            >
+                              {meta.label}
+                            </span>
+                          );
+                        }) : (
+                          <span className="text-[10px] text-[var(--text-dim)]">Text only</span>
+                        )}
                       </div>
                     </td>
                     <td className="px-5 py-3.5 text-right text-white/70">
