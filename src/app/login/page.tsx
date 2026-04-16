@@ -61,29 +61,34 @@ export default function LoginPage() {
       </div>
       <div className="noise-overlay" />
 
-      <div className="w-full max-w-md relative z-10">
+      <div className="w-full max-w-md relative z-10 animate-in">
         {/* Logo + Title */}
         <div className="text-center mb-8">
           <div
-            className="w-14 h-14 rounded-2xl mx-auto mb-4 flex items-center justify-center text-xl font-bold"
+            className="w-16 h-16 rounded-2xl mx-auto mb-5 flex items-center justify-center text-2xl font-bold"
             style={{
               background: "linear-gradient(135deg, rgba(34, 211, 238, 0.15), rgba(139, 92, 246, 0.25))",
               border: "1px solid rgba(139, 92, 246, 0.2)",
-              boxShadow: "0 0 40px -8px rgba(139, 92, 246, 0.3)",
+              boxShadow: "0 0 60px -8px rgba(139, 92, 246, 0.25), 0 0 30px -4px rgba(34, 211, 238, 0.15)",
             }}
           >
             <span className="aurora-text">A</span>
           </div>
-          <h1 className="text-3xl font-bold text-white/90">Aether Router</h1>
+          <h1 className="text-3xl font-bold text-white/90 tracking-tight">Aether Router</h1>
           <p className="text-[var(--text-muted)] mt-2 text-sm">Sign in to your account</p>
         </div>
 
         <form
           onSubmit={handleLogin}
-          className="glass-card shimmer-line p-6 space-y-4"
+          className="glass-card-elevated shimmer-line p-6 space-y-4"
         >
           {error && (
-            <div className="badge-error rounded-lg p-3 text-sm">
+            <div className="badge-error rounded-xl p-3 text-sm flex items-center gap-2">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="15" y1="9" x2="9" y2="15" />
+                <line x1="9" y1="9" x2="15" y2="15" />
+              </svg>
               {error}
             </div>
           )}
@@ -107,7 +112,7 @@ export default function LoginPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-xl px-4 py-2.5 text-sm text-white/90 placeholder-[var(--text-dim)] transition-all"
-              placeholder="••••••••"
+              placeholder="Enter your password"
               required
             />
           </div>
@@ -115,7 +120,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full btn-aurora px-4 py-2.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full btn-aurora px-4 py-3 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? "Signing in..." : "Sign In"}
           </button>
@@ -132,20 +137,7 @@ export default function LoginPage() {
           <button
             type="button"
             onClick={handleGoogleLogin}
-            className="w-full flex items-center justify-center gap-2.5 rounded-xl px-4 py-2.5 text-sm font-medium transition-all duration-200"
-            style={{
-              background: "rgba(255, 255, 255, 0.03)",
-              border: "1px solid rgba(255, 255, 255, 0.08)",
-              color: "var(--text)",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = "rgba(255, 255, 255, 0.06)";
-              e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.12)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "rgba(255, 255, 255, 0.03)";
-              e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.08)";
-            }}
+            className="w-full btn-ghost flex items-center justify-center gap-2.5 rounded-xl px-4 py-3 text-sm font-medium"
           >
             <svg width="18" height="18" viewBox="0 0 24 24">
               <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
@@ -158,13 +150,13 @@ export default function LoginPage() {
 
           <p className="text-center text-sm text-[var(--text-muted)]">
             Don&apos;t have an account?{" "}
-            <Link href="/register" className="text-violet-400 hover:text-violet-300 transition-colors">
+            <Link href="/register" className="text-violet-400 hover:text-violet-300 transition-colors font-medium">
               Sign up
             </Link>
           </p>
         </form>
 
-        <p className="text-center text-xs text-[var(--text-dim)] mt-6">
+        <p className="text-center text-xs text-[var(--text-dim)] mt-6 leading-relaxed">
           Aether Router is a model proxy. We don&apos;t control model availability or stability.
         </p>
         <p className="text-center text-xs text-[var(--text-dim)] mt-2">

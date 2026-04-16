@@ -37,7 +37,6 @@ export default async function BillingPage() {
       .limit(50),
   ]);
 
-  // Fetch premium model usage (w/, t/, an/) for today and plan limits
   const admin = createAdminClient();
   const todayStart = new Date();
   todayStart.setUTCHours(0, 0, 0, 0);
@@ -70,7 +69,7 @@ export default async function BillingPage() {
   return (
     <div>
       <div className="mb-6">
-        <h2 className="text-2xl font-bold text-white/90">Billing</h2>
+        <h2 className="text-2xl font-bold text-white/90 tracking-tight">Billing</h2>
         <p className="text-sm text-[var(--text-muted)] mt-1">Manage your credits, plans, and purchases</p>
       </div>
 
@@ -79,43 +78,43 @@ export default async function BillingPage() {
       </Suspense>
 
       {/* Current balance */}
-      <div className="glass-card aurora-border shimmer-line p-6 mb-8">
-        <div className="flex items-center justify-between">
+      <div className="glass-card-elevated aurora-border shimmer-line p-6 mb-8">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
-            <p className="text-xs text-[var(--text-muted)] uppercase tracking-wider mb-2">Total Balance</p>
-            <p className="text-4xl font-bold aurora-text">
+            <div className="flex items-center gap-2 mb-2">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--aurora-teal)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="opacity-70">
+                <rect x="2" y="5" width="20" height="14" rx="2" />
+                <line x1="2" y1="10" x2="22" y2="10" />
+              </svg>
+              <p className="text-xs text-[var(--text-muted)] uppercase tracking-wider font-medium">Total Balance</p>
+            </div>
+            <p className="text-4xl font-bold aurora-text tracking-tight">
               {totalCredits.toLocaleString()}
             </p>
             <p className="text-sm text-[var(--text-muted)] mt-1">credits</p>
-            <div className="flex gap-4 mt-3">
+            <div className="flex gap-5 mt-3">
               <div>
-                <p className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Daily</p>
-                <p className="text-sm font-medium text-teal-400">{dailyCredits.toLocaleString()}</p>
+                <p className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider mb-0.5">Daily</p>
+                <p className="text-sm font-semibold text-teal-400">{dailyCredits.toLocaleString()}</p>
               </div>
               <div>
-                <p className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Permanent</p>
-                <p className="text-sm font-medium text-emerald-400">{permanentCredits.toLocaleString()}</p>
+                <p className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider mb-0.5">Permanent</p>
+                <p className="text-sm font-semibold text-emerald-400">{permanentCredits.toLocaleString()}</p>
               </div>
             </div>
           </div>
-          <div className="text-right">
+          <div className="text-right shrink-0">
             <p className="text-xs text-[var(--text-dim)] mb-1">10,000 credits = $1.00 USD</p>
             <p className="text-xs text-[var(--text-dim)] mb-2">Daily credits are used first and reset each day</p>
             {subscription?.plans && (
-              <div className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium"
-                style={{
-                  background: "linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(34, 211, 238, 0.1))",
-                  border: "1px solid rgba(139, 92, 246, 0.2)",
-                  color: "rgba(167, 139, 250, 0.9)",
-                }}
-              >
+              <div className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium badge-violet">
                 {(subscription.plans as { name: string }).name}
               </div>
             )}
           </div>
         </div>
         {creditsPerDay > 0 && (
-          <div className="mt-4 pt-4 border-t border-white/[0.04]">
+          <div className="mt-5 pt-4 border-t border-white/[0.04]">
             <ClaimDailyButton alreadyClaimed={alreadyClaimed} creditsPerDay={creditsPerDay} />
           </div>
         )}
@@ -132,7 +131,12 @@ export default async function BillingPage() {
 
       {/* Plans */}
       <div className="mb-8">
-        <h3 className="text-xl font-bold text-white/90 mb-1">Plans</h3>
+        <div className="flex items-center gap-2 mb-1">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--aurora-violet)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="opacity-60">
+            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+          </svg>
+          <h3 className="text-xl font-bold text-white/90">Plans</h3>
+        </div>
         <p className="text-sm text-[var(--text-muted)] mb-5">
           Subscribe monthly for daily temporary credits. They reset each day &mdash; use them or lose them.
         </p>
@@ -150,7 +154,13 @@ export default async function BillingPage() {
 
       {/* Buy Credits */}
       <div className="mb-8">
-        <h3 className="text-xl font-bold text-white/90 mb-1">Buy Credits</h3>
+        <div className="flex items-center gap-2 mb-1">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--aurora-teal)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="opacity-60">
+            <line x1="12" y1="1" x2="12" y2="23" />
+            <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+          </svg>
+          <h3 className="text-xl font-bold text-white/90">Buy Credits</h3>
+        </div>
         <p className="text-sm text-[var(--text-muted)] mb-5">
           One-time purchase. $1 = 10,000 permanent credits. These never expire.
         </p>
@@ -164,8 +174,9 @@ export default async function BillingPage() {
 
       {/* Transaction history */}
       <div className="glass-card shimmer-line overflow-hidden">
-        <div className="p-5 border-b border-white/[0.04]">
+        <div className="p-5 border-b border-white/[0.04] flex items-center justify-between">
           <h3 className="font-semibold text-white/85">Transaction History</h3>
+          <span className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Last 50</span>
         </div>
 
         {transactions && transactions.length > 0 ? (
@@ -183,7 +194,7 @@ export default async function BillingPage() {
               <tbody>
                 {transactions.map((tx) => (
                   <tr key={tx.id}>
-                    <td className="px-5 py-3 text-[var(--text-muted)] whitespace-nowrap">
+                    <td className="px-5 py-3 text-[var(--text-muted)] whitespace-nowrap text-xs">
                       {new Date(tx.created_at).toLocaleString()}
                     </td>
                     <td className="px-5 py-3">
@@ -194,20 +205,20 @@ export default async function BillingPage() {
                             : tx.type === "purchase"
                             ? "badge-success"
                             : tx.type === "daily_grant"
-                            ? "text-teal-400 bg-teal-400/10 border border-teal-400/15"
+                            ? "badge-teal"
                             : tx.type === "admin_grant"
-                            ? "text-violet-400 bg-violet-400/10 border border-violet-400/15"
+                            ? "badge-violet"
                             : "text-zinc-400 bg-zinc-400/10 border border-zinc-400/15"
                         }`}
                       >
                         {tx.type}
                       </span>
                     </td>
-                    <td className="px-5 py-3 text-[var(--text-muted)]">
+                    <td className="px-5 py-3 text-[var(--text-muted)] text-xs">
                       {tx.description || "-"}
                     </td>
                     <td
-                      className={`px-5 py-3 text-right font-medium ${
+                      className={`px-5 py-3 text-right font-semibold ${
                         tx.amount > 0 ? "text-emerald-400" : "text-red-400/80"
                       }`}
                     >

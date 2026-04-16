@@ -40,49 +40,26 @@ export function GmRequestsCard({
     setLoading(false);
   }
 
-  // ALL users must claim daily to unlock an/ models (w/ and c/ work without claim)
   const needsClaim = !hasClaimed;
 
   return (
     <div className="glass-card shimmer-line p-5">
       <div className="flex items-center justify-between mb-3">
-        <div>
-          <h4 className="font-semibold text-sm text-white/85">Premium Model Requests</h4>
-          <p className="text-xs text-[var(--text-muted)]">
-            Daily usage for premium models (w/, c/ and an/)
-          </p>
+        <div className="flex items-center gap-2">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--aurora-violet)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="opacity-60">
+            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+          </svg>
+          <div>
+            <h4 className="font-semibold text-sm text-white/85">Premium Model Requests</h4>
+            <p className="text-xs text-[var(--text-muted)]">
+              Daily usage for premium models (w/, c/ and an/)
+            </p>
+          </div>
         </div>
         <div className="flex gap-1">
-          <span
-            className="text-[10px] px-2.5 py-0.5 rounded-full font-medium"
-            style={{
-              background: "rgba(139, 92, 246, 0.1)",
-              border: "1px solid rgba(139, 92, 246, 0.15)",
-              color: "rgba(167, 139, 250, 0.9)",
-            }}
-          >
-            w/
-          </span>
-          <span
-            className="text-[10px] px-2.5 py-0.5 rounded-full font-medium"
-            style={{
-              background: "rgba(34, 211, 238, 0.1)",
-              border: "1px solid rgba(34, 211, 238, 0.15)",
-              color: "rgba(34, 211, 238, 0.9)",
-            }}
-          >
-            c/
-          </span>
-          <span
-            className="text-[10px] px-2.5 py-0.5 rounded-full font-medium"
-            style={{
-              background: "rgba(245, 158, 11, 0.1)",
-              border: "1px solid rgba(245, 158, 11, 0.15)",
-              color: "rgba(251, 191, 36, 0.9)",
-            }}
-          >
-            an/
-          </span>
+          <span className="text-[10px] px-2.5 py-0.5 rounded-full font-medium badge-violet">w/</span>
+          <span className="text-[10px] px-2.5 py-0.5 rounded-full font-medium badge-cyan">c/</span>
+          <span className="text-[10px] px-2.5 py-0.5 rounded-full font-medium badge-amber">an/</span>
         </div>
       </div>
 
@@ -116,12 +93,12 @@ export function GmRequestsCard({
                 )}
               </span>
             </div>
-            <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: "rgba(255, 255, 255, 0.04)" }}>
+            <div className="w-full h-2.5 rounded-full overflow-hidden" style={{ background: "rgba(255, 255, 255, 0.04)" }}>
               {isUnlimited ? (
                 <div className="h-full rounded-full w-full" style={{ background: "linear-gradient(90deg, rgba(139, 92, 246, 0.3), rgba(34, 211, 238, 0.2))" }} />
               ) : (
                 <div
-                  className="h-full rounded-full transition-all"
+                  className="h-full rounded-full transition-all duration-500"
                   style={{
                     width: `${pct}%`,
                     background: pct >= 90
@@ -141,14 +118,14 @@ export function GmRequestsCard({
                 ? "Unlimited requests"
                 : remaining > 0
                 ? `${remaining} remaining`
-                : "Limit reached — upgrade for more"}
+                : "Limit reached -- upgrade for more"}
             </span>
             {message && (
               <span className="text-violet-400 font-medium">{message}</span>
             )}
           </div>
 
-          <p className="text-[10px] text-[var(--text-muted)] mt-2 leading-relaxed">
+          <p className="text-[10px] text-[var(--text-muted)] mt-2.5 leading-relaxed">
             Claude models use <span className="text-red-400/80 font-medium">2 requests</span> per call · Gemini Pro uses <span className="text-amber-400/80 font-medium">1 request</span> · Gemini Flash uses <span className="text-green-400/80 font-medium">0.5 requests</span>
           </p>
         </>

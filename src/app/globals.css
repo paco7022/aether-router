@@ -7,6 +7,7 @@
   --bg-card-solid: #0f0f23;
   --bg-hover: rgba(30, 30, 60, 0.5);
   --bg-input: rgba(10, 10, 25, 0.8);
+  --bg-elevated: rgba(20, 20, 45, 0.7);
 
   /* Borders */
   --border: rgba(255, 255, 255, 0.06);
@@ -31,6 +32,12 @@
   --success: #34d399;
   --danger: #f87171;
   --warning: #fbbf24;
+
+  /* Spacing rhythm */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
 }
 
 /* Base body */
@@ -38,6 +45,8 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: "Inter", system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* ===== Aurora background effect ===== */
@@ -125,12 +134,28 @@ body {
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid var(--border);
-  border-radius: 16px;
-  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+  border-radius: var(--radius-lg);
+  transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
 }
 
 .glass-card:hover {
   border-color: var(--border-hover);
+}
+
+/* Elevated glass card variant */
+.glass-card-elevated {
+  background: var(--bg-elevated);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 32px -8px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+}
+
+.glass-card-elevated:hover {
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 12px 40px -8px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 /* ===== Aurora border glow (for special cards) ===== */
@@ -171,6 +196,13 @@ body {
 .glow-violet { box-shadow: 0 0 30px -8px rgba(139, 92, 246, 0.2); }
 .glow-cyan { box-shadow: 0 0 30px -8px rgba(34, 211, 238, 0.2); }
 .glow-magenta { box-shadow: 0 0 30px -8px rgba(217, 70, 239, 0.2); }
+
+/* Interactive glow on hover */
+.glow-green:hover { box-shadow: 0 0 40px -6px rgba(52, 211, 153, 0.3); }
+.glow-blue:hover { box-shadow: 0 0 40px -6px rgba(59, 130, 246, 0.3); }
+.glow-violet:hover { box-shadow: 0 0 40px -6px rgba(139, 92, 246, 0.3); }
+.glow-cyan:hover { box-shadow: 0 0 40px -6px rgba(34, 211, 238, 0.3); }
+.glow-magenta:hover { box-shadow: 0 0 40px -6px rgba(217, 70, 239, 0.3); }
 
 /* ===== Shimmer line (decorative top bar for cards) ===== */
 .shimmer-line {
@@ -224,8 +256,20 @@ body {
 }
 
 /* ===== Table styling ===== */
+.aurora-table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
 .aurora-table thead tr {
   border-bottom: 1px solid var(--border);
+}
+
+.aurora-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-card-solid);
+  z-index: 2;
 }
 
 .aurora-table tbody tr {
@@ -243,15 +287,21 @@ body {
   border: none;
   color: white;
   font-weight: 500;
-  border-radius: 10px;
-  transition: all 0.3s ease;
+  border-radius: var(--radius-md);
+  transition: all 0.25s ease;
   position: relative;
   overflow: hidden;
+  cursor: pointer;
 }
 
 .btn-aurora:hover {
   box-shadow: 0 0 24px -4px rgba(139, 92, 246, 0.4);
   transform: translateY(-1px);
+}
+
+.btn-aurora:active {
+  transform: translateY(0);
+  box-shadow: 0 0 16px -4px rgba(139, 92, 246, 0.3);
 }
 
 .btn-aurora::after {
@@ -265,6 +315,42 @@ body {
 
 .btn-aurora:hover::after {
   opacity: 1;
+}
+
+/* Secondary ghost button */
+.btn-ghost {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  font-weight: 500;
+  border-radius: var(--radius-md);
+  transition: all 0.25s ease;
+  cursor: pointer;
+}
+
+.btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+/* Teal CTA button */
+.btn-teal {
+  background: linear-gradient(135deg, #14b8a6, #22d3ee);
+  border: none;
+  color: white;
+  font-weight: 500;
+  border-radius: var(--radius-md);
+  transition: all 0.25s ease;
+  cursor: pointer;
+}
+
+.btn-teal:hover {
+  box-shadow: 0 0 24px -4px rgba(20, 184, 166, 0.4);
+  transform: translateY(-1px);
+}
+
+.btn-teal:active {
+  transform: translateY(0);
 }
 
 /* ===== Input focus ring ===== */
@@ -287,6 +373,30 @@ input:focus, select:focus, textarea:focus {
   border: 1px solid rgba(248, 113, 113, 0.15);
 }
 
+.badge-violet {
+  background: rgba(139, 92, 246, 0.1);
+  color: rgba(167, 139, 250, 0.9);
+  border: 1px solid rgba(139, 92, 246, 0.15);
+}
+
+.badge-cyan {
+  background: rgba(34, 211, 238, 0.1);
+  color: rgba(34, 211, 238, 0.9);
+  border: 1px solid rgba(34, 211, 238, 0.15);
+}
+
+.badge-amber {
+  background: rgba(245, 158, 11, 0.1);
+  color: rgba(251, 191, 36, 0.9);
+  border: 1px solid rgba(245, 158, 11, 0.15);
+}
+
+.badge-teal {
+  background: rgba(20, 184, 166, 0.1);
+  color: rgba(94, 234, 212, 0.9);
+  border: 1px solid rgba(20, 184, 166, 0.15);
+}
+
 /* ===== Subtle noise texture ===== */
 .noise-overlay {
   position: fixed;
@@ -297,4 +407,76 @@ input:focus, select:focus, textarea:focus {
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   background-repeat: repeat;
   background-size: 256px 256px;
+}
+
+/* ===== Page transition ===== */
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-in {
+  animation: fade-in-up 0.4s ease-out;
+}
+
+/* ===== Pulse ring for interactive elements ===== */
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.3); }
+  70% { box-shadow: 0 0 0 6px rgba(139, 92, 246, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0); }
+}
+
+.pulse-ring {
+  animation: pulse-ring 2s ease-in-out infinite;
+}
+
+/* ===== Stat card icon container ===== */
+.stat-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.stat-icon:hover {
+  transform: scale(1.05);
+}
+
+/* ===== Sidebar mobile overlay ===== */
+.sidebar-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  z-index: 40;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+.sidebar-overlay.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* ===== Code blocks ===== */
+pre, code {
+  font-family: "JetBrains Mono", "Fira Code", "SF Mono", "Cascadia Code", monospace;
+}
+
+/* ===== Section divider ===== */
+.section-divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--border-hover), transparent);
+  border: none;
+  margin: 2rem 0;
 }

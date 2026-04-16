@@ -51,11 +51,9 @@ export function PlanCard({
 
   return (
     <div
-      className={`relative glass-card p-5 flex flex-col ${
-        plan.is_popular
-          ? "aurora-border"
-          : ""
-      }`}
+      className={`relative glass-card p-5 flex flex-col transition-all duration-300 ${
+        plan.is_popular ? "aurora-border" : ""
+      } ${plan.is_popular ? "hover:scale-[1.01]" : ""}`}
       style={plan.is_popular ? {
         boxShadow: "0 0 30px -8px rgba(20, 184, 166, 0.15)",
         borderColor: "rgba(20, 184, 166, 0.25)",
@@ -66,6 +64,7 @@ export function PlanCard({
           className="absolute -top-3 left-1/2 -translate-x-1/2 text-white text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-wider"
           style={{
             background: "linear-gradient(135deg, #14b8a6, #22d3ee)",
+            boxShadow: "0 2px 12px -2px rgba(20, 184, 166, 0.4)",
           }}
         >
           Popular
@@ -74,42 +73,50 @@ export function PlanCard({
 
       <div className="mb-4">
         <h4 className="text-lg font-bold text-white/90">{plan.name}</h4>
-        <p className="text-xs text-[var(--text-muted)]">{plan.description}</p>
+        <p className="text-xs text-[var(--text-muted)] mt-0.5">{plan.description}</p>
       </div>
 
       <div className="mb-4">
         {plan.price_usd > 0 ? (
-          <p className="text-3xl font-bold text-white/90">
+          <p className="text-3xl font-bold text-white/90 tracking-tight">
             ${plan.price_usd}
             <span className="text-base font-normal text-[var(--text-muted)]">
               /mo
             </span>
           </p>
         ) : (
-          <p className="text-3xl font-bold text-white/90">Free</p>
+          <p className="text-3xl font-bold text-white/90 tracking-tight">Free</p>
         )}
       </div>
 
-      <div className="mb-4 space-y-1 text-sm">
-        <p>
-          <span className="font-semibold text-white/85">
-            {plan.credits_per_day > 0
-              ? `${plan.credits_per_day.toLocaleString()}`
-              : "Unlimited"}
-          </span>{" "}
-          <span className="text-[var(--text-muted)]">credits/day</span>
-        </p>
-        <p className="text-xs text-[var(--text-muted)]">
+      <div className="mb-4 space-y-1.5 text-sm">
+        <div className="flex items-center gap-2">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--aurora-teal)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+          <p>
+            <span className="font-semibold text-white/85">
+              {plan.credits_per_day > 0
+                ? `${plan.credits_per_day.toLocaleString()}`
+                : "Unlimited"}
+            </span>{" "}
+            <span className="text-[var(--text-muted)]">credits/day</span>
+          </p>
+        </div>
+        <p className="text-xs text-[var(--text-muted)] ml-6">
           1 credit = 1 request
         </p>
       </div>
 
       {/* Deepseek free pool */}
       <div className="mb-4 pt-3 border-t border-white/[0.04]">
-        <p className="text-xs font-semibold text-emerald-400/80 mb-1.5">
+        <p className="text-xs font-semibold text-emerald-400/80 mb-1.5 flex items-center gap-1.5">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
           Deepseek v3.2 (free)
         </p>
-        <div className="space-y-0.5 text-xs text-[var(--text-muted)]">
+        <div className="space-y-0.5 text-xs text-[var(--text-muted)] ml-5">
           <p>200k tokens/day</p>
         </div>
       </div>
@@ -118,10 +125,13 @@ export function PlanCard({
       <div className="mb-4 pt-3 border-t border-white/[0.04]">
         {plan.id === "free" ? (
           <>
-            <p className="text-xs font-semibold text-cyan-400/80 mb-1.5">
+            <p className="text-xs font-semibold text-cyan-400/80 mb-1.5 flex items-center gap-1.5">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
               Premium Models (t/, w/)
             </p>
-            <div className="space-y-0.5 text-xs text-[var(--text-muted)]">
+            <div className="space-y-0.5 text-xs text-[var(--text-muted)] ml-5">
               <p>
                 {plan.gm_daily_requests > 0
                   ? `${plan.gm_daily_requests} requests/day`
@@ -136,10 +146,13 @@ export function PlanCard({
           </>
         ) : (
           <>
-            <p className="text-xs font-semibold text-violet-400/80 mb-1.5">
+            <p className="text-xs font-semibold text-violet-400/80 mb-1.5 flex items-center gap-1.5">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
               Premium Models (t/, w/, an/)
             </p>
-            <div className="space-y-0.5 text-xs text-[var(--text-muted)]">
+            <div className="space-y-0.5 text-xs text-[var(--text-muted)] ml-5">
               <p>
                 {plan.gm_daily_requests > 0
                   ? `${plan.gm_daily_requests} requests/day`
@@ -161,32 +174,19 @@ export function PlanCard({
 
       <div className="mt-auto">
         {isCurrent ? (
-          <div className="w-full py-2.5 px-4 rounded-xl text-center text-sm text-[var(--text-dim)]"
-            style={{ background: "rgba(255, 255, 255, 0.03)", border: "1px solid rgba(255, 255, 255, 0.06)" }}>
+          <div className="w-full py-2.5 px-4 rounded-xl text-center text-sm text-[var(--text-dim)] btn-ghost">
             Current Plan
           </div>
         ) : plan.price_usd > 0 ? (
           <button
             onClick={handleSubscribe}
             disabled={loading}
-            className="w-full py-2.5 px-4 rounded-xl text-white text-sm font-medium transition-all disabled:opacity-50 cursor-pointer"
-            style={{
-              background: "linear-gradient(135deg, #14b8a6, #22d3ee)",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.boxShadow = "0 0 24px -4px rgba(20, 184, 166, 0.4)";
-              e.currentTarget.style.transform = "translateY(-1px)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.boxShadow = "none";
-              e.currentTarget.style.transform = "none";
-            }}
+            className="w-full py-2.5 px-4 rounded-xl text-white text-sm font-medium btn-teal disabled:opacity-50"
           >
             {loading ? "Redirecting..." : "Subscribe"}
           </button>
         ) : (
-          <div className="w-full py-2.5 px-4 rounded-xl text-center text-sm text-[var(--text-dim)]"
-            style={{ background: "rgba(255, 255, 255, 0.03)", border: "1px solid rgba(255, 255, 255, 0.06)" }}>
+          <div className="w-full py-2.5 px-4 rounded-xl text-center text-sm text-[var(--text-dim)] btn-ghost">
             Free Tier
           </div>
         )}
