@@ -21,11 +21,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ banned: true, reason: banned.reason || "Device banned" });
   }
 
-  // Also check how many accounts this fingerprint is linked to
-  const { count } = await admin
-    .from("device_fingerprints")
-    .select("*", { count: "exact", head: true })
-    .eq("fingerprint", fingerprint);
-
-  return NextResponse.json({ banned: false, linked_accounts: count || 0 });
+  // Don't expose account count — it leaks information about other users.
+  return NextResponse.json({ banned: false });
 }

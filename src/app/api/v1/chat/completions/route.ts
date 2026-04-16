@@ -6,7 +6,11 @@ import { getProvider } from "@/lib/providers";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+// NOTE: If a Vercel function timeout kills a streaming request mid-flight,
+// the `flush()` handler and the `catch` block will NOT fire. The
+// pre-reserved credits will be stuck as "charged" with no usage log.
+// Consider a periodic reconciliation job to detect orphaned reservations.
+export const maxDuration = 300;
 
 // Free-pool limits shared by nano (na/) and airforce deepseek-v3.2.
 const PER_USER_DAILY_TOKEN_LIMIT = 200_000;
@@ -145,7 +149,7 @@ export async function POST(req: NextRequest) {
 
   if (!model) {
     return NextResponse.json(
-      { error: { message: `Model '${modelId}' not found`, type: "invalid_request" } },
+      { error: { message: "Model not found or unavailable", type: "invalid_request" } },
       { status: 404 }
     );
   }
@@ -537,23 +541,154 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 5.6. Pre-check credits before forwarding (skip for free-pool models)
+  // 5.6. Atomic credit reservation before forwarding to upstream.
+  // For both streaming and non-streaming, we reserve credits up-front so
+  // the user cannot receive a response they can't pay for.
+  const estimatedPrompt = estimatePromptTokens(messages);
+  let reservation: StreamChargeReservation | null = null;
+
   if (!isFreePool) {
+    const requestedCompletionTokens = getRequestedCompletionTokens(body);
+    const reservedCompletionTokens = Math.min(
+      requestedCompletionTokens ?? DEFAULT_STREAM_RESERVATION_COMPLETION_TOKENS,
+      MAX_STREAM_RESERVATION_COMPLETION_TOKENS
+    );
+    const { credits: reservedCreditsRaw } = calculateCredits(
+      estimatedPrompt,
+      reservedCompletionTokens,
+      {
+        cost_per_m_input: model.cost_per_m_input,
+        cost_per_m_output: model.cost_per_m_output,
+        cost_per_m_cache_read: model.cost_per_m_cache_read ?? 0,
+        cost_per_m_cache_write: model.cost_per_m_cache_write ?? 0,
+        margin: model.margin,
+      }
+    );
+    const reservedCredits = isPremiumProvider ? 1 : Math.max(reservedCreditsRaw, 1);
+
     if (keyInfo.isCustom && keyInfo.customCredits !== null) {
-      // Already checked above
-    } else {
-      const totalCredits = keyInfo.credits + keyInfo.dailyCredits;
-      if (totalCredits <= 0) {
+      const { data: keyBalance, error: reserveErr } = await supabase.rpc("deduct_custom_key_credits", {
+        p_key_id: keyInfo.keyId,
+        p_amount: reservedCredits,
+      });
+
+      if (reserveErr) {
         return NextResponse.json(
-          { error: { message: "Insufficient credits", type: "billing_error", credits_available: totalCredits } },
+          { error: { message: "Failed to reserve key credits", type: "billing_error" } },
+          { status: 500 }
+        );
+      }
+      if (keyBalance === -1) {
+        return NextResponse.json(
+          { error: { message: "Insufficient key credits", type: "billing_error", credits_available: keyInfo.customCredits } },
           { status: 402 }
         );
+      }
+
+      reservation = {
+        reservedCredits,
+        balanceAfterReserve: keyBalance as number,
+      };
+    } else {
+      const { data: reserveBalance, error: reserveErr } = await supabase.rpc("deduct_credits", {
+        p_user_id: keyInfo.userId,
+        p_amount: reservedCredits,
+      });
+
+      if (reserveErr) {
+        return NextResponse.json(
+          { error: { message: "Failed to reserve credits", type: "billing_error" } },
+          { status: 500 }
+        );
+      }
+      if (reserveBalance === -1) {
+        return NextResponse.json(
+          { error: { message: "Insufficient credits", type: "billing_error", credits_required: reservedCredits, credits_available: keyInfo.credits + keyInfo.dailyCredits } },
+          { status: 402 }
+        );
+      }
+
+      reservation = {
+        reservedCredits,
+        balanceAfterReserve: reserveBalance as number,
+      };
+    }
+  }
+
+  // Capture keyInfo as non-null for inner helpers (already validated above).
+  const key = keyInfo!;
+
+  // Helper: refund reserved credits on error/exception
+  async function refundReservation() {
+    if (!reservation || isFreePool) return;
+    if (key.isCustom && key.customCredits !== null) {
+      const { error: refundErr } = await supabase.rpc("add_custom_key_credits", {
+        p_key_id: key.keyId,
+        p_amount: reservation.reservedCredits,
+      });
+      if (refundErr) {
+        console.error("Failed to refund reserved custom-key credits:", refundErr.message);
+      }
+    } else {
+      const { error: refundErr } = await supabase.rpc("add_credits", {
+        p_user_id: key.userId,
+        p_amount: reservation.reservedCredits,
+      });
+      if (refundErr) {
+        console.error("Failed to refund reserved credits:", refundErr.message);
       }
     }
   }
 
-  const streamEstimatedPrompt = stream ? estimatePromptTokens(messages) : 0;
-  let streamReservation: StreamChargeReservation | null = null;
+  // Helper: settle the difference between reservation and actual cost.
+  // Returns the final balance and credits actually charged.
+  async function settleReservation(
+    actualCredits: number
+  ): Promise<{ chargedCredits: number; balanceAfter: number; status: "success" | "settlement_failed" }> {
+    if (!reservation) {
+      return { chargedCredits: 0, balanceAfter: 0, status: "settlement_failed" };
+    }
+
+    let chargedCredits = reservation.reservedCredits;
+    let balanceAfter = reservation.balanceAfterReserve;
+    let billingStatus: "success" | "settlement_failed" = "success";
+    const delta = actualCredits - reservation.reservedCredits;
+
+    if (delta > 0) {
+      // Need to charge more
+      if (key.isCustom && key.customCredits !== null) {
+        const { data: kb, error: err } = await supabase.rpc("deduct_custom_key_credits", {
+          p_key_id: key.keyId, p_amount: delta,
+        });
+        if (err || kb === -1) { billingStatus = "settlement_failed"; }
+        else { chargedCredits += delta; balanceAfter = kb as number; }
+      } else {
+        const { data: nb, error: err } = await supabase.rpc("deduct_credits", {
+          p_user_id: key.userId, p_amount: delta,
+        });
+        if (err || nb === -1) { billingStatus = "settlement_failed"; }
+        else { chargedCredits += delta; balanceAfter = nb as number; }
+      }
+    } else if (delta < 0) {
+      // Refund excess
+      const refundAmount = Math.abs(delta);
+      if (key.isCustom && key.customCredits !== null) {
+        const { data: kb, error: err } = await supabase.rpc("add_custom_key_credits", {
+          p_key_id: key.keyId, p_amount: refundAmount,
+        });
+        if (err || kb === -1) { billingStatus = "settlement_failed"; }
+        else { chargedCredits -= refundAmount; balanceAfter = kb as number; }
+      } else {
+        const { data: nb, error: err } = await supabase.rpc("add_credits", {
+          p_user_id: key.userId, p_amount: refundAmount,
+        });
+        if (err || nb === -1) { billingStatus = "settlement_failed"; }
+        else { chargedCredits -= refundAmount; balanceAfter = nb as number; }
+      }
+    }
+
+    return { chargedCredits, balanceAfter, status: billingStatus };
+  }
 
   try {
     // Ask upstream to include usage data in stream chunks (OpenAI-compatible)
@@ -562,98 +697,10 @@ export async function POST(req: NextRequest) {
       (forwardBody as Record<string, unknown>).stream_options = { include_usage: true };
     }
 
-    // Reserve a minimum charge before opening a non-free stream so we never
-    // send streamed content when billing cannot settle at all.
-    if (stream && !isFreePool) {
-      const requestedCompletionTokens = getRequestedCompletionTokens(body);
-      const reservedCompletionTokens = Math.min(
-        requestedCompletionTokens ?? DEFAULT_STREAM_RESERVATION_COMPLETION_TOKENS,
-        MAX_STREAM_RESERVATION_COMPLETION_TOKENS
-      );
-      const { credits: reservedCreditsRaw } = calculateCredits(
-        streamEstimatedPrompt,
-        reservedCompletionTokens,
-        {
-          cost_per_m_input: model.cost_per_m_input,
-          cost_per_m_output: model.cost_per_m_output,
-          cost_per_m_cache_read: model.cost_per_m_cache_read ?? 0,
-          cost_per_m_cache_write: model.cost_per_m_cache_write ?? 0,
-          margin: model.margin,
-        }
-      );
-      const reservedCredits = isPremiumProvider ? 1 : Math.max(reservedCreditsRaw, 1);
-
-      if (keyInfo.isCustom && keyInfo.customCredits !== null) {
-        const { data: keyBalance, error: reserveErr } = await supabase.rpc("deduct_custom_key_credits", {
-          p_key_id: keyInfo.keyId,
-          p_amount: reservedCredits,
-        });
-
-        if (reserveErr) {
-          return NextResponse.json(
-            { error: { message: "Failed to reserve key credits", type: "billing_error" } },
-            { status: 500 }
-          );
-        }
-        if (keyBalance === -1) {
-          return NextResponse.json(
-            { error: { message: "Insufficient key credits", type: "billing_error", credits_available: keyInfo.customCredits } },
-            { status: 402 }
-          );
-        }
-
-        streamReservation = {
-          reservedCredits,
-          balanceAfterReserve: keyBalance as number,
-        };
-      } else {
-        const { data: reserveBalance, error: reserveErr } = await supabase.rpc("deduct_credits", {
-          p_user_id: keyInfo.userId,
-          p_amount: reservedCredits,
-        });
-
-        if (reserveErr) {
-          return NextResponse.json(
-            { error: { message: "Failed to reserve credits", type: "billing_error" } },
-            { status: 500 }
-          );
-        }
-        if (reserveBalance === -1) {
-          return NextResponse.json(
-            { error: { message: "Insufficient credits", type: "billing_error", credits_required: reservedCredits, credits_available: keyInfo.credits + keyInfo.dailyCredits } },
-            { status: 402 }
-          );
-        }
-
-        streamReservation = {
-          reservedCredits,
-          balanceAfterReserve: reserveBalance as number,
-        };
-      }
-    }
-
     const providerResponse = await provider.forward(forwardBody as any);
 
     if (!providerResponse.ok) {
-      if (streamReservation && !isFreePool) {
-        if (keyInfo.isCustom && keyInfo.customCredits !== null) {
-          const { error: refundErr } = await supabase.rpc("add_custom_key_credits", {
-            p_key_id: keyInfo.keyId,
-            p_amount: streamReservation.reservedCredits,
-          });
-          if (refundErr) {
-            console.error("Failed to refund reserved custom-key credits after upstream error:", refundErr.message);
-          }
-        } else {
-          const { error: refundErr } = await supabase.rpc("add_credits", {
-            p_user_id: keyInfo.userId,
-            p_amount: streamReservation.reservedCredits,
-          });
-          if (refundErr) {
-            console.error("Failed to refund reserved credits after upstream error:", refundErr.message);
-          }
-        }
-      }
+      await refundReservation();
 
       const errorText = await providerResponse.text();
       const status = providerResponse.status;
@@ -690,15 +737,15 @@ export async function POST(req: NextRequest) {
         keyInfo,
         model,
         startTime,
-        streamEstimatedPrompt,
+        estimatedPrompt,
         isFreePool,
         freePoolName,
         activeEventId,
-        streamReservation
+        reservation
       );
     }
 
-    // 8. Handle non-streaming
+    // 8. Handle non-streaming — response already received, settle the reservation.
     const data = await providerResponse.json() as {
       usage?: UsageLike;
       [key: string]: unknown;
@@ -709,12 +756,12 @@ export async function POST(req: NextRequest) {
 
     // Some providers omit usage on non-stream responses; estimate to avoid zero-charge responses.
     if (!usage.total_tokens || usage.total_tokens <= 0) {
-      const estimatedPrompt = estimatePromptTokens(messages);
-      const estimatedCompletion = estimateTokens(extractCompletionText(data));
+      const fallbackPrompt = estimatePromptTokens(messages);
+      const fallbackCompletion = estimateTokens(extractCompletionText(data));
       usage = {
-        prompt_tokens: estimatedPrompt,
-        completion_tokens: estimatedCompletion,
-        total_tokens: estimatedPrompt + estimatedCompletion,
+        prompt_tokens: fallbackPrompt,
+        completion_tokens: fallbackCompletion,
+        total_tokens: fallbackPrompt + fallbackCompletion,
       };
       cacheTokens = { read: 0, write: 0 };
     }
@@ -739,52 +786,16 @@ export async function POST(req: NextRequest) {
     // Premium-request models (t/, an/, w/) are flat-rate: 1 credit + N premium-request budget.
     const finalCredits = isFreePool ? 0 : isPremiumProvider ? 1 : Math.max(credits, 1);
 
-    // 9. Deduct credits (skip for free-pool models)
+    // 9. Settle credits — adjust reservation to match actual usage
+    let chargedCredits = 0;
     let newBalance = 0;
-    if (!isFreePool) {
-      if (keyInfo.isCustom && keyInfo.customCredits !== null) {
-        // Deduct from key's own credit pool atomically.
-        const { data: keyBalance, error: keyErr } = await supabase.rpc("deduct_custom_key_credits", {
-          p_key_id: keyInfo.keyId,
-          p_amount: finalCredits,
-        });
+    let billingStatus: "success" | "settlement_failed" = "success";
 
-        if (keyErr) {
-          return NextResponse.json(
-            { error: { message: "Failed to deduct key credits", type: "billing_error" } },
-            { status: 500 }
-          );
-        }
-
-        if (keyBalance === -1) {
-          return NextResponse.json(
-            { error: { message: "Insufficient key credits", type: "billing_error", credits_available: keyInfo.customCredits } },
-            { status: 402 }
-          );
-        }
-        newBalance = keyBalance as number;
-      } else {
-        // Deduct from user's credit pool
-        const { data: rpcBalance, error: deductError } = await supabase.rpc("deduct_credits", {
-          p_user_id: keyInfo.userId,
-          p_amount: finalCredits,
-        });
-
-        if (deductError) {
-          return NextResponse.json(
-            { error: { message: "Failed to deduct credits", type: "billing_error" } },
-            { status: 500 }
-          );
-        }
-
-        if (rpcBalance === -1) {
-          return NextResponse.json(
-            { error: { message: "Insufficient credits", type: "billing_error", credits_required: finalCredits, credits_available: keyInfo.credits + keyInfo.dailyCredits } },
-            { status: 402 }
-          );
-        }
-        newBalance = rpcBalance as number;
-      }
+    if (!isFreePool && reservation) {
+      const settlement = await settleReservation(finalCredits);
+      chargedCredits = settlement.chargedCredits;
+      newBalance = settlement.balanceAfter;
+      billingStatus = settlement.status;
     }
 
     // 10. Log usage (always log, even for free-pool — needed for token tracking)
@@ -800,9 +811,9 @@ export async function POST(req: NextRequest) {
       total_tokens: totalTokens,
       cache_read_tokens: cacheTokens.read,
       cache_write_tokens: cacheTokens.write,
-      credits_charged: finalCredits,
+      credits_charged: isFreePool ? 0 : chargedCredits,
       cost_usd: costUsd,
-      status: "success",
+      status: isFreePool ? "success" : billingStatus,
       duration_ms: durationMs,
       premium_cost: premiumCost,
     });
@@ -810,13 +821,14 @@ export async function POST(req: NextRequest) {
       console.error("Failed to write usage log:", usageLogError.message);
     }
 
-    if (!isFreePool) {
+    if (!isFreePool && chargedCredits > 0) {
+      const settlementSuffix = billingStatus === "success" ? "" : ` [${billingStatus}]`;
       const { error: txError } = await supabase.from("transactions").insert({
         user_id: keyInfo.userId,
-        amount: -finalCredits,
+        amount: -chargedCredits,
         balance: newBalance,
         type: keyInfo.isCustom ? "custom_key_usage" : "usage",
-        description: `${modelId} - ${totalTokens} tokens`,
+        description: `${modelId} - ${totalTokens} tokens${settlementSuffix}`,
       });
       if (txError) {
         console.error("Failed to write transaction log:", txError.message);
@@ -825,8 +837,6 @@ export async function POST(req: NextRequest) {
 
     try {
       // Increment daily token pool only when the request was actually free.
-      // Paid nano requests (after a user crosses their 200k free threshold)
-      // shouldn't eat into the global free pool.
       if (freePoolName && isFreePool) {
         await incrementDailyTokenPool(supabase, freePoolName, totalTokens);
       }
@@ -841,25 +851,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(data);
   } catch (error) {
-    if (streamReservation && !isFreePool) {
-      if (keyInfo.isCustom && keyInfo.customCredits !== null) {
-        const { error: refundErr } = await supabase.rpc("add_custom_key_credits", {
-          p_key_id: keyInfo.keyId,
-          p_amount: streamReservation.reservedCredits,
-        });
-        if (refundErr) {
-          console.error("Failed to refund reserved custom-key credits after exception:", refundErr.message);
-        }
-      } else {
-        const { error: refundErr } = await supabase.rpc("add_credits", {
-          p_user_id: keyInfo.userId,
-          p_amount: streamReservation.reservedCredits,
-        });
-        if (refundErr) {
-          console.error("Failed to refund reserved credits after exception:", refundErr.message);
-        }
-      }
-    }
+    await refundReservation();
 
     return NextResponse.json(
       { error: { message: (error as Error).message, type: "server_error" } },

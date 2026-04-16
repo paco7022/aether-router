@@ -12,7 +12,7 @@ export function DeleteAccountButton() {
     setStep("deleting");
     setError("");
 
-    const res = await fetch("/api/v1/account", { method: "DELETE" });
+    const res = await fetch("/api/v1/account", { method: "DELETE", headers: { "X-Requested-With": "AetherRouter" } });
 
     if (!res.ok) {
       setError("Something went wrong. Please try again.");

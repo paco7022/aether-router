@@ -2,8 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { stripe } from "@/lib/stripe";
+import { requireCsrf } from "@/lib/csrf";
 
 export async function POST(req: NextRequest) {
+  const csrfError = requireCsrf(req);
+  if (csrfError) return csrfError;
+
   const supabase = await createServerSupabase();
   const {
     data: { user },
@@ -14,8 +18,8 @@ export async function POST(req: NextRequest) {
   }
 
   const { package_id } = await req.json();
-  if (!package_id) {
-    return NextResponse.json({ error: "Missing package_id" }, { status: 400 });
+  if (!package_id || typeof package_id !== "string" || package_id.length > 64) {
+    return NextResponse.json({ error: "Invalid package_id" }, { status: 400 });
   }
 
   const admin = createAdminClient();

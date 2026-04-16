@@ -106,12 +106,12 @@ const ALL_PROVIDERS = ["trolllm", "airforce", "gemini-cli", "antigravity", "webp
 async function api(method: "GET" | "POST", params?: Record<string, string>, body?: unknown) {
   if (method === "GET") {
     const qs = new URLSearchParams(params).toString();
-    const res = await fetch(`/api/v1/admin?${qs}`);
+    const res = await fetch(`/api/v1/admin?${qs}`, { headers: { "X-Requested-With": "AetherRouter" } });
     return res.json();
   }
   const res = await fetch("/api/v1/admin", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "X-Requested-With": "AetherRouter" },
     body: JSON.stringify(body),
   });
   return res.json();

@@ -44,7 +44,7 @@ export default function LoginPage() {
       if (fpRef.current) {
         fetch("/api/v1/fingerprint", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", "X-Requested-With": "AetherRouter" },
           body: JSON.stringify({ fingerprint: fpRef.current }),
         }).catch(() => {});
       }

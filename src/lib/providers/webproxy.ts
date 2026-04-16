@@ -11,7 +11,10 @@ export const webproxyProvider: Provider = {
   baseUrl: process.env.WEBPROXY_BASE_URL || "http://localhost:8000/v1",
 
   async forward(request: ProviderRequest, signal?: AbortSignal): Promise<Response> {
-    const apiKey = process.env.WEBPROXY_API_KEY || "";
+    const apiKey = process.env.WEBPROXY_API_KEY;
+    if (!apiKey) {
+      throw new Error("WEBPROXY_API_KEY not configured");
+    }
 
     let lastResponse: Response | null = null;
 

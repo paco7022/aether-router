@@ -2,8 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { stripe } from "@/lib/stripe";
+import { requireCsrf } from "@/lib/csrf";
 
 export async function POST(req: NextRequest) {
+  const csrfError = requireCsrf(req);
+  if (csrfError) return csrfError;
+
   const supabase = await createServerSupabase();
   const {
     data: { user },
@@ -14,7 +18,7 @@ export async function POST(req: NextRequest) {
   }
 
   const { plan_id } = await req.json();
-  if (!plan_id || plan_id === "free") {
+  if (!plan_id || typeof plan_id !== "string" || plan_id.length > 64 || plan_id === "free") {
     return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
   }
 

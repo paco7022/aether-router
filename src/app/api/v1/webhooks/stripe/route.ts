@@ -166,14 +166,30 @@ export async function POST(req: NextRequest) {
           .single();
 
         if (sub) {
-          // Update period
+          // Retrieve actual period from Stripe subscription items rather than
+          // using a hardcoded 30-day window which drifts over time.
+          let periodStart = new Date().toISOString();
+          let periodEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+          try {
+            const stripeSub = await stripe.subscriptions.retrieve(stripeSubId, {
+              expand: ["items"],
+            });
+            const firstItem = stripeSub.items?.data?.[0];
+            if (firstItem?.current_period_start) {
+              periodStart = new Date(firstItem.current_period_start * 1000).toISOString();
+            }
+            if (firstItem?.current_period_end) {
+              periodEnd = new Date(firstItem.current_period_end * 1000).toISOString();
+            }
+          } catch (stripeErr) {
+            console.error("Failed to retrieve subscription period from Stripe:", stripeErr);
+          }
+
           await admin
             .from("subscriptions")
             .update({
-              current_period_start: new Date().toISOString(),
-              current_period_end: new Date(
-                Date.now() + 30 * 24 * 60 * 60 * 1000
-              ).toISOString(),
+              current_period_start: periodStart,
+              current_period_end: periodEnd,
               updated_at: new Date().toISOString(),
             })
             .eq("id", sub.id);

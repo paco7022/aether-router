@@ -5,7 +5,10 @@ export const geminiCliProvider: Provider = {
   baseUrl: process.env.GEMINI_CLI_URL || process.env.GEMINI_PROXY_URL || "http://localhost:8964/v1",
 
   async forward(request: ProviderRequest, signal?: AbortSignal): Promise<Response> {
-    const apiKey = process.env.GEMINI_CLI_API_KEY || process.env.GEMINI_PROXY_PASSWORD || "77777";
+    const apiKey = process.env.GEMINI_CLI_API_KEY || process.env.GEMINI_PROXY_PASSWORD;
+    if (!apiKey) {
+      throw new Error("GEMINI_CLI_API_KEY not configured");
+    }
 
     const res = await fetch(`${this.baseUrl}/chat/completions`, {
       method: "POST",

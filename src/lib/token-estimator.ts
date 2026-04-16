@@ -7,6 +7,12 @@
  * Rule of thumb (from OpenAI docs): ~0.75 words per token for English,
  * so 1 token ≈ 1.33 words. We use a slightly conservative 1.25 to avoid
  * under-charging, but it's far more accurate than chars/4.
+ *
+ * WARNING: This estimator is used for BILLING when providers omit usage data.
+ * For code-heavy content it can over-count (~2x); for non-English text or
+ * minified content it can under-count. If billing accuracy is critical,
+ * consider integrating tiktoken (for OpenAI models) or the provider's own
+ * token counting API instead of relying on this heuristic.
  */
 
 // Regex: split on whitespace and common punctuation boundaries

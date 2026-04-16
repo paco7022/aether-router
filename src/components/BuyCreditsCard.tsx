@@ -19,7 +19,7 @@ export function BuyCreditsCard({ pkg }: { pkg: CreditPackage }) {
     try {
       const res = await fetch("/api/v1/billing/buy-credits", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-Requested-With": "AetherRouter" },
         body: JSON.stringify({ package_id: pkg.id }),
       });
       const data = await res.json();

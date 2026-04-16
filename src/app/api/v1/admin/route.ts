@@ -4,6 +4,12 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { isAdmin } from "@/lib/admin";
 import { hashApiKey } from "@/lib/auth";
 import { API_KEY_PREFIX } from "@/lib/constants";
+import { requireCsrf } from "@/lib/csrf";
+
+// Escape LIKE/ILIKE wildcards so user input is treated literally.
+function escapeLike(input: string): string {
+  return input.replace(/[%_\\]/g, "\\$&");
+}
 
 async function requireAdmin(req: NextRequest) {
   const supabase = await createServerSupabase();
@@ -16,6 +22,9 @@ async function requireAdmin(req: NextRequest) {
 
 // GET /api/v1/admin?action=users|stats|plans|models|keys
 export async function GET(req: NextRequest) {
+  const csrfError = requireCsrf(req);
+  if (csrfError) return csrfError;
+
   const user = await requireAdmin(req);
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
@@ -34,18 +43,19 @@ export async function GET(req: NextRequest) {
         .limit(100);
 
       if (search) {
-        // Use separate .ilike() filters to avoid PostgREST .or() parsing issues with special chars
+        // Escape LIKE wildcards (%, _) so user input is treated literally
+        const safeSearch = escapeLike(search);
         const [{ data: byEmail }, { data: byName }] = await Promise.all([
           supabase
             .from("profiles")
             .select("id, email, display_name, credits, daily_credits, plan_id, gm_claimed_date, created_at, updated_at")
-            .ilike("email", `%${search}%`)
+            .ilike("email", `%${safeSearch}%`)
             .order("created_at", { ascending: false })
             .limit(100),
           supabase
             .from("profiles")
             .select("id, email, display_name, credits, daily_credits, plan_id, gm_claimed_date, created_at, updated_at")
-            .ilike("display_name", `%${search}%`)
+            .ilike("display_name", `%${safeSearch}%`)
             .order("created_at", { ascending: false })
             .limit(100),
         ]);
@@ -215,6 +225,9 @@ export async function GET(req: NextRequest) {
 
 // POST /api/v1/admin
 export async function POST(req: NextRequest) {
+  const csrfError = requireCsrf(req);
+  if (csrfError) return csrfError;
+
   const user = await requireAdmin(req);
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 });

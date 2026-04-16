@@ -25,7 +25,7 @@ export function GmRequestsCard({
     setLoading(true);
     setMessage("");
 
-    const res = await fetch("/api/v1/billing/claim-gm", { method: "POST" });
+    const res = await fetch("/api/v1/billing/claim-gm", { method: "POST", headers: { "X-Requested-With": "AetherRouter" } });
     const data = await res.json();
 
     if (res.ok) {

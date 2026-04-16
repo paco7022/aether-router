@@ -32,7 +32,7 @@ export async function validateApiKey(key: string): Promise<ApiKeyInfo | null> {
   // Look up key and join with profile for credits
   const { data: result, error } = await supabase
     .from("api_keys")
-    .select("id, user_id, is_active, is_custom, custom_credits, max_context, allowed_providers, daily_request_limit, rate_limit_seconds, expires_at, profiles(credits, daily_credits, plan_id, gm_claimed_date, gm_daily_override, gm_override_expires)")
+    .select("id, user_id, is_active, is_custom, custom_credits, max_context, allowed_providers, daily_request_limit, rate_limit_seconds, expires_at, last_used, profiles(credits, daily_credits, plan_id, gm_claimed_date, gm_daily_override, gm_override_expires)")
     .eq("key_hash", keyHash)
     .single();
 
@@ -45,11 +45,19 @@ export async function validateApiKey(key: string): Promise<ApiKeyInfo | null> {
     return null;
   }
 
-  // Update last_used
-  await supabase
-    .from("api_keys")
-    .update({ last_used: new Date().toISOString() })
-    .eq("id", result.id);
+  // Debounce last_used update — only write if >5 minutes stale.
+  // Avoids a DB write on every single API request under heavy load.
+  const lastUsedMs = result.last_used ? new Date(result.last_used).getTime() : 0;
+  if (Date.now() - lastUsedMs > 5 * 60_000) {
+    // Fire-and-forget — non-critical update
+    supabase
+      .from("api_keys")
+      .update({ last_used: new Date().toISOString() })
+      .eq("id", result.id)
+      .then(({ error: updateErr }) => {
+        if (updateErr) console.error("Failed to update last_used:", updateErr.message);
+      });
+  }
 
   const profile = result.profiles as unknown as { credits: number; daily_credits: number; plan_id: string; gm_claimed_date: string | null; gm_daily_override: number | null; gm_override_expires: string | null };
 
