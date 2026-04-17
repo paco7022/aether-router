@@ -410,9 +410,16 @@ export async function POST(req: NextRequest) {
         keyInfo.gmOverrideExpires &&
         new Date(keyInfo.gmOverrideExpires) > new Date();
 
-      const gmDailyRequests = hasActiveOverride
+      const baseGmDaily = hasActiveOverride
         ? keyInfo.gmDailyOverride!
         : (plan?.gm_daily_requests ?? 15);
+
+      const referralBonusActive =
+        keyInfo.referralBonusExpires !== null &&
+        new Date(keyInfo.referralBonusExpires) > new Date();
+      const referralBonus = referralBonusActive ? keyInfo.referralBonusRequests : 0;
+
+      const gmDailyRequests = baseGmDaily + referralBonus;
       const gmMaxContext = plan?.gm_max_context ?? 32768;
 
       if (gmDailyRequests > 0) {

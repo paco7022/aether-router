@@ -25,6 +25,25 @@ export function useFingerprintCapture() {
           },
           body: JSON.stringify({ fingerprint: fp }),
         });
+
+        // Redeem pending referral (covers OAuth, where /register couldn't
+        // call redeem directly). Safe if already redeemed — the RPC
+        // rejects a second attempt with "Already referred".
+        const pendingRef = sessionStorage.getItem("aether_ref");
+        if (pendingRef) {
+          try {
+            await fetch("/api/v1/referral/redeem", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Requested-With": "AetherRouter",
+              },
+              body: JSON.stringify({ code: pendingRef, fingerprint: fp }),
+            });
+          } finally {
+            sessionStorage.removeItem("aether_ref");
+          }
+        }
       } catch {
         // Silent fail — fingerprint is best-effort
       }

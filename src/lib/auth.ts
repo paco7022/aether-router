@@ -9,6 +9,8 @@ export interface ApiKeyInfo {
   gmClaimedDate: string | null;
   gmDailyOverride: number | null;
   gmOverrideExpires: string | null;
+  referralBonusRequests: number;
+  referralBonusExpires: string | null;
   // Per-key overrides (custom/event keys)
   isCustom: boolean;
   customCredits: number | null;
@@ -32,7 +34,7 @@ export async function validateApiKey(key: string): Promise<ApiKeyInfo | null> {
   // Look up key and join with profile for credits
   const { data: result, error } = await supabase
     .from("api_keys")
-    .select("id, user_id, is_active, is_custom, custom_credits, max_context, allowed_providers, daily_request_limit, rate_limit_seconds, expires_at, last_used, profiles(credits, daily_credits, plan_id, gm_claimed_date, gm_daily_override, gm_override_expires)")
+    .select("id, user_id, is_active, is_custom, custom_credits, max_context, allowed_providers, daily_request_limit, rate_limit_seconds, expires_at, last_used, profiles(credits, daily_credits, plan_id, gm_claimed_date, gm_daily_override, gm_override_expires, referral_bonus_requests, referral_bonus_expires)")
     .eq("key_hash", keyHash)
     .single();
 
@@ -59,7 +61,7 @@ export async function validateApiKey(key: string): Promise<ApiKeyInfo | null> {
       });
   }
 
-  const profile = result.profiles as unknown as { credits: number; daily_credits: number; plan_id: string; gm_claimed_date: string | null; gm_daily_override: number | null; gm_override_expires: string | null };
+  const profile = result.profiles as unknown as { credits: number; daily_credits: number; plan_id: string; gm_claimed_date: string | null; gm_daily_override: number | null; gm_override_expires: string | null; referral_bonus_requests: number | null; referral_bonus_expires: string | null };
 
   return {
     keyId: result.id,
@@ -70,6 +72,8 @@ export async function validateApiKey(key: string): Promise<ApiKeyInfo | null> {
     gmClaimedDate: profile?.gm_claimed_date ?? null,
     gmDailyOverride: profile?.gm_daily_override ?? null,
     gmOverrideExpires: profile?.gm_override_expires ?? null,
+    referralBonusRequests: profile?.referral_bonus_requests ?? 0,
+    referralBonusExpires: profile?.referral_bonus_expires ?? null,
     isCustom: result.is_custom ?? false,
     customCredits: result.custom_credits ?? null,
     maxContext: result.max_context ?? null,

@@ -16,13 +16,23 @@ export default function RegisterPage() {
   const router = useRouter();
   const supabase = createClient();
   const fpRef = useRef<string | null>(null);
+  const refCodeRef = useRef<string | null>(null);
 
   useEffect(() => {
     getFingerprint().then((fp) => { fpRef.current = fp; });
+
+    const fromUrl = new URLSearchParams(window.location.search).get("ref");
+    const stored = sessionStorage.getItem("aether_ref");
+    const code = (fromUrl || stored || "").trim().toUpperCase();
+    if (code) {
+      refCodeRef.current = code;
+      sessionStorage.setItem("aether_ref", code);
+    }
   }, []);
 
   async function handleGoogleLogin() {
     setError("");
+    // Ref code stays in sessionStorage — auth/callback can pick it up after OAuth.
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
@@ -63,11 +73,19 @@ export default function RegisterPage() {
       setLoading(false);
     } else {
       if (fpRef.current) {
-        fetch("/api/v1/fingerprint", {
+        await fetch("/api/v1/fingerprint", {
           method: "POST",
           headers: { "Content-Type": "application/json", "X-Requested-With": "AetherRouter" },
           body: JSON.stringify({ fingerprint: fpRef.current }),
         }).catch(() => {});
+      }
+      if (refCodeRef.current) {
+        await fetch("/api/v1/referral/redeem", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Requested-With": "AetherRouter" },
+          body: JSON.stringify({ code: refCodeRef.current, fingerprint: fpRef.current }),
+        }).catch(() => {});
+        sessionStorage.removeItem("aether_ref");
       }
       router.push("/dashboard");
     }
