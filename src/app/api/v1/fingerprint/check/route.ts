@@ -11,11 +11,16 @@ export async function POST(req: NextRequest) {
 
   const admin = createAdminClient();
 
-  const { data: banned } = await admin
-    .from("banned_fingerprints")
-    .select("id, reason")
-    .eq("fingerprint", fingerprint)
-    .maybeSingle();
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    req.headers.get("x-real-ip") || "unknown";
+
+  const [fpBan, ipBan] = await Promise.all([
+    admin.from("banned_fingerprints").select("id, reason").eq("fingerprint", fingerprint).maybeSingle(),
+    ip !== "unknown"
+      ? admin.from("banned_fingerprints").select("id, reason").eq("ip_address", ip).maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
+  const banned = fpBan.data || ipBan.data;
 
   if (banned) {
     return NextResponse.json({ banned: true, reason: banned.reason || "Device banned" });
