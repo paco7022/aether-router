@@ -140,6 +140,18 @@ export async function POST(req: NextRequest) {
 
             // Don't auto-grant daily credits — user must click "Claim" button
             // This ensures users know they've received their daily allowance
+
+            // Paid-conversion referral bonus: if this user was referred,
+            // grant +15 premium requests/day for 7 days to both sides.
+            // Fires on every paid checkout (first sub or upgrade).
+            const { error: refBonusErr } = await admin.rpc("grant_paid_referral_bonus", {
+              p_referee_id: userId,
+              p_bonus: 15,
+              p_days: 7,
+            });
+            if (refBonusErr) {
+              console.error("grant_paid_referral_bonus failed:", refBonusErr.message);
+            }
           }
         }
         break;
