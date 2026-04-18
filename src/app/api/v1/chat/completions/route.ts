@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { validateApiKey } from "@/lib/auth";
+import { validateApiKey, validateSession } from "@/lib/auth";
 import { calculateCredits } from "@/lib/credits";
 import { estimateTokens, estimatePromptTokens } from "@/lib/token-estimator";
 import { getProvider } from "@/lib/providers";
@@ -97,23 +97,29 @@ function getRequestedCompletionTokens(body: Record<string, unknown>): number | n
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
 
-  // 1. Extract API key
+  // 1. Authenticate — Bearer API key OR Supabase session (in-dashboard chat).
+  // Session auth lets the internal chat UI reuse this endpoint without
+  // minting/storing a plaintext API key; validateSession() builds a synthetic
+  // keyInfo (keyId=null, source="chat") that flows through the same billing
+  // and rate-limit paths as a real API call.
   const authHeader = req.headers.get("authorization");
-  if (!authHeader?.startsWith("Bearer ")) {
-    return NextResponse.json(
-      { error: { message: "Missing Authorization header", type: "auth_error" } },
-      { status: 401 }
-    );
-  }
-  const apiKey = authHeader.slice(7);
-
-  // 2. Validate API key
-  const keyInfo = await validateApiKey(apiKey);
-  if (!keyInfo) {
-    return NextResponse.json(
-      { error: { message: "Invalid API key", type: "auth_error" } },
-      { status: 401 }
-    );
+  let keyInfo;
+  if (authHeader?.startsWith("Bearer ")) {
+    keyInfo = await validateApiKey(authHeader.slice(7));
+    if (!keyInfo) {
+      return NextResponse.json(
+        { error: { message: "Invalid API key", type: "auth_error" } },
+        { status: 401 }
+      );
+    }
+  } else {
+    keyInfo = await validateSession();
+    if (!keyInfo) {
+      return NextResponse.json(
+        { error: { message: "Missing Authorization header", type: "auth_error" } },
+        { status: 401 }
+      );
+    }
   }
 
   // 3. Parse request body
@@ -271,6 +277,13 @@ export async function POST(req: NextRequest) {
     activeEventId = activeEvent.id;
   }
 
+  // Reservation flags so refundReservation() can roll back request counters
+  // (premium RPD / custom-key RPD) on upstream failure, independently of the
+  // credit reservation.
+  let premiumRequestReserved = false;
+  let premiumReservedCost = 0;
+  let customKeyRequestReserved = false;
+
   // 5.5b. Custom key checks — custom keys bypass plan restrictions and use their own limits
   if (keyInfo.isCustom) {
     // Provider allowlist
@@ -281,55 +294,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Per-key rate limit (defaults to 60s for premium, no limit for non-premium)
-    const isPremium = model.provider === "trolllm" || model.provider === "antigravity" || model.provider === "webproxy";
-    const rlSeconds = keyInfo.rateLimitSeconds ?? (isPremium ? 60 : 0);
-    if (rlSeconds > 0) {
-      const windowAgo = new Date(Date.now() - rlSeconds * 1000).toISOString();
-      const { data: recentReq } = await supabase
-        .from("usage_logs")
-        .select("created_at")
-        .eq("api_key_id", keyInfo.keyId)
-        .gte("created_at", windowAgo)
-        .limit(1)
-        .maybeSingle();
-
-      if (recentReq) {
-        const retryAfter = Math.ceil(
-          (new Date(recentReq.created_at).getTime() + rlSeconds * 1000 - Date.now()) / 1000
-        );
-        return NextResponse.json(
-          { error: { message: `Rate limit: 1 request per ${rlSeconds}s. Try again in ${retryAfter}s.`, type: "rate_limit" } },
-          { status: 429, headers: { "Retry-After": String(Math.max(retryAfter, 1)) } }
-        );
-      }
-    }
-
-    // Per-key daily request limit
-    if (keyInfo.dailyRequestLimit && keyInfo.dailyRequestLimit > 0) {
-      const todayStart = new Date();
-      todayStart.setUTCHours(0, 0, 0, 0);
-      const { count, error: countErr } = await supabase
-        .from("usage_logs")
-        .select("*", { count: "exact", head: true })
-        .eq("api_key_id", keyInfo.keyId)
-        .gte("created_at", todayStart.toISOString());
-
-      if (countErr) {
-        return NextResponse.json(
-          { error: { message: "Failed to check rate limit", type: "server_error" } },
-          { status: 500 }
-        );
-      }
-      if ((count ?? 0) >= keyInfo.dailyRequestLimit) {
-        return NextResponse.json(
-          { error: { message: `Daily request limit reached (${keyInfo.dailyRequestLimit}/day for this key).`, type: "rate_limit" } },
-          { status: 429 }
-        );
-      }
-    }
-
-    // Per-key context limit
+    // Per-key context limit — cheap check runs before the atomic reservation
+    // so oversize requests don't burn a slot on the daily counter.
     if (keyInfo.maxContext && keyInfo.maxContext > 0) {
       const estimatedContext = estimatePromptTokens(messages);
       if (estimatedContext > keyInfo.maxContext) {
@@ -340,45 +306,57 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Per-key credit pool
-    if (keyInfo.customCredits !== null) {
-      if (keyInfo.customCredits <= 0) {
+    // Per-key credit pool sanity (no mutation — deduct_custom_key_credits
+    // below does the actual atomic deduction).
+    if (keyInfo.customCredits !== null && keyInfo.customCredits <= 0) {
+      return NextResponse.json(
+        { error: { message: "This key has no credits remaining.", type: "billing_error", credits_available: 0 } },
+        { status: 402 }
+      );
+    }
+
+    // Per-key rate limit + daily request limit — atomic reservation RPC so
+    // concurrent requests can't all pass the check before the first log is
+    // written. Defaults: 60s rate-limit for premium providers, no rate-limit
+    // otherwise; daily limit from key config (0 = unlimited).
+    const isPremium = model.provider === "trolllm" || model.provider === "antigravity" || model.provider === "webproxy";
+    const rlSeconds = keyInfo.rateLimitSeconds ?? (isPremium ? 60 : 0);
+    const dailyReqLimit = keyInfo.dailyRequestLimit ?? 0;
+
+    if (rlSeconds > 0 || dailyReqLimit > 0) {
+      const { data: reserveResult, error: reserveErr } = await supabase.rpc("reserve_custom_key_request", {
+        p_key_id: keyInfo.keyId,
+        p_daily_limit: dailyReqLimit,
+        p_rate_limit_seconds: rlSeconds,
+      });
+
+      if (reserveErr) {
         return NextResponse.json(
-          { error: { message: "This key has no credits remaining.", type: "billing_error", credits_available: 0 } },
-          { status: 402 }
+          { error: { message: "Failed to check rate limit", type: "server_error" } },
+          { status: 500 }
         );
       }
+
+      const res = reserveResult as { status: string; retry_after_seconds?: number; limit?: number; used?: number };
+      if (res.status === "rate_limited") {
+        const retryAfter = res.retry_after_seconds ?? 1;
+        return NextResponse.json(
+          { error: { message: `Rate limit: 1 request per ${rlSeconds}s. Try again in ${retryAfter}s.`, type: "rate_limit" } },
+          { status: 429, headers: { "Retry-After": String(Math.max(retryAfter, 1)) } }
+        );
+      }
+      if (res.status === "daily_limit") {
+        return NextResponse.json(
+          { error: { message: `Daily request limit reached (${dailyReqLimit}/day for this key).`, type: "rate_limit" } },
+          { status: 429 }
+        );
+      }
+      customKeyRequestReserved = true;
     }
   } else if (!activeEvent) {
     // 5.5b-normal. Premium plan limits (requests/day + context cap) — applies to trolllm, antigravity, webproxy.
     // Skipped entirely when an active event covers this model for the user's plan.
     if (isPremiumProvider) {
-      // Rate limit: 1 request per minute per user on premium models
-      const oneMinuteAgo = new Date(Date.now() - 60_000).toISOString();
-      const { data: recentPremium } = await supabase
-        .from("usage_logs")
-        .select("created_at")
-        .eq("user_id", keyInfo.userId)
-        .or("model_id.like.t/%,model_id.like.an/%,model_id.like.w/%")
-        .gte("created_at", oneMinuteAgo)
-        .limit(1)
-        .maybeSingle();
-
-      if (recentPremium) {
-        const retryAfter = Math.ceil(
-          (new Date(recentPremium.created_at).getTime() + 60_000 - Date.now()) / 1000
-        );
-        return NextResponse.json(
-          {
-            error: {
-              message: `Premium model rate limit: 1 request per minute. Try again in ${retryAfter}s.`,
-              type: "rate_limit",
-            },
-          },
-          { status: 429, headers: { "Retry-After": String(Math.max(retryAfter, 1)) } }
-        );
-      }
-
       // Block an/ models for free tier — they only get t/ and w/ models
       if (model.provider === "antigravity" && keyInfo.planId === "free") {
         return NextResponse.json(
@@ -422,35 +400,9 @@ export async function POST(req: NextRequest) {
       const gmDailyRequests = baseGmDaily + referralBonus;
       const gmMaxContext = plan?.gm_max_context ?? 32768;
 
-      if (gmDailyRequests > 0) {
-        const todayStart = new Date();
-        todayStart.setUTCHours(0, 0, 0, 0);
-        const { data: premiumSum, error: premiumErr } = await supabase
-          .from("usage_logs")
-          .select("premium_cost")
-          .eq("user_id", keyInfo.userId)
-          .or("model_id.like.t/%,model_id.like.an/%,model_id.like.w/%")
-          .gte("created_at", todayStart.toISOString());
-
-        if (premiumErr) {
-          return NextResponse.json(
-            { error: { message: "Failed to check rate limit", type: "server_error" } },
-            { status: 500 }
-          );
-        }
-
-        const totalPremiumUsed = (premiumSum ?? []).reduce((sum: number, row: { premium_cost: number }) => sum + Number(row.premium_cost), 0);
-        if (totalPremiumUsed + Number(model.premium_request_cost ?? 1) > gmDailyRequests) {
-          return NextResponse.json(
-            { error: { message: `Daily premium limit reached (${gmDailyRequests} requests/day for your plan). Upgrade for more.`, type: "rate_limit" } },
-            { status: 429 }
-          );
-        }
-      }
-
-      // Context cap applies to all premium providers (t/, an/, w/). Free
-      // tier only has t/ and w/ access — the previous antigravity-only check
-      // meant their plan-level context cap was never actually enforced.
+      // Context cap checked BEFORE the atomic reservation so oversize
+      // requests don't inflate the daily counter. Applies to all premium
+      // providers (t/, an/, w/); free tier only has t/ and w/ access.
       if (gmMaxContext > 0) {
         const estimatedContext = estimatePromptTokens(messages);
         if (estimatedContext > gmMaxContext) {
@@ -460,6 +412,47 @@ export async function POST(req: NextRequest) {
           );
         }
       }
+
+      // Atomic premium reservation: rate limit + daily limit + counter
+      // increment in one transaction. Replaces the prior two SELECTs on
+      // usage_logs which had a TOCTOU window — concurrent streams could
+      // all pass the check before any log was written.
+      const premiumCost = Number(model.premium_request_cost ?? 1);
+      const { data: reserveResult, error: reserveErr } = await supabase.rpc("reserve_premium_request", {
+        p_user_id: keyInfo.userId,
+        p_cost: premiumCost,
+        p_daily_limit: gmDailyRequests > 0 ? gmDailyRequests : 0,
+        p_rate_limit_seconds: 60,
+      });
+
+      if (reserveErr) {
+        return NextResponse.json(
+          { error: { message: "Failed to check rate limit", type: "server_error" } },
+          { status: 500 }
+        );
+      }
+
+      const res = reserveResult as { status: string; retry_after_seconds?: number; limit?: number; used?: number };
+      if (res.status === "rate_limited") {
+        const retryAfter = res.retry_after_seconds ?? 1;
+        return NextResponse.json(
+          {
+            error: {
+              message: `Premium model rate limit: 1 request per minute. Try again in ${retryAfter}s.`,
+              type: "rate_limit",
+            },
+          },
+          { status: 429, headers: { "Retry-After": String(Math.max(retryAfter, 1)) } }
+        );
+      }
+      if (res.status === "daily_limit") {
+        return NextResponse.json(
+          { error: { message: `Daily premium limit reached (${gmDailyRequests} requests/day for your plan). Upgrade for more.`, type: "rate_limit" } },
+          { status: 429 }
+        );
+      }
+      premiumRequestReserved = true;
+      premiumReservedCost = premiumCost;
     }
   }
 
@@ -625,25 +618,49 @@ export async function POST(req: NextRequest) {
   // Capture keyInfo as non-null for inner helpers (already validated above).
   const key = keyInfo!;
 
-  // Helper: refund reserved credits on error/exception
+  // Helper: refund reserved credits AND request-count reservations on
+  // error/exception. Each reservation type (credits / premium RPD /
+  // custom-key RPD) is independent, so they're refunded separately.
   async function refundReservation() {
-    if (!reservation || isFreePool) return;
-    if (key.isCustom && key.customCredits !== null) {
-      const { error: refundErr } = await supabase.rpc("add_custom_key_credits", {
-        p_key_id: key.keyId,
-        p_amount: reservation.reservedCredits,
-      });
-      if (refundErr) {
-        console.error("Failed to refund reserved custom-key credits:", refundErr.message);
+    if (reservation && !isFreePool) {
+      if (key.isCustom && key.customCredits !== null) {
+        const { error: refundErr } = await supabase.rpc("add_custom_key_credits", {
+          p_key_id: key.keyId,
+          p_amount: reservation.reservedCredits,
+        });
+        if (refundErr) {
+          console.error("Failed to refund reserved custom-key credits:", refundErr.message);
+        }
+      } else {
+        const { error: refundErr } = await supabase.rpc("add_credits", {
+          p_user_id: key.userId,
+          p_amount: reservation.reservedCredits,
+        });
+        if (refundErr) {
+          console.error("Failed to refund reserved credits:", refundErr.message);
+        }
       }
-    } else {
-      const { error: refundErr } = await supabase.rpc("add_credits", {
+    }
+
+    if (premiumRequestReserved && premiumReservedCost > 0) {
+      const { error: refundErr } = await supabase.rpc("refund_premium_request", {
         p_user_id: key.userId,
-        p_amount: reservation.reservedCredits,
+        p_cost: premiumReservedCost,
       });
       if (refundErr) {
-        console.error("Failed to refund reserved credits:", refundErr.message);
+        console.error("Failed to refund premium request reservation:", refundErr.message);
       }
+      premiumRequestReserved = false;
+    }
+
+    if (customKeyRequestReserved) {
+      const { error: refundErr } = await supabase.rpc("refund_custom_key_request", {
+        p_key_id: key.keyId,
+      });
+      if (refundErr) {
+        console.error("Failed to refund custom-key request reservation:", refundErr.message);
+      }
+      customKeyRequestReserved = false;
     }
   }
 
@@ -823,6 +840,7 @@ export async function POST(req: NextRequest) {
       status: isFreePool ? "success" : billingStatus,
       duration_ms: durationMs,
       premium_cost: premiumCost,
+      source: keyInfo.source,
     });
     if (usageLogError) {
       console.error("Failed to write usage log:", usageLogError.message);
@@ -869,7 +887,7 @@ export async function POST(req: NextRequest) {
 
 async function handleStreamingResponse(
   providerResponse: Response,
-  keyInfo: { userId: string; keyId: string; credits: number; isCustom: boolean; customCredits: number | null },
+  keyInfo: { userId: string; keyId: string | null; credits: number; isCustom: boolean; customCredits: number | null; source: "api" | "chat" },
   model: { id: string; provider: string; cost_per_m_input: number; cost_per_m_output: number; cost_per_m_cache_read?: number; cost_per_m_cache_write?: number; margin: number; premium_request_cost?: number },
   startTime: number,
   estimatedPromptTokens: number = 0,
@@ -1051,6 +1069,7 @@ async function handleStreamingResponse(
         status: isFreePool ? "success" : billingStatus,
         duration_ms: durationMs,
         premium_cost: streamPremiumCost,
+        source: keyInfo.source,
       });
       if (usageLogError) {
         console.error("Failed to write streaming usage log:", usageLogError.message);

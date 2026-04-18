@@ -1,7 +1,11 @@
 import { createAdminClient } from "./supabase/admin";
+import { createServerSupabase } from "./supabase/server";
 
 export interface ApiKeyInfo {
-  keyId: string;
+  // keyId is null when the caller authenticated with a Supabase session
+  // (in-dashboard chat) instead of a real API key. usage_logs.api_key_id
+  // is nullable to accommodate this; `source` distinguishes the two.
+  keyId: string | null;
   userId: string;
   credits: number;
   dailyCredits: number;
@@ -19,6 +23,9 @@ export interface ApiKeyInfo {
   dailyRequestLimit: number | null;
   rateLimitSeconds: number | null;
   expiresAt: string | null;
+  // Traffic source for usage_logs. "chat" means session-authed (dashboard),
+  // "api" means Bearer-authed (public API).
+  source: "api" | "chat";
 }
 
 export async function validateApiKey(key: string): Promise<ApiKeyInfo | null> {
@@ -81,6 +88,49 @@ export async function validateApiKey(key: string): Promise<ApiKeyInfo | null> {
     dailyRequestLimit: result.daily_request_limit ?? null,
     rateLimitSeconds: result.rate_limit_seconds ?? null,
     expiresAt: result.expires_at ?? null,
+    source: "api",
+  };
+}
+
+/**
+ * Build an ApiKeyInfo from a Supabase session cookie. Used by the in-dashboard
+ * chat so /v1/chat/completions can treat the request identically to an API
+ * call — same plan limits, premium claims, rate limits, billing. The only
+ * differences: keyId is null (logged as api_key_id=null) and source="chat".
+ */
+export async function validateSession(): Promise<ApiKeyInfo | null> {
+  const userSb = await createServerSupabase();
+  const { data: { user } } = await userSb.auth.getUser();
+  if (!user) return null;
+
+  const admin = createAdminClient();
+  const { data: profile } = await admin
+    .from("profiles")
+    .select("credits, daily_credits, plan_id, gm_claimed_date, gm_daily_override, gm_override_expires, referral_bonus_requests, referral_bonus_expires")
+    .eq("id", user.id)
+    .single();
+
+  if (!profile) return null;
+
+  return {
+    keyId: null,
+    userId: user.id,
+    credits: profile.credits ?? 0,
+    dailyCredits: profile.daily_credits ?? 0,
+    planId: profile.plan_id ?? "free",
+    gmClaimedDate: profile.gm_claimed_date ?? null,
+    gmDailyOverride: profile.gm_daily_override ?? null,
+    gmOverrideExpires: profile.gm_override_expires ?? null,
+    referralBonusRequests: profile.referral_bonus_requests ?? 0,
+    referralBonusExpires: profile.referral_bonus_expires ?? null,
+    isCustom: false,
+    customCredits: null,
+    maxContext: null,
+    allowedProviders: null,
+    dailyRequestLimit: null,
+    rateLimitSeconds: null,
+    expiresAt: null,
+    source: "chat",
   };
 }
 
