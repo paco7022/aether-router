@@ -11,6 +11,11 @@ type ConversationSummary = {
   updated_at: string;
 };
 
+type ContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string }; storage_path?: string }
+  | { type: string; [k: string]: unknown };
+
 type Message = {
   id: string;
   role: "user" | "assistant" | "system";
@@ -27,17 +32,42 @@ type Model = {
   capabilities: string[];
 };
 
+type Attachment = {
+  // tmp id used only client-side for removal
+  tmpId: string;
+  path: string;          // storage path: {user}/{conv|unattached}/{uuid}.{ext}
+  mime: string;
+  size: number;
+  signed_url: string;    // short-lived preview URL
+};
+
 function extractText(content: unknown): string {
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
     return content
-      .map((p) => (p && typeof p === "object" && "type" in p && (p as { type: string }).type === "text" ? ((p as { text?: string }).text ?? "") : ""))
+      .map((p) =>
+        p && typeof p === "object" && "type" in p && (p as { type: string }).type === "text"
+          ? ((p as { text?: string }).text ?? "")
+          : ""
+      )
       .join("");
   }
   if (content && typeof content === "object" && "text" in content) {
     return String((content as { text: unknown }).text ?? "");
   }
   return "";
+}
+
+function extractImages(content: unknown): string[] {
+  if (!Array.isArray(content)) return [];
+  const urls: string[] = [];
+  for (const p of content as ContentPart[]) {
+    if (p && typeof p === "object" && p.type === "image_url") {
+      const url = (p as { image_url?: { url?: string } }).image_url?.url;
+      if (typeof url === "string" && url) urls.push(url);
+    }
+  }
+  return urls;
 }
 
 /** Minimal markdown-ish renderer: preserves whitespace, highlights fenced code blocks. */
@@ -91,7 +121,13 @@ export default function ChatPage() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [streamingText, setStreamingText] = useState("");
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [uploading, setUploading] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const selectedModelInfo = models.find((m) => m.id === selectedModel);
+  const supportsVision = (selectedModelInfo?.capabilities ?? []).includes("vision");
 
   useEffect(() => {
     (async () => {
@@ -152,6 +188,7 @@ export default function ChatPage() {
     await loadConversations();
     setActiveId(json.conversation.id);
     setMessages([]);
+    setAttachments([]);
   }
 
   async function deleteConversation(id: string, ev: React.MouseEvent) {
@@ -161,6 +198,7 @@ export default function ChatPage() {
     if (activeId === id) {
       setActiveId(null);
       setMessages([]);
+      setAttachments([]);
     }
     loadConversations();
   }
@@ -177,9 +215,43 @@ export default function ChatPage() {
     }
   }
 
+  async function handleFilesSelected(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    setError(null);
+    setUploading(true);
+    try {
+      for (const file of Array.from(files)) {
+        const form = new FormData();
+        form.append("file", file);
+        if (activeId) form.append("conversation_id", activeId);
+        const res = await fetch("/api/dashboard/chat/upload", {
+          method: "POST",
+          body: form,
+        });
+        if (!res.ok) {
+          const { error: msg } = await res.json().catch(() => ({ error: "upload failed" }));
+          setError(msg || "upload failed");
+          continue;
+        }
+        const json = (await res.json()) as Omit<Attachment, "tmpId">;
+        setAttachments((xs) => [
+          ...xs,
+          { ...json, tmpId: `a-${Date.now()}-${Math.random().toString(36).slice(2, 7)}` },
+        ]);
+      }
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  function removeAttachment(tmpId: string) {
+    setAttachments((xs) => xs.filter((a) => a.tmpId !== tmpId));
+  }
+
   async function sendMessage() {
     const text = input.trim();
-    if (!text || streaming) return;
+    if ((!text && attachments.length === 0) || streaming) return;
 
     let convId = activeId;
     // Auto-create conversation on first message
@@ -189,7 +261,7 @@ export default function ChatPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model_id: selectedModel,
-          title: text.slice(0, 60),
+          title: (text || "Image chat").slice(0, 60),
         }),
       });
       if (!res.ok) {
@@ -202,25 +274,45 @@ export default function ChatPage() {
       await loadConversations();
     }
 
+    // Build the multimodal content array.
+    // Use the `storage:{path}` sentinel so the server never receives a frozen
+    // signed URL; the server inlines as data URL when forwarding.
+    const parts: ContentPart[] = [];
+    if (text) parts.push({ type: "text", text });
+    for (const a of attachments) {
+      parts.push({
+        type: "image_url",
+        image_url: { url: `storage:${a.path}` },
+      });
+    }
+    const outgoingContent: string | ContentPart[] = attachments.length > 0 ? parts : text;
+
+    // Optimistic user bubble — show the local preview URL instead of the
+    // `storage:` sentinel so the thumbnail renders immediately.
+    const optimisticParts: ContentPart[] = [];
+    if (text) optimisticParts.push({ type: "text", text });
+    for (const a of attachments) {
+      optimisticParts.push({ type: "image_url", image_url: { url: a.signed_url } });
+    }
+    const optimisticUserMsg: Message = {
+      id: `tmp-${Date.now()}`,
+      role: "user",
+      content: attachments.length > 0 ? optimisticParts : text,
+      created_at: new Date().toISOString(),
+    };
+    setMessages((m) => [...m, optimisticUserMsg]);
+
     setInput("");
     setError(null);
     setStreaming(true);
     setStreamingText("");
-
-    // Optimistic user bubble
-    const optimisticUserMsg: Message = {
-      id: `tmp-${Date.now()}`,
-      role: "user",
-      content: text,
-      created_at: new Date().toISOString(),
-    };
-    setMessages((m) => [...m, optimisticUserMsg]);
+    setAttachments([]);
 
     try {
       const res = await fetch(`/api/dashboard/chat/conversations/${convId}/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: text }),
+        body: JSON.stringify({ content: outgoingContent }),
       });
       if (!res.ok || !res.body) {
         const errText = await res.text();
@@ -241,7 +333,6 @@ export default function ChatPage() {
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
 
-        // Parse SSE events: blocks separated by \n\n
         let blockIdx: number;
         while ((blockIdx = buffer.indexOf("\n\n")) >= 0) {
           const block = buffer.slice(0, blockIdx);
@@ -254,12 +345,7 @@ export default function ChatPage() {
             else if (line.startsWith("data:")) dataLine += line.slice(5).trim();
           }
           if (!dataLine || dataLine === "[DONE]") continue;
-
-          if (ev === "meta" || ev === "done") {
-            // metadata events — we just ignore the body here; final UI refresh
-            // happens after stream ends
-            continue;
-          }
+          if (ev === "meta" || ev === "done") continue;
 
           try {
             const parsed = JSON.parse(dataLine) as {
@@ -276,7 +362,6 @@ export default function ChatPage() {
         }
       }
 
-      // Reload messages to replace optimistic rows with persisted ones
       await loadConversation(convId!);
       await loadConversations();
     } catch (e) {
@@ -287,7 +372,6 @@ export default function ChatPage() {
     }
   }
 
-  // Auto-scroll to bottom when messages or streaming text change
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
@@ -367,6 +451,7 @@ export default function ChatPage() {
             </h2>
             <p className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider mt-0.5">
               In-app chat · billed in credits
+              {supportsVision && " · vision"}
             </p>
           </div>
           <select
@@ -374,11 +459,14 @@ export default function ChatPage() {
             onChange={(e) => changeModel(e.target.value)}
             className="rounded-lg px-3 py-1.5 text-xs font-mono bg-black/30 text-white/80 border border-white/10 outline-none focus:border-violet-400/40"
           >
-            {models.map((m) => (
-              <option key={m.id} value={m.id} className="bg-slate-900">
-                {m.id}
-              </option>
-            ))}
+            {models.map((m) => {
+              const hasVision = (m.capabilities ?? []).includes("vision");
+              return (
+                <option key={m.id} value={m.id} className="bg-slate-900">
+                  {hasVision ? "👁 " : ""}{m.id}
+                </option>
+              );
+            })}
           </select>
         </div>
 
@@ -403,17 +491,23 @@ export default function ChatPage() {
               </div>
               <p className="text-sm font-medium text-white/70 mb-1">Start a conversation</p>
               <p className="text-xs text-[var(--text-dim)] max-w-xs mx-auto">
-                Ask anything. Uses your credits at normal model rates.
+                Ask anything. Attach images on vision-capable models (👁).
               </p>
             </div>
           )}
 
           {messages.map((m) => (
-            <MessageBubble key={m.id} role={m.role} text={extractText(m.content)} error={m.error ?? null} />
+            <MessageBubble
+              key={m.id}
+              role={m.role}
+              text={extractText(m.content)}
+              images={extractImages(m.content)}
+              error={m.error ?? null}
+            />
           ))}
 
           {streaming && (
-            <MessageBubble role="assistant" text={streamingText} pulsing />
+            <MessageBubble role="assistant" text={streamingText} images={[]} pulsing />
           )}
         </div>
 
@@ -428,7 +522,66 @@ export default function ChatPage() {
               {error}
             </div>
           )}
+
+          {attachments.length > 0 && (
+            <div className="mb-2 flex gap-2 flex-wrap">
+              {attachments.map((a) => (
+                <div
+                  key={a.tmpId}
+                  className="relative group rounded-lg overflow-hidden"
+                  style={{
+                    border: "1px solid rgba(255, 255, 255, 0.1)",
+                    background: "rgba(0, 0, 0, 0.3)",
+                  }}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={a.signed_url} alt="attachment" className="w-16 h-16 object-cover" />
+                  <button
+                    onClick={() => removeAttachment(a.tmpId)}
+                    className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full flex items-center justify-center text-[10px] opacity-0 group-hover:opacity-100 transition-opacity"
+                    style={{ background: "rgba(0,0,0,0.6)", color: "rgba(255,255,255,0.9)" }}
+                    aria-label="Remove attachment"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {attachments.length > 0 && !supportsVision && (
+            <p className="mb-2 text-[11px] text-amber-300/80">
+              ⚠ {selectedModel} doesn&apos;t support vision — switch to a 👁 model or remove images.
+            </p>
+          )}
+
           <div className="flex gap-2 items-end">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              multiple
+              className="hidden"
+              onChange={(e) => handleFilesSelected(e.target.files)}
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={streaming || uploading}
+              className="rounded-xl px-3 py-2 text-sm transition-all disabled:opacity-40"
+              style={{
+                background: "rgba(255, 255, 255, 0.04)",
+                border: "1px solid rgba(255, 255, 255, 0.1)",
+                color: "rgba(200, 200, 240, 0.9)",
+              }}
+              title="Attach image"
+              aria-label="Attach image"
+            >
+              {uploading ? "…" : (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                </svg>
+              )}
+            </button>
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -445,7 +598,7 @@ export default function ChatPage() {
             />
             <button
               onClick={sendMessage}
-              disabled={streaming || !input.trim()}
+              disabled={streaming || (!input.trim() && attachments.length === 0)}
               className="rounded-xl px-4 py-2 text-sm font-medium transition-all disabled:opacity-40"
               style={{
                 background: "linear-gradient(135deg, rgba(139, 92, 246, 0.25), rgba(34, 211, 238, 0.15))",
@@ -465,11 +618,13 @@ export default function ChatPage() {
 function MessageBubble({
   role,
   text,
+  images,
   error,
   pulsing,
 }: {
   role: "user" | "assistant" | "system";
   text: string;
+  images: string[];
   error?: string | null;
   pulsing?: boolean;
 }) {
@@ -486,10 +641,26 @@ function MessageBubble({
           color: "rgba(240, 240, 255, 0.92)",
         }}
       >
+        {images.length > 0 && (
+          <div className="mb-2 flex gap-2 flex-wrap">
+            {images.map((src, i) => (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                key={`${i}-${src.slice(0, 40)}`}
+                src={src}
+                alt="attachment"
+                className="max-w-[200px] max-h-[200px] rounded-lg object-cover"
+                style={{ border: "1px solid rgba(255, 255, 255, 0.08)" }}
+              />
+            ))}
+          </div>
+        )}
         {error ? (
           <p className="text-red-300 text-xs">⚠ {error}</p>
         ) : (
-          <div className="leading-relaxed">{renderContent(text || (pulsing ? "…" : ""))}</div>
+          <div className="leading-relaxed">
+            {text || pulsing ? renderContent(text || "…") : null}
+          </div>
         )}
       </div>
     </div>

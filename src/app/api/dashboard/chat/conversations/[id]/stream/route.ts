@@ -6,8 +6,13 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 const HISTORY_LIMIT = 50;
+const STORAGE_PREFIX = "storage:";
 
-type ContentPart = { type: "text"; text: string } | { type: string; [k: string]: unknown };
+type ContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } }
+  | { type: string; [k: string]: unknown };
+
 type StoredContent = string | ContentPart[];
 
 function extractText(content: unknown): string {
@@ -27,14 +32,85 @@ function extractText(content: unknown): string {
   return "";
 }
 
+function hasImage(content: unknown): boolean {
+  if (!Array.isArray(content)) return false;
+  return content.some(
+    (p) => p && typeof p === "object" && (p as { type?: string }).type === "image_url"
+  );
+}
+
+/**
+ * Normalize user-provided content into the JSONB shape we persist:
+ *   - strings → stored verbatim as strings (cheaper for text-only history)
+ *   - arrays → parts are kept as-is; image_url paths stay as `storage:{path}`
+ *     so signed URLs aren't frozen into the DB
+ */
+function normalizeForStorage(content: StoredContent): StoredContent {
+  if (typeof content === "string") return content;
+  return (content as ContentPart[]).map((p) => {
+    if (p && typeof p === "object" && p.type === "image_url") {
+      const url = (p as { image_url?: { url?: string }; storage_path?: string }).image_url?.url;
+      const storagePath = (p as { storage_path?: string }).storage_path;
+      // Prefer an explicit storage_path if present; otherwise accept an
+      // already-prefixed URL. Never persist raw signed URLs — they expire.
+      const path = storagePath || (typeof url === "string" && url.startsWith(STORAGE_PREFIX) ? url.slice(STORAGE_PREFIX.length) : null);
+      if (path) {
+        return { type: "image_url", image_url: { url: `${STORAGE_PREFIX}${path}` } } as ContentPart;
+      }
+    }
+    return p;
+  });
+}
+
+/**
+ * Convert any `storage:{path}` image references into inline data URLs by
+ * downloading the bytes through the service-role client. Returns a plain
+ * string when the content is text-only (keeps prompts small for history).
+ */
+async function inlineForForward(
+  admin: ReturnType<typeof createAdminClient>,
+  content: unknown
+): Promise<string | ContentPart[]> {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return extractText(content);
+
+  const hasAnyImage = hasImage(content);
+  if (!hasAnyImage) return extractText(content);
+
+  const out: ContentPart[] = [];
+  for (const p of content as ContentPart[]) {
+    if (p && p.type === "image_url") {
+      const url = (p as { image_url?: { url?: string } }).image_url?.url;
+      if (typeof url === "string" && url.startsWith(STORAGE_PREFIX)) {
+        const path = url.slice(STORAGE_PREFIX.length);
+        const { data, error } = await admin.storage.from("chat-uploads").download(path);
+        if (error || !data) {
+          console.error("chat-uploads download failed:", path, error?.message);
+          continue;
+        }
+        const buf = Buffer.from(await data.arrayBuffer());
+        const mime = data.type || "image/png";
+        out.push({ type: "image_url", image_url: { url: `data:${mime};base64,${buf.toString("base64")}` } });
+        continue;
+      }
+      // If the URL is already a data/http URL, pass through.
+      if (typeof url === "string") {
+        out.push({ type: "image_url", image_url: { url } });
+        continue;
+      }
+    } else if (p && p.type === "text") {
+      out.push(p);
+    }
+  }
+  return out;
+}
+
 type Ctx = { params: Promise<{ id: string }> };
 
 export async function POST(req: NextRequest, { params }: Ctx) {
   const { id: conversationId } = await params;
 
-  // 1. Session auth — we use the *user-scoped* client to verify ownership
-  // via RLS, then switch to the admin client only for inserts that need to
-  // bypass RLS in downstream triggers.
+  // 1. Session auth
   const userSb = await createServerSupabase();
   const { data: { user } } = await userSb.auth.getUser();
   if (!user) {
@@ -51,7 +127,8 @@ export async function POST(req: NextRequest, { params }: Ctx) {
 
   const userContent = body.content;
   const userText = extractText(userContent);
-  if (!userText.trim()) {
+  const imagesPresent = hasImage(userContent);
+  if (!userText.trim() && !imagesPresent) {
     return NextResponse.json({ error: "empty message" }, { status: 400 });
   }
 
@@ -66,8 +143,8 @@ export async function POST(req: NextRequest, { params }: Ctx) {
     return NextResponse.json({ error: "conversation not found" }, { status: 404 });
   }
 
-  // 4. Load conversation history (oldest first). Admin client bypasses RLS
-  // but we filter by the authenticated user's id, so no data leak.
+  // 4. Load history — note we pull content as-is (with storage: sentinels)
+  // because we're going to inline them for the upstream forward.
   const admin = createAdminClient();
   const { data: history } = await admin
     .from("chat_messages")
@@ -77,23 +154,15 @@ export async function POST(req: NextRequest, { params }: Ctx) {
     .order("created_at", { ascending: true })
     .limit(HISTORY_LIMIT);
 
-  // 5. Persist the user's message now. Saving before forwarding means if the
-  // upstream call fails the user's text isn't lost and the retry can reuse
-  // the same conversation without retyping.
-  const normalizedUserContent: ContentPart =
-    typeof userContent === "string"
-      ? { type: "text", text: userContent }
-      : Array.isArray(userContent) && userContent.length > 0
-        ? (userContent[0] as ContentPart)
-        : { type: "text", text: userText };
-
+  // 5. Persist the user's message (storage-safe form — never frozen signed URLs)
+  const storedUserContent = normalizeForStorage(userContent ?? "");
   const { data: userMsgRow, error: userMsgErr } = await admin
     .from("chat_messages")
     .insert({
       conversation_id: conversationId,
       user_id: user.id,
       role: "user",
-      content: normalizedUserContent as unknown as object,
+      content: storedUserContent as unknown as object,
     })
     .select("id, role, content, created_at")
     .single();
@@ -102,23 +171,22 @@ export async function POST(req: NextRequest, { params }: Ctx) {
     return NextResponse.json({ error: userMsgErr?.message ?? "failed to save message" }, { status: 500 });
   }
 
-  // 6. Build the OpenAI-style messages array we'll send to /v1/chat/completions.
-  // System prompt first (if any), then prior turns, then the new user message.
-  const forwardMessages: Array<{ role: string; content: string }> = [];
+  // 6. Build forwarded messages. For each historical message, if it contains
+  // images they're inlined as data URLs — no signed URL leakage to upstream.
+  const forwardMessages: Array<{ role: string; content: string | ContentPart[] }> = [];
   if (conv.system_prompt) {
     forwardMessages.push({ role: "system", content: conv.system_prompt });
   }
   for (const h of history ?? []) {
-    const text = extractText(h.content);
-    if (text) forwardMessages.push({ role: h.role, content: text });
+    const inlined = await inlineForForward(admin, h.content);
+    if ((typeof inlined === "string" && inlined) || (Array.isArray(inlined) && inlined.length > 0)) {
+      forwardMessages.push({ role: h.role, content: inlined });
+    }
   }
-  forwardMessages.push({ role: "user", content: userText });
+  const newInlined = await inlineForForward(admin, userContent ?? "");
+  forwardMessages.push({ role: "user", content: newInlined });
 
-  // 7. Call our own /v1/chat/completions internally with session auth.
-  // The request carries the caller's Supabase session cookie so /v1
-  // resolves the same user via validateSession() and applies all the
-  // normal billing/rate-limit/premium logic as if the user hit the API
-  // directly with a Bearer key.
+  // 7. Forward to /v1/chat/completions with session cookie (same billing path)
   const origin = req.nextUrl.origin;
   const cookieHeader = req.headers.get("cookie") ?? "";
 
@@ -149,7 +217,6 @@ export async function POST(req: NextRequest, { params }: Ctx) {
   }
 
   if (!upstream.ok) {
-    // /v1 returned JSON error — relay status + message, save error row.
     const errJson: { error?: { message?: string } } = await upstream.json().catch(() => ({}));
     const msg = errJson.error?.message || `upstream ${upstream.status}`;
     await admin.from("chat_messages").insert({
@@ -167,9 +234,7 @@ export async function POST(req: NextRequest, { params }: Ctx) {
     return NextResponse.json({ error: "no upstream body" }, { status: 502 });
   }
 
-  // 8. Stream back. We relay raw SSE chunks so the client sees standard
-  // OpenAI-format deltas, while parsing a side copy to accumulate the
-  // assistant text + final usage for persistence.
+  // 8. Stream back, accumulate assistant text, persist on flush
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
   let completionText = "";
@@ -182,7 +247,6 @@ export async function POST(req: NextRequest, { params }: Ctx) {
 
   const readable = new ReadableStream({
     async start(controller) {
-      // Envelope so the client can bind this stream to the persisted user row.
       controller.enqueue(
         encoder.encode(
           `event: meta\ndata: ${JSON.stringify({
@@ -229,10 +293,6 @@ export async function POST(req: NextRequest, { params }: Ctx) {
         console.error("Chat stream relay error:", e);
       } finally {
         try {
-          // /v1 already billed, reserved/settled, and wrote usage_logs. We just
-          // persist the assistant turn so the UI can replay the conversation.
-          // Fetch the credits_charged from the most recent usage_log row for
-          // this user to surface in the chat_messages row.
           const { data: lastUsage } = await admin
             .from("usage_logs")
             .select("credits_charged, prompt_tokens, completion_tokens")
@@ -244,7 +304,6 @@ export async function POST(req: NextRequest, { params }: Ctx) {
 
           if (lastUsage) {
             creditsCharged = lastUsage.credits_charged;
-            // Prefer authoritative token counts from /v1 over our local parse.
             promptTokens = lastUsage.prompt_tokens ?? promptTokens;
             completionTokens = lastUsage.completion_tokens ?? completionTokens;
           }
