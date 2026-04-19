@@ -41,9 +41,20 @@ function getCorsHeaders(request: NextRequest): Record<string, string> {
   const auth = request.headers.get("authorization") || "";
   const hasBearer = auth.toLowerCase().startsWith("bearer ");
 
+  // Browsers don't forward `Authorization` on CORS preflight — they advertise
+  // it via `Access-Control-Request-Headers` instead. Treat a preflight that
+  // declares `authorization` the same as a real bearer request so third-party
+  // API consumers (e.g. JanitorAI) aren't blocked by an empty ACAO.
+  const preflightAuthRequested = (
+    request.headers.get("access-control-request-headers") || ""
+  )
+    .toLowerCase()
+    .includes("authorization");
+
   const isModelsRoute = pathname === "/api/v1/models";
   const isBearerRoute =
-    pathname === "/api/v1/chat/completions" && hasBearer;
+    pathname === "/api/v1/chat/completions" &&
+    (hasBearer || preflightAuthRequested);
 
   // Origin is in our trusted allowlist: full credentialed access.
   if (origin && ALLOWED_ORIGINS.has(origin)) {

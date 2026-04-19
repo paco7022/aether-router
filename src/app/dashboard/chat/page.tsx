@@ -150,7 +150,9 @@ export default function ChatPage() {
   }, []);
 
   async function loadConversations() {
-    const res = await fetch("/api/dashboard/chat/conversations");
+    const res = await fetch("/api/dashboard/chat/conversations", {
+      headers: { "X-Requested-With": "AetherRouter" },
+    });
     if (!res.ok) return;
     const json = await res.json();
     setConversations(json.conversations ?? []);
@@ -161,7 +163,9 @@ export default function ChatPage() {
     setLoadingMessages(true);
     setError(null);
     try {
-      const res = await fetch(`/api/dashboard/chat/conversations/${id}`);
+      const res = await fetch(`/api/dashboard/chat/conversations/${id}`, {
+        headers: { "X-Requested-With": "AetherRouter" },
+      });
       if (!res.ok) throw new Error("failed to load");
       const json = await res.json();
       setMessages(json.messages ?? []);
@@ -177,7 +181,7 @@ export default function ChatPage() {
     if (!selectedModel) return;
     const res = await fetch("/api/dashboard/chat/conversations", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-Requested-With": "AetherRouter" },
       body: JSON.stringify({ model_id: selectedModel, title: "New chat" }),
     });
     if (!res.ok) {
@@ -194,7 +198,10 @@ export default function ChatPage() {
   async function deleteConversation(id: string, ev: React.MouseEvent) {
     ev.stopPropagation();
     if (!confirm("Delete this conversation?")) return;
-    await fetch(`/api/dashboard/chat/conversations/${id}`, { method: "DELETE" });
+    await fetch(`/api/dashboard/chat/conversations/${id}`, {
+      method: "DELETE",
+      headers: { "X-Requested-With": "AetherRouter" },
+    });
     if (activeId === id) {
       setActiveId(null);
       setMessages([]);
@@ -208,7 +215,7 @@ export default function ChatPage() {
     if (activeId) {
       await fetch(`/api/dashboard/chat/conversations/${activeId}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-Requested-With": "AetherRouter" },
         body: JSON.stringify({ model_id: modelId }),
       });
       loadConversations();
@@ -226,6 +233,7 @@ export default function ChatPage() {
         if (activeId) form.append("conversation_id", activeId);
         const res = await fetch("/api/dashboard/chat/upload", {
           method: "POST",
+          headers: { "X-Requested-With": "AetherRouter" },
           body: form,
         });
         if (!res.ok) {
@@ -258,7 +266,7 @@ export default function ChatPage() {
     if (!convId) {
       const res = await fetch("/api/dashboard/chat/conversations", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-Requested-With": "AetherRouter" },
         body: JSON.stringify({
           model_id: selectedModel,
           title: (text || "Image chat").slice(0, 60),
@@ -311,7 +319,7 @@ export default function ChatPage() {
     try {
       const res = await fetch(`/api/dashboard/chat/conversations/${convId}/stream`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-Requested-With": "AetherRouter" },
         body: JSON.stringify({ content: outgoingContent }),
       });
       if (!res.ok || !res.body) {
