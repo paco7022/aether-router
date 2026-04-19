@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireCsrf } from "@/lib/csrf";
+import { evaluateBanStatus, getClientIpFromHeaders } from "@/lib/ban";
 
 // POST /api/v1/fingerprint — store fingerprint + check ban
 export async function POST(req: NextRequest) {
@@ -22,37 +23,49 @@ export async function POST(req: NextRequest) {
   }
 
   const admin = createAdminClient();
+  const cleanFingerprint = fingerprint.trim();
+  if (!cleanFingerprint) {
+    return NextResponse.json({ error: "fingerprint required" }, { status: 400 });
+  }
 
-  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    req.headers.get("x-real-ip") || "unknown";
-  const userAgent = req.headers.get("user-agent") || "unknown";
+  const banDecision = await evaluateBanStatus({
+    headers: req.headers,
+    userId: user.id,
+    fingerprint: cleanFingerprint,
+    adminClient: admin,
+  });
 
-  // Check if fingerprint OR ip is banned
-  const [fpBan, ipBan] = await Promise.all([
-    admin.from("banned_fingerprints").select("id, reason").eq("fingerprint", fingerprint).maybeSingle(),
-    ip !== "unknown"
-      ? admin.from("banned_fingerprints").select("id, reason").eq("ip_address", ip).maybeSingle()
-      : Promise.resolve({ data: null }),
-  ]);
-  const banned = fpBan.data || ipBan.data;
+  if (banDecision?.blocked) {
+    if (banDecision.statusCode === 403) {
+      return NextResponse.json(
+        { banned: true, reason: banDecision.reason, source: banDecision.source },
+        { status: 403 }
+      );
+    }
 
-  if (banned) {
     return NextResponse.json(
-      { banned: true, reason: banned.reason || "Device banned" },
-      { status: 403 }
+      { error: "Ban check unavailable", reason: banDecision.reason },
+      { status: 503 }
     );
   }
 
-  await admin.from("device_fingerprints").upsert(
+  const ip = getClientIpFromHeaders(req.headers);
+  const userAgent = req.headers.get("user-agent") || "unknown";
+
+  const { error: upsertErr } = await admin.from("device_fingerprints").upsert(
     {
       user_id: user.id,
-      fingerprint,
+      fingerprint: cleanFingerprint,
       user_agent: userAgent,
       ip_address: ip,
       last_seen_at: new Date().toISOString(),
     },
     { onConflict: "user_id,fingerprint" }
   );
+
+  if (upsertErr) {
+    return NextResponse.json({ error: upsertErr.message }, { status: 500 });
+  }
 
   return NextResponse.json({ banned: false });
 }

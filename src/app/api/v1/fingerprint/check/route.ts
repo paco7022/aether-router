@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { evaluateBanStatus } from "@/lib/ban";
 
 // POST /api/v1/fingerprint/check — public, no auth required
 // Used before registration to block banned devices
@@ -9,21 +9,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "fingerprint required" }, { status: 400 });
   }
 
-  const admin = createAdminClient();
+  const decision = await evaluateBanStatus({
+    headers: req.headers,
+    fingerprint: fingerprint.trim(),
+  });
 
-  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    req.headers.get("x-real-ip") || "unknown";
+  if (decision?.blocked) {
+    if (decision.statusCode === 403) {
+      return NextResponse.json({ banned: true, reason: decision.reason, source: decision.source });
+    }
 
-  const [fpBan, ipBan] = await Promise.all([
-    admin.from("banned_fingerprints").select("id, reason").eq("fingerprint", fingerprint).maybeSingle(),
-    ip !== "unknown"
-      ? admin.from("banned_fingerprints").select("id, reason").eq("ip_address", ip).maybeSingle()
-      : Promise.resolve({ data: null }),
-  ]);
-  const banned = fpBan.data || ipBan.data;
-
-  if (banned) {
-    return NextResponse.json({ banned: true, reason: banned.reason || "Device banned" });
+    return NextResponse.json(
+      { error: "Ban check unavailable", reason: decision.reason },
+      { status: 503 }
+    );
   }
 
   // Don't expose account count — it leaks information about other users.

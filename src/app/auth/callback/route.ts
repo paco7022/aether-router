@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { NextResponse, type NextRequest } from "next/server";
+import { evaluateBanStatus } from "@/lib/ban";
 
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
@@ -28,6 +29,23 @@ export async function GET(request: NextRequest) {
 
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (user) {
+        const banDecision = await evaluateBanStatus({
+          headers: request.headers,
+          userId: user.id,
+        });
+
+        if (banDecision?.blocked) {
+          await supabase.auth.signOut();
+          const reason = encodeURIComponent(banDecision.reason || "Access blocked");
+          return NextResponse.redirect(`${origin}/login?error=banned&reason=${reason}`);
+        }
+      }
+
       return NextResponse.redirect(`${origin}${next}`);
     }
   }

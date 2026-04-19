@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { getFingerprint } from "@/lib/fingerprint";
+import { createClient } from "@/lib/supabase/client";
 
 /**
  * Sends the device fingerprint to the server after auth.
@@ -9,15 +10,15 @@ import { getFingerprint } from "@/lib/fingerprint";
  */
 export function useFingerprintCapture() {
   const sent = useRef(false);
+  const supabase = createClient();
 
   useEffect(() => {
     if (sent.current) return;
-    sent.current = true;
 
     (async () => {
       try {
         const fp = await getFingerprint();
-        await fetch("/api/v1/fingerprint", {
+        const fpRes = await fetch("/api/v1/fingerprint", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -25,6 +26,20 @@ export function useFingerprintCapture() {
           },
           body: JSON.stringify({ fingerprint: fp }),
         });
+
+        if (!fpRes.ok) {
+          const payload = await fpRes.json().catch(() => ({}));
+          const reason =
+            (payload as { reason?: string; error?: string }).reason ||
+            (payload as { reason?: string; error?: string }).error ||
+            "This device is blocked from accessing the app.";
+
+          await supabase.auth.signOut();
+          window.location.href = `/login?error=banned&reason=${encodeURIComponent(reason)}`;
+          return;
+        }
+
+        sent.current = true;
 
         // Redeem pending referral (covers OAuth, where /register couldn't
         // call redeem directly). Safe if already redeemed — the RPC
@@ -45,7 +60,7 @@ export function useFingerprintCapture() {
           }
         }
       } catch {
-        // Silent fail — fingerprint is best-effort
+        // Keep app usable for transient client-side failures.
       }
     })();
   }, []);
@@ -67,7 +82,10 @@ export async function checkFingerprintBan(): Promise<{
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ fingerprint: fp }),
     });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok && res.status !== 403) {
+      return null;
+    }
     return { ...data, fingerprint: fp };
   } catch {
     return null;

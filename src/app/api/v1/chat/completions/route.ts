@@ -4,6 +4,14 @@ import { calculateCredits } from "@/lib/credits";
 import { estimateTokens, estimatePromptTokens } from "@/lib/token-estimator";
 import { getProvider } from "@/lib/providers";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { evaluateBanStatus } from "@/lib/ban";
+import {
+  getCustomKeyNoCreditsError,
+  getMissingFingerprintError,
+  getNoPaidBalanceError,
+  getRequestFingerprint,
+  isApiKeyAuthHeader,
+} from "@/lib/chat-preflight";
 
 export const runtime = "nodejs";
 // NOTE: If a Vercel function timeout kills a streaming request mid-flight,
@@ -15,7 +23,7 @@ export const maxDuration = 300;
 // Free-pool limits shared by nano (na/) and airforce deepseek-v3.2.
 const PER_USER_DAILY_TOKEN_LIMIT = 200_000;
 const GLOBAL_DAILY_TOKEN_POOL = 10_000_000;
-const DEFAULT_STREAM_RESERVATION_COMPLETION_TOKENS = 1024;
+const DEFAULT_STREAM_RESERVATION_COMPLETION_TOKENS = 4096;
 const MAX_STREAM_RESERVATION_COMPLETION_TOKENS = 32_768;
 
 type StreamChargeReservation = {
@@ -103,9 +111,11 @@ export async function POST(req: NextRequest) {
   // keyInfo (keyId=null, source="chat") that flows through the same billing
   // and rate-limit paths as a real API call.
   const authHeader = req.headers.get("authorization");
+  const isApiKeyAuth = isApiKeyAuthHeader(authHeader);
+  const apiKeyToken = isApiKeyAuth ? (authHeader ?? "").slice(7) : null;
   let keyInfo;
-  if (authHeader?.startsWith("Bearer ")) {
-    keyInfo = await validateApiKey(authHeader.slice(7));
+  if (isApiKeyAuth) {
+    keyInfo = await validateApiKey(apiKeyToken!);
     if (!keyInfo) {
       return NextResponse.json(
         { error: { message: "Invalid API key", type: "auth_error" } },
@@ -120,6 +130,52 @@ export async function POST(req: NextRequest) {
         { status: 401 }
       );
     }
+  }
+
+  const requestFingerprint = getRequestFingerprint(req.headers);
+  const missingFingerprintError = getMissingFingerprintError(isApiKeyAuth, requestFingerprint);
+  if (missingFingerprintError) {
+    return NextResponse.json(missingFingerprintError.payload, { status: missingFingerprintError.status });
+  }
+
+  // Extra hardening: if a custom key has exhausted credits, reject before
+  // parsing payload or touching upstream selection paths.
+  const customKeyNoCreditsError = keyInfo.isCustom
+    ? getCustomKeyNoCreditsError(keyInfo.customCredits)
+    : null;
+  if (customKeyNoCreditsError) {
+    return NextResponse.json(customKeyNoCreditsError.payload, { status: customKeyNoCreditsError.status });
+  }
+
+  const banDecision = await evaluateBanStatus({
+    headers: req.headers,
+    userId: keyInfo.userId,
+    fingerprint: requestFingerprint,
+  });
+
+  if (banDecision?.blocked) {
+    if (banDecision.statusCode === 403) {
+      return NextResponse.json(
+        {
+          error: {
+            message: banDecision.reason,
+            type: "ban_enforced",
+            source: banDecision.source,
+          },
+        },
+        { status: 403 }
+      );
+    }
+
+    return NextResponse.json(
+      {
+        error: {
+          message: banDecision.reason,
+          type: "server_error",
+        },
+      },
+      { status: 503 }
+    );
   }
 
   // 3. Parse request body. Reject oversized payloads up-front: a 200-page
@@ -474,6 +530,29 @@ export async function POST(req: NextRequest) {
 
   // 6. Forward to provider (use upstream_model_id for the real provider name)
   const upstreamModel = model.upstream_model_id || modelId;
+  const requestedCompletionTokens = getRequestedCompletionTokens(body);
+  const reservedCompletionTokens = Math.min(
+    requestedCompletionTokens ?? DEFAULT_STREAM_RESERVATION_COMPLETION_TOKENS,
+    MAX_STREAM_RESERVATION_COMPLETION_TOKENS
+  );
+  const estimatedPrompt = estimatePromptTokens(body);
+
+  if (requestedCompletionTokens !== null && requestedCompletionTokens > MAX_STREAM_RESERVATION_COMPLETION_TOKENS) {
+    return NextResponse.json(
+      {
+        error: {
+          message: `max_tokens too large. Maximum allowed is ${MAX_STREAM_RESERVATION_COMPLETION_TOKENS}.`,
+          type: "invalid_request",
+        },
+      },
+      { status: 400 }
+    );
+  }
+
+  // Ensure upstream and reservation math share the same completion ceiling.
+  if (requestedCompletionTokens === null) {
+    body.max_tokens = reservedCompletionTokens;
+  }
 
   // Free pool gating.
   //
@@ -487,88 +566,79 @@ export async function POST(req: NextRequest) {
   //
   // All pools reset at UTC midnight.
   let freePoolName: string | null = null;
+  const freePoolReservationTokens = estimatedPrompt + reservedCompletionTokens;
 
   if (!activeEventId && (model.provider === "nano" || upstreamModel === "deepseek-v3.2")) {
     freePoolName = model.provider === "nano" ? "nano" : "deepseek-v3.2";
-
-    const todayStart = new Date();
-    todayStart.setUTCHours(0, 0, 0, 0);
-    const today = todayStart.toISOString().split("T")[0];
-
-    // Global daily pool
-    const { data: pool } = await supabase
-      .from("daily_token_pools")
-      .select("used, pool_limit")
-      .eq("pool_name", freePoolName)
-      .eq("pool_date", today)
-      .maybeSingle();
-
-    const globalLimit = Number(pool?.pool_limit ?? GLOBAL_DAILY_TOKEN_POOL);
-    const globalUsed = Number(pool?.used ?? 0);
-    const globalExhausted = globalUsed >= globalLimit;
-
-    // Per-user tokens used today against this pool
-    let userUsageQuery = supabase
-      .from("usage_logs")
-      .select("total_tokens")
-      .eq("user_id", keyInfo.userId)
-      .gte("created_at", todayStart.toISOString());
-
-    userUsageQuery =
-      freePoolName === "nano"
-        ? userUsageQuery.like("model_id", "na/%")
-        : userUsageQuery.eq("model_id", modelId);
-
-    const { data: userUsage } = await userUsageQuery;
-    const userTokensUsed = (userUsage || []).reduce(
-      (sum, r) => sum + (r.total_tokens || 0),
-      0
+    const freePoolReservation = await reserveDailyFreePoolAllowance(
+      supabase,
+      freePoolName,
+      keyInfo.userId,
+      freePoolReservationTokens
     );
-    const userExhausted = userTokensUsed >= PER_USER_DAILY_TOKEN_LIMIT;
 
-    if (freePoolName === "deepseek-v3.2") {
-      // Hard caps — 429 when exceeded.
-      if (globalExhausted) {
+    if (!freePoolReservation.allowed) {
+      const globalExhausted = freePoolReservation.poolUsed >= freePoolReservation.poolLimit;
+      const userExhausted = freePoolReservation.userUsed >= freePoolReservation.userLimit;
+
+      if (freePoolName === "deepseek-v3.2") {
+        // Hard caps — 429 when exceeded.
+        if (globalExhausted) {
+          return NextResponse.json(
+            {
+              error: {
+                message: `Daily global pool exhausted for deepseek-v3.2 (${(freePoolReservation.poolLimit / 1_000_000).toFixed(0)}M tokens/day). Resets at midnight UTC.`,
+                type: "rate_limit",
+              },
+            },
+            { status: 429 }
+          );
+        }
+
+        if (userExhausted) {
+          return NextResponse.json(
+            {
+              error: {
+                message: `Daily deepseek-v3.2 token limit reached (${(freePoolReservation.userLimit / 1000).toFixed(0)}k tokens/day per user). Resets at midnight UTC.`,
+                type: "rate_limit",
+              },
+            },
+            { status: 429 }
+          );
+        }
+
         return NextResponse.json(
           {
             error: {
-              message: `Daily global pool exhausted for deepseek-v3.2 (${(globalLimit / 1_000_000).toFixed(0)}M tokens/day). Resets at midnight UTC.`,
+              message: "Daily deepseek-v3.2 free pool is currently unavailable. Try again later.",
               type: "rate_limit",
             },
           },
           { status: 429 }
         );
       }
-      if (userExhausted) {
-        return NextResponse.json(
-          {
-            error: {
-              message: `Daily deepseek-v3.2 token limit reached (${(PER_USER_DAILY_TOKEN_LIMIT / 1000).toFixed(0)}k tokens/day per user). Resets at midnight UTC.`,
-              type: "rate_limit",
-            },
-          },
-          { status: 429 }
-        );
-      }
-      isFreePool = true;
+
+      // nano — soft caps. If reservation fails, request falls through to paid mode.
+      freePoolName = null;
+      isFreePool = false;
     } else {
-      // nano — soft caps. Free when under both limits, otherwise paid.
-      isFreePool = !globalExhausted && !userExhausted;
+      isFreePool = true;
     }
   }
 
   // 5.6. Atomic credit reservation before forwarding to upstream.
   // For both streaming and non-streaming, we reserve credits up-front so
   // the user cannot receive a response they can't pay for.
-  const estimatedPrompt = estimatePromptTokens(body);
   let reservation: StreamChargeReservation | null = null;
 
+  if (!keyInfo.isCustom) {
+    const noPaidBalanceError = getNoPaidBalanceError(isFreePool, keyInfo.credits, keyInfo.dailyCredits);
+    if (noPaidBalanceError) {
+      return NextResponse.json(noPaidBalanceError.payload, { status: noPaidBalanceError.status });
+    }
+  }
+
   if (!isFreePool) {
-    const requestedCompletionTokens = getRequestedCompletionTokens(body);
-    const reservedCompletionTokens = Math.min(
-      requestedCompletionTokens ?? DEFAULT_STREAM_RESERVATION_COMPLETION_TOKENS,
-      MAX_STREAM_RESERVATION_COMPLETION_TOKENS
-    );
     const { credits: reservedCreditsRaw } = calculateCredits(
       estimatedPrompt,
       reservedCompletionTokens,
@@ -876,12 +946,21 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    try {
-      // Increment daily token pool only when the request was actually free.
-      if (freePoolName && isFreePool) {
-        await incrementDailyTokenPool(supabase, freePoolName, totalTokens);
-      }
+    // Do not return a successful model response when final settlement failed.
+    if (!isFreePool && billingStatus === "settlement_failed") {
+      return NextResponse.json(
+        {
+          error: {
+            message: "Billing settlement failed. Request output was not delivered.",
+            type: "billing_error",
+            code: "settlement_failed",
+          },
+        },
+        { status: 402 }
+      );
+    }
 
+    try {
       // Increment active free event token pool
       if (activeEventId) {
         await incrementFreeEventTokens(supabase, activeEventId, totalTokens);
@@ -1106,11 +1185,6 @@ async function handleStreamingResponse(
       }
 
       try {
-        // Increment daily token pool only for requests that were actually free.
-        if (freePoolName && isFreePool) {
-          await incrementDailyTokenPool(supabase, freePoolName, totalTokens);
-        }
-
         // Increment active free event token pool
         if (activeEventId) {
           await incrementFreeEventTokens(supabase, activeEventId, totalTokens);
@@ -1142,21 +1216,54 @@ async function handleStreamingResponse(
   });
 }
 
-async function incrementDailyTokenPool(
+type DailyFreePoolReservation = {
+  allowed: boolean;
+  poolUsed: number;
+  poolLimit: number;
+  userUsed: number;
+  userLimit: number;
+};
+
+async function reserveDailyFreePoolAllowance(
   supabase: ReturnType<typeof createAdminClient>,
   poolName: string,
+  userId: string,
   tokens: number
 ) {
-  if (tokens <= 0) return;
-  const { error } = await supabase.rpc("increment_daily_token_pool", {
+  if (tokens <= 0) {
+    return {
+      allowed: true,
+      poolUsed: 0,
+      poolLimit: GLOBAL_DAILY_TOKEN_POOL,
+      userUsed: 0,
+      userLimit: PER_USER_DAILY_TOKEN_LIMIT,
+    } satisfies DailyFreePoolReservation;
+  }
+
+  const { data, error } = await supabase.rpc("reserve_daily_pool_tokens", {
     p_pool_name: poolName,
+    p_user_id: userId,
     p_tokens: tokens,
-    p_default_limit: GLOBAL_DAILY_TOKEN_POOL,
+    p_pool_default_limit: GLOBAL_DAILY_TOKEN_POOL,
+    p_user_default_limit: PER_USER_DAILY_TOKEN_LIMIT,
   });
 
   if (error) {
-    throw new Error(`Failed to increment daily token pool '${poolName}': ${error.message}`);
+    throw new Error(`Failed to reserve daily token pool '${poolName}': ${error.message}`);
   }
+
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) {
+    throw new Error(`Daily pool reservation '${poolName}' returned empty result`);
+  }
+
+  return {
+    allowed: Boolean(row.allowed),
+    poolUsed: Number(row.pool_used ?? 0),
+    poolLimit: Number(row.pool_limit ?? GLOBAL_DAILY_TOKEN_POOL),
+    userUsed: Number(row.user_used ?? 0),
+    userLimit: Number(row.user_limit ?? PER_USER_DAILY_TOKEN_LIMIT),
+  } satisfies DailyFreePoolReservation;
 }
 
 async function incrementFreeEventTokens(

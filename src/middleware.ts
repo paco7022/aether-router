@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { evaluateBanStatus } from "@/lib/ban";
 
 // [SECURITY] Allowed origins for CORS. Only these origins may make
 // cross-origin requests. Configure via ALLOWED_ORIGINS env var
@@ -140,6 +141,22 @@ export async function middleware(request: NextRequest) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
+  }
+
+  if (user && pathname.startsWith("/dashboard")) {
+    const banDecision = await evaluateBanStatus({
+      headers: request.headers,
+      userId: user.id,
+    });
+
+    if (banDecision?.blocked) {
+      await supabase.auth.signOut();
+      const url = request.nextUrl.clone();
+      url.pathname = "/login";
+      url.searchParams.set("error", "banned");
+      url.searchParams.set("reason", banDecision.reason);
+      return NextResponse.redirect(url);
+    }
   }
 
   return response;

@@ -202,17 +202,28 @@ export async function GET(req: NextRequest) {
         }));
       }
 
-      // Check which fingerprints are banned
+      // Check which rows are banned by fingerprint and/or IP.
       const fpValues = (fps || []).map((f) => f.fingerprint);
-      const { data: bans } = fpValues.length > 0
+      const ipValues = (fps || [])
+        .map((f) => f.ip_address)
+        .filter((ip): ip is string => typeof ip === "string" && ip.length > 0 && ip !== "unknown");
+
+      const { data: fpBans } = fpValues.length > 0
         ? await supabase.from("banned_fingerprints").select("fingerprint").in("fingerprint", fpValues)
         : { data: [] };
-      const bannedSet = new Set((bans || []).map((b) => b.fingerprint));
+      const { data: ipBans } = ipValues.length > 0
+        ? await supabase.from("banned_fingerprints").select("ip_address").in("ip_address", ipValues)
+        : { data: [] };
+
+      const bannedFingerprintSet = new Set((fpBans || []).map((b) => b.fingerprint));
+      const bannedIpSet = new Set((ipBans || []).map((b) => b.ip_address));
 
       return NextResponse.json({
         fingerprints: (fps || []).map((fp) => ({
           ...fp,
-          is_banned: bannedSet.has(fp.fingerprint),
+          is_banned:
+            bannedFingerprintSet.has(fp.fingerprint) ||
+            (typeof fp.ip_address === "string" && bannedIpSet.has(fp.ip_address)),
           linked_accounts: linkedAccounts[fp.fingerprint] || [],
         })),
       });
@@ -359,6 +370,30 @@ export async function POST(req: NextRequest) {
       const { fingerprint } = body;
       if (!fingerprint) return NextResponse.json({ error: "fingerprint required" }, { status: 400 });
       const { error } = await supabase.from("banned_fingerprints").delete().eq("fingerprint", fingerprint);
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ ok: true });
+    }
+
+    case "ban_ip": {
+      const { ip_address, reason } = body;
+      if (!ip_address) return NextResponse.json({ error: "ip_address required" }, { status: 400 });
+      const normalizedIp = String(ip_address).trim();
+      if (!normalizedIp || normalizedIp === "unknown") {
+        return NextResponse.json({ error: "valid ip_address required" }, { status: 400 });
+      }
+
+      const { error } = await supabase.from("banned_fingerprints").upsert(
+        { ip_address: normalizedIp, reason: reason || "IP banned by admin", banned_by: user.email },
+        { onConflict: "ip_address" }
+      );
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ ok: true });
+    }
+
+    case "unban_ip": {
+      const { ip_address } = body;
+      if (!ip_address) return NextResponse.json({ error: "ip_address required" }, { status: 400 });
+      const { error } = await supabase.from("banned_fingerprints").delete().eq("ip_address", String(ip_address).trim());
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
       return NextResponse.json({ ok: true });
     }
