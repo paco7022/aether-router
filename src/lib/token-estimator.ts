@@ -26,7 +26,15 @@ const BASE64_BYTES_PER_TOKEN = 3;    // 1 token ≈ 3 base64 chars for binary do
 export function estimateTokens(text: string): number {
   if (!text) return 0;
   const words = text.split(WORD_SPLIT).filter(Boolean).length;
-  return Math.ceil(words * 1.33);
+  const wordBased = Math.ceil(words * 1.33);
+  // Character-based floor. The word-split heuristic badly under-counts
+  // markdown-heavy prose (JanitorAI RP) and non-space-separated scripts
+  // (CJK) because punctuation and whole paragraphs collapse into one
+  // "word". chars/3 is a conservative upper bound that still over-counts
+  // by ~20% for normal English but prevents the 3x under-count that let
+  // Pro users sneak 66k prompts past a 32k cap.
+  const charBased = Math.ceil(text.length / 3);
+  return Math.max(wordBased, charBased);
 }
 
 /**

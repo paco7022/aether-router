@@ -1015,6 +1015,19 @@ export async function POST(req: NextRequest) {
       console.error("Failed to write usage log:", usageLogError.message);
     }
 
+    // Accrue premium-request debt when a prompt sneaks past the pre-flight
+    // context estimator and the real prompt_tokens end up over the user's
+    // plan cap. Only applies to the premium-provider flow (t/ an/ w/).
+    if (isPremiumProvider && !activeEventId && !keyInfo.isCustom) {
+      const { error: debtErr } = await supabase.rpc("accrue_prompt_cap_debt", {
+        p_user_id: keyInfo.userId,
+        p_plan_id: keyInfo.planId,
+        p_actual_tokens: promptTokens,
+        p_penalty: 3,
+      });
+      if (debtErr) console.error("Failed to accrue prompt-cap debt:", debtErr.message);
+    }
+
     if (!isFreePool && chargedCredits > 0) {
       const settlementSuffix = billingStatus === "success" ? "" : ` [${billingStatus}]`;
       const { error: txError } = await supabase.from("transactions").insert({
@@ -1065,7 +1078,7 @@ export async function POST(req: NextRequest) {
 
 async function handleStreamingResponse(
   providerResponse: Response,
-  keyInfo: { userId: string; keyId: string | null; credits: number; dailyCredits: number; isCustom: boolean; customCredits: number | null; source: "api" | "chat" },
+  keyInfo: { userId: string; keyId: string | null; credits: number; dailyCredits: number; isCustom: boolean; customCredits: number | null; planId: string; source: "api" | "chat" },
   model: { id: string; provider: string; cost_per_m_input: number; cost_per_m_output: number; cost_per_m_cache_read?: number; cost_per_m_cache_write?: number; margin: number; premium_request_cost?: number },
   startTime: number,
   estimatedPromptTokens: number = 0,
@@ -1269,6 +1282,18 @@ async function handleStreamingResponse(
     });
     if (usageLogError) {
       console.error("Failed to write streaming usage log:", usageLogError.message);
+    }
+
+    // See non-streaming path: accrue debt when real prompt_tokens exceed
+    // the user's plan cap (estimator under-counted during pre-flight).
+    if (isPremium && !activeEventId && !keyInfo.isCustom) {
+      const { error: debtErr } = await supabase.rpc("accrue_prompt_cap_debt", {
+        p_user_id: keyInfo.userId,
+        p_plan_id: keyInfo.planId,
+        p_actual_tokens: totalPromptTokens,
+        p_penalty: 3,
+      });
+      if (debtErr) console.error("Failed to accrue prompt-cap debt (stream):", debtErr.message);
     }
 
     if (!isFreePool && chargedCredits > 0) {
