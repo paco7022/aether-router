@@ -122,7 +122,19 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 3. Parse request body
+  // 3. Parse request body. Reject oversized payloads up-front: a 200-page
+  // PDF in base64 is ~2-3MB, anything beyond ~10MB is almost certainly an
+  // attempt to push past the context cap with binary content the estimator
+  // can't accurately measure.
+  const MAX_BODY_BYTES = 10 * 1024 * 1024;
+  const contentLength = Number(req.headers.get("content-length") ?? 0);
+  if (contentLength > MAX_BODY_BYTES) {
+    return NextResponse.json(
+      { error: { message: `Request body too large (${(contentLength / 1024 / 1024).toFixed(1)} MB). Max ${MAX_BODY_BYTES / 1024 / 1024} MB.`, type: "invalid_request" } },
+      { status: 413 }
+    );
+  }
+
   let body: Record<string, unknown>;
   try {
     body = await req.json();
@@ -259,7 +271,7 @@ export async function POST(req: NextRequest) {
 
     // Context cap for this event
     if (activeEvent.max_context > 0) {
-      const estimatedContext = estimatePromptTokens(messages);
+      const estimatedContext = estimatePromptTokens(body);
       if (estimatedContext > activeEvent.max_context) {
         return NextResponse.json(
           {
@@ -297,7 +309,7 @@ export async function POST(req: NextRequest) {
     // Per-key context limit — cheap check runs before the atomic reservation
     // so oversize requests don't burn a slot on the daily counter.
     if (keyInfo.maxContext && keyInfo.maxContext > 0) {
-      const estimatedContext = estimatePromptTokens(messages);
+      const estimatedContext = estimatePromptTokens(body);
       if (estimatedContext > keyInfo.maxContext) {
         return NextResponse.json(
           { error: { message: `Context too long (~${estimatedContext} tokens). This key allows ${keyInfo.maxContext} tokens max.`, type: "context_limit" } },
@@ -404,7 +416,7 @@ export async function POST(req: NextRequest) {
       // requests don't inflate the daily counter. Applies to all premium
       // providers (t/, an/, w/); free tier only has t/ and w/ access.
       if (gmMaxContext > 0) {
-        const estimatedContext = estimatePromptTokens(messages);
+        const estimatedContext = estimatePromptTokens(body);
         if (estimatedContext > gmMaxContext) {
           return NextResponse.json(
             { error: { message: `Context too long (~${estimatedContext} tokens). Your plan allows ${gmMaxContext} tokens max. Upgrade for more.`, type: "context_limit" } },
@@ -432,7 +444,7 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      const res = reserveResult as { status: string; retry_after_seconds?: number; limit?: number; used?: number };
+      const res = reserveResult as { status: string; retry_after_seconds?: number; limit?: number; used?: number; debt?: number };
       if (res.status === "rate_limited") {
         const retryAfter = res.retry_after_seconds ?? 1;
         return NextResponse.json(
@@ -446,8 +458,12 @@ export async function POST(req: NextRequest) {
         );
       }
       if (res.status === "daily_limit") {
+        const debt = Number(res.debt ?? 0);
+        const message = debt > 0
+          ? `Premium access locked: you owe ${debt} premium requests for past oversized prompts (>100k tokens beyond your plan's context cap). Contact support to clear the debt.`
+          : `Daily premium limit reached (${gmDailyRequests} requests/day for your plan). Upgrade for more.`;
         return NextResponse.json(
-          { error: { message: `Daily premium limit reached (${gmDailyRequests} requests/day for your plan). Upgrade for more.`, type: "rate_limit" } },
+          { error: { message, type: "rate_limit" } },
           { status: 429 }
         );
       }
@@ -544,7 +560,7 @@ export async function POST(req: NextRequest) {
   // 5.6. Atomic credit reservation before forwarding to upstream.
   // For both streaming and non-streaming, we reserve credits up-front so
   // the user cannot receive a response they can't pay for.
-  const estimatedPrompt = estimatePromptTokens(messages);
+  const estimatedPrompt = estimatePromptTokens(body);
   let reservation: StreamChargeReservation | null = null;
 
   if (!isFreePool) {
@@ -780,7 +796,7 @@ export async function POST(req: NextRequest) {
 
     // Some providers omit usage on non-stream responses; estimate to avoid zero-charge responses.
     if (!usage.total_tokens || usage.total_tokens <= 0) {
-      const fallbackPrompt = estimatePromptTokens(messages);
+      const fallbackPrompt = estimatePromptTokens(body);
       const fallbackCompletion = estimateTokens(extractCompletionText(data));
       usage = {
         prompt_tokens: fallbackPrompt,
