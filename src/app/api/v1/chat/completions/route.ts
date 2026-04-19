@@ -8,7 +8,6 @@ import { evaluateBanStatus } from "@/lib/ban";
 import { requireCsrf } from "@/lib/csrf";
 import {
   getCustomKeyNoCreditsError,
-  getMissingFingerprintError,
   getNoPaidBalanceError,
   getRequestFingerprint,
   isApiKeyAuthHeader,
@@ -166,10 +165,6 @@ export async function POST(req: NextRequest) {
   }
 
   const requestFingerprint = getRequestFingerprint(req.headers);
-  const missingFingerprintError = getMissingFingerprintError(isApiKeyAuth, requestFingerprint);
-  if (missingFingerprintError) {
-    return NextResponse.json(missingFingerprintError.payload, { status: missingFingerprintError.status });
-  }
 
   // Extra hardening: if a custom key has exhausted credits, reject before
   // parsing payload or touching upstream selection paths.

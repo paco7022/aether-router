@@ -14,20 +14,6 @@ export function getRequestFingerprint(headers: Headers): string | null {
   return cleaned.length > 0 ? cleaned : null;
 }
 
-export function getMissingFingerprintError(isApiKeyAuth: boolean, fingerprint: string | null): PreflightError | null {
-  if (!isApiKeyAuth || fingerprint) return null;
-  return {
-    status: 400,
-    payload: {
-      error: {
-        message: "Missing device fingerprint header for API key request.",
-        type: "invalid_request",
-        code: "missing_fingerprint",
-      },
-    },
-  };
-}
-
 export function getCustomKeyNoCreditsError(customCredits: number | null): PreflightError | null {
   if (customCredits === null || customCredits > 0) return null;
   return {

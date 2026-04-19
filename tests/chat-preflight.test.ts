@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   getCustomKeyNoCreditsError,
-  getMissingFingerprintError,
   getNoPaidBalanceError,
   getRequestFingerprint,
   isApiKeyAuthHeader,
@@ -23,14 +22,6 @@ describe("chat preflight", () => {
 
     const h3 = new Headers();
     expect(getRequestFingerprint(h3)).toBeNull();
-  });
-
-  it("requires fingerprint for API key requests", () => {
-    const err = getMissingFingerprintError(true, null);
-    expect(err?.status).toBe(400);
-
-    expect(getMissingFingerprintError(true, "fp-1")).toBeNull();
-    expect(getMissingFingerprintError(false, null)).toBeNull();
   });
 
   it("rejects exhausted custom key credits", () => {
