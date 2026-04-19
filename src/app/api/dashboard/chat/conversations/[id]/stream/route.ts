@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { requireCsrf } from "@/lib/csrf";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -108,6 +109,9 @@ async function inlineForForward(
 type Ctx = { params: Promise<{ id: string }> };
 
 export async function POST(req: NextRequest, { params }: Ctx) {
+  const csrfError = requireCsrf(req);
+  if (csrfError) return csrfError;
+
   const { id: conversationId } = await params;
 
   // 1. Session auth
@@ -187,7 +191,10 @@ export async function POST(req: NextRequest, { params }: Ctx) {
   forwardMessages.push({ role: "user", content: newInlined });
 
   // 7. Forward to /v1/chat/completions with session cookie (same billing path)
-  const origin = req.nextUrl.origin;
+  // Use an env-configured base URL if set; otherwise fall back to the
+  // request's derived origin. Do NOT derive origin from the Host header in
+  // untrusted deployments — in that case set NEXT_PUBLIC_SITE_URL.
+  const origin = process.env.NEXT_PUBLIC_SITE_URL || req.nextUrl.origin;
   const cookieHeader = req.headers.get("cookie") ?? "";
 
   let upstream: Response;
@@ -196,8 +203,10 @@ export async function POST(req: NextRequest, { params }: Ctx) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "X-Requested-With": "dashboard-stream",
         cookie: cookieHeader,
       },
+      signal: req.signal,
       body: JSON.stringify({
         model: conv.model_id,
         messages: forwardMessages,

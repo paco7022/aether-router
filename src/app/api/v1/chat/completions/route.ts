@@ -5,6 +5,7 @@ import { estimateTokens, estimatePromptTokens } from "@/lib/token-estimator";
 import { getProvider } from "@/lib/providers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { evaluateBanStatus } from "@/lib/ban";
+import { requireCsrf } from "@/lib/csrf";
 import {
   getCustomKeyNoCreditsError,
   getMissingFingerprintError,
@@ -47,17 +48,40 @@ type UsageLike = {
 // either in OpenAI's `prompt_tokens_details.cached_tokens` shape or in
 // Anthropic's `cache_read_input_tokens` / `cache_creation_input_tokens` shape.
 // Accept both so billing matches whichever upstream format leaks through.
-function extractCacheTokens(usage: UsageLike | undefined): { read: number; write: number } {
+//
+// IMPORTANT: an upstream that mis-reports `cache_read = prompt_tokens` would
+// drive billable fresh tokens to ~0 (cache pricing is much lower than input).
+// We clamp the sum so it can never exceed the prompt; the caller still pays
+// for any prompt token, just at cache rate vs input rate.
+function extractCacheTokens(
+  usage: UsageLike | undefined,
+  promptTokens: number = Infinity
+): { read: number; write: number } {
   if (!usage) return { read: 0, write: 0 };
-  const read =
+  let read =
     Number(usage.cache_read_input_tokens) ||
     Number(usage.prompt_tokens_details?.cached_tokens) ||
     0;
-  const write =
+  let write =
     Number(usage.cache_creation_input_tokens) ||
     Number(usage.prompt_tokens_details?.cache_creation_tokens) ||
     0;
-  return { read: read > 0 ? read : 0, write: write > 0 ? write : 0 };
+  read = read > 0 ? read : 0;
+  write = write > 0 ? write : 0;
+
+  // Cap to prompt size so a malicious/buggy upstream can't drive the bill
+  // to zero by inflating cache counters above prompt_tokens.
+  if (Number.isFinite(promptTokens) && promptTokens > 0) {
+    if (read + write > promptTokens) {
+      // Trim write first (more aggressive lower price), then read.
+      const overflow = read + write - promptTokens;
+      const wTrim = Math.min(write, overflow);
+      write -= wTrim;
+      const remaining = overflow - wTrim;
+      if (remaining > 0) read = Math.max(0, read - remaining);
+    }
+  }
+  return { read, write };
 }
 
 function extractCompletionText(payload: unknown): string {
@@ -123,6 +147,15 @@ export async function POST(req: NextRequest) {
       );
     }
   } else {
+    // Session auth path: the client is our own dashboard using cookies.
+    // Cookies are sent automatically by browsers on cross-origin requests,
+    // so any cross-site POST to this endpoint would drain the victim's
+    // credits if we didn't require a CSRF token. `X-Requested-With` cannot
+    // be sent by a simple HTML form and requires CORS preflight which our
+    // middleware only grants to the allowlist.
+    const csrfError = requireCsrf(req);
+    if (csrfError) return csrfError;
+
     keyInfo = await validateSession();
     if (!keyInfo) {
       return NextResponse.json(
@@ -170,7 +203,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         error: {
-          message: banDecision.reason,
+          message: "Unable to verify account status right now. Please try again.",
           type: "server_error",
         },
       },
@@ -182,18 +215,60 @@ export async function POST(req: NextRequest) {
   // PDF in base64 is ~2-3MB, anything beyond ~10MB is almost certainly an
   // attempt to push past the context cap with binary content the estimator
   // can't accurately measure.
+  //
+  // IMPORTANT: The `Content-Length` header is attacker-controlled (can be
+  // omitted entirely or lied about with chunked transfer), so we cannot
+  // trust it as a guard. We read the body as a byte stream and enforce the
+  // cap while accumulating, aborting the moment we exceed it. `req.json()`
+  // alone does NOT enforce a size limit in Next.js App Router.
   const MAX_BODY_BYTES = 10 * 1024 * 1024;
-  const contentLength = Number(req.headers.get("content-length") ?? 0);
-  if (contentLength > MAX_BODY_BYTES) {
+  let rawBody: Uint8Array;
+  try {
+    const reader = req.body?.getReader();
+    if (!reader) {
+      return NextResponse.json(
+        { error: { message: "Empty request body", type: "invalid_request" } },
+        { status: 400 }
+      );
+    }
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (value) {
+        total += value.byteLength;
+        if (total > MAX_BODY_BYTES) {
+          try { await reader.cancel(); } catch { /* ignore */ }
+          return NextResponse.json(
+            {
+              error: {
+                message: `Request body too large. Max ${MAX_BODY_BYTES / 1024 / 1024} MB.`,
+                type: "invalid_request",
+              },
+            },
+            { status: 413 }
+          );
+        }
+        chunks.push(value);
+      }
+    }
+    rawBody = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      rawBody.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+  } catch (err) {
     return NextResponse.json(
-      { error: { message: `Request body too large (${(contentLength / 1024 / 1024).toFixed(1)} MB). Max ${MAX_BODY_BYTES / 1024 / 1024} MB.`, type: "invalid_request" } },
-      { status: 413 }
+      { error: { message: "Failed to read request body", type: "invalid_request" } },
+      { status: 400 }
     );
   }
 
   let body: Record<string, unknown>;
   try {
-    body = await req.json();
+    body = JSON.parse(new TextDecoder().decode(rawBody));
   } catch {
     return NextResponse.json(
       { error: { message: "Invalid JSON body", type: "invalid_request" } },
@@ -275,74 +350,85 @@ export async function POST(req: NextRequest) {
   }
 
   if (activeEvent) {
-    // Rate limit within event (per user, per prefix)
-    if (activeEvent.rate_limit_seconds > 0) {
-      const windowAgo = new Date(Date.now() - activeEvent.rate_limit_seconds * 1000).toISOString();
-      const { data: recent } = await supabase
-        .from("usage_logs")
-        .select("created_at")
-        .eq("user_id", keyInfo.userId)
-        .like("model_id", `${activeEvent.model_prefix}%`)
-        .gte("created_at", windowAgo)
-        .limit(1)
-        .maybeSingle();
+    // Atomic per-event reservation: rate limit + per-user message cap +
+    // pool-exhaustion check happen inside one transaction with row locks.
+    // Replaces the prior SELECT/COUNT-on-usage_logs approach which had a
+    // multi-second TOCTOU window during which N parallel requests could
+    // all pass before any of them logged a row.
+    const { data: reserveResult, error: reserveErr } = await supabase.rpc(
+      "reserve_free_event_request",
+      { p_event_id: activeEvent.id, p_user_id: keyInfo.userId }
+    );
 
-      if (recent) {
-        const retryAfter = Math.ceil(
-          (new Date(recent.created_at).getTime() + activeEvent.rate_limit_seconds * 1000 - Date.now()) / 1000
-        );
-        return NextResponse.json(
-          {
-            error: {
-              message: `Event rate limit: 1 request per ${activeEvent.rate_limit_seconds}s. Try again in ${retryAfter}s.`,
-              type: "rate_limit",
-            },
-          },
-          { status: 429, headers: { "Retry-After": String(Math.max(retryAfter, 1)) } }
-        );
-      }
+    if (reserveErr) {
+      console.error("Free event reservation RPC failed:", reserveErr.message);
+      return NextResponse.json(
+        { error: { message: "Failed to check event quota", type: "server_error" } },
+        { status: 500 }
+      );
     }
 
-    // Per-user message cap for this event
-    if (activeEvent.per_user_msg_limit > 0) {
-      const { count } = await supabase
-        .from("usage_logs")
-        .select("*", { count: "exact", head: true })
-        .eq("user_id", keyInfo.userId)
-        .like("model_id", `${activeEvent.model_prefix}%`)
-        .gte("created_at", activeEvent.starts_at);
-
-      if ((count ?? 0) >= activeEvent.per_user_msg_limit) {
-        return NextResponse.json(
-          {
-            error: {
-              message: `Event message limit reached (${activeEvent.per_user_msg_limit} messages for this event).`,
-              type: "rate_limit",
-            },
+    const res = reserveResult as { status?: string; retry_after_seconds?: number; limit?: number };
+    if (res?.status === "rate_limited") {
+      const retryAfter = res.retry_after_seconds ?? activeEvent.rate_limit_seconds ?? 60;
+      return NextResponse.json(
+        {
+          error: {
+            message: `Event rate limit: 1 request per ${activeEvent.rate_limit_seconds}s. Try again in ${retryAfter}s.`,
+            type: "rate_limit",
           },
-          { status: 429 }
-        );
-      }
+        },
+        { status: 429, headers: { "Retry-After": String(Math.max(retryAfter, 1)) } }
+      );
+    }
+    if (res?.status === "msg_limit") {
+      return NextResponse.json(
+        {
+          error: {
+            message: `Event message limit reached (${activeEvent.per_user_msg_limit} messages for this event).`,
+            type: "rate_limit",
+          },
+        },
+        { status: 429 }
+      );
+    }
+    if (res?.status === "pool_exhausted") {
+      return NextResponse.json(
+        {
+          error: {
+            message: "This event's free token pool has been exhausted. Use the model normally to continue.",
+            type: "rate_limit",
+          },
+        },
+        { status: 429 }
+      );
+    }
+    if (res?.status === "inactive" || res?.status === "not_found") {
+      // Event ended between lookup and reservation — treat as if no event.
+      activeEvent = null;
     }
 
-    // Context cap for this event
-    if (activeEvent.max_context > 0) {
-      const estimatedContext = estimatePromptTokens(body);
-      if (estimatedContext > activeEvent.max_context) {
-        return NextResponse.json(
-          {
-            error: {
-              message: `Context too long (~${estimatedContext} tokens). This event allows ${activeEvent.max_context} tokens max.`,
-              type: "context_limit",
+    if (activeEvent) {
+      // Context cap for this event (cheap, runs after atomic reservation
+      // so we don't burn a counter if the request is going to bounce).
+      if (activeEvent.max_context > 0) {
+        const estimatedContext = estimatePromptTokens(body);
+        if (estimatedContext > activeEvent.max_context) {
+          return NextResponse.json(
+            {
+              error: {
+                message: `Context too long (~${estimatedContext} tokens). This event allows ${activeEvent.max_context} tokens max.`,
+                type: "context_limit",
+              },
             },
-          },
-          { status: 413 }
-        );
+            { status: 413 }
+          );
+        }
       }
-    }
 
-    isFreePool = true;
-    activeEventId = activeEvent.id;
+      isFreePool = true;
+      activeEventId = activeEvent.id;
+    }
   }
 
   // Reservation flags so refundReservation() can roll back request counters
@@ -851,7 +937,9 @@ export async function POST(req: NextRequest) {
         isFreePool,
         freePoolName,
         activeEventId,
-        reservation
+        reservation,
+        refundReservation,
+        req.signal
       );
     }
 
@@ -862,7 +950,7 @@ export async function POST(req: NextRequest) {
     };
 
     let usage: UsageLike = data.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
-    let cacheTokens = extractCacheTokens(usage);
+    let cacheTokens = extractCacheTokens(usage, Number(usage.prompt_tokens) || 0);
 
     // Some providers omit usage on non-stream responses; estimate to avoid zero-charge responses.
     if (!usage.total_tokens || usage.total_tokens <= 0) {
@@ -982,14 +1070,16 @@ export async function POST(req: NextRequest) {
 
 async function handleStreamingResponse(
   providerResponse: Response,
-  keyInfo: { userId: string; keyId: string | null; credits: number; isCustom: boolean; customCredits: number | null; source: "api" | "chat" },
+  keyInfo: { userId: string; keyId: string | null; credits: number; dailyCredits: number; isCustom: boolean; customCredits: number | null; source: "api" | "chat" },
   model: { id: string; provider: string; cost_per_m_input: number; cost_per_m_output: number; cost_per_m_cache_read?: number; cost_per_m_cache_write?: number; margin: number; premium_request_cost?: number },
   startTime: number,
   estimatedPromptTokens: number = 0,
   isFreePool: boolean = false,
   freePoolName: string | null = null,
   activeEventId: string | null = null,
-  reservation: StreamChargeReservation | null = null
+  reservation: StreamChargeReservation | null = null,
+  refundReservation: () => Promise<void> = async () => {},
+  clientSignal?: AbortSignal,
 ) {
   const supabase = createAdminClient();
   let totalPromptTokens = 0;
@@ -998,14 +1088,221 @@ async function handleStreamingResponse(
   let cacheWriteTokens = 0;
   let completionText = "";
   let hasUsageData = false;
+  let settled = false; // ensures finalize() runs at most once
 
   const decoder = new TextDecoder();
+
+  // --- Final accounting routine, factored out so it can be triggered from
+  //     either the natural end of stream OR a client abort (TCP RST / nav-away).
+  //     Without this, an attacker could stream a request, abort right before
+  //     `flush()` would have run, and walk away having paid only the
+  //     under-counted reservation while the upstream charged us full price.
+  async function finalize(reason: "complete" | "aborted") {
+    if (settled) return;
+    settled = true;
+
+    // Client aborted before the upstream stream finished: we never observed
+    // real `usage` data, so refund the full reservation rather than charge
+    // a guessed amount. The upstream is also aborted (we propagate via the
+    // composed AbortController below) so we won't be billed by them either.
+    if (reason === "aborted" && !hasUsageData) {
+      try { await refundReservation(); } catch (e) {
+        console.error("Refund-on-abort failed:", e);
+      }
+      return;
+    }
+
+    // If provider didn't send usage data, estimate tokens
+    if (!hasUsageData) {
+      totalPromptTokens = estimatedPromptTokens;
+      totalCompletionTokens = estimateTokens(completionText);
+    }
+
+    const totalTokens = totalPromptTokens + totalCompletionTokens;
+    const { credits, costUsd } = calculateCredits(
+      totalPromptTokens,
+      totalCompletionTokens,
+      {
+        cost_per_m_input: model.cost_per_m_input,
+        cost_per_m_output: model.cost_per_m_output,
+        cost_per_m_cache_read: model.cost_per_m_cache_read ?? 0,
+        cost_per_m_cache_write: model.cost_per_m_cache_write ?? 0,
+        margin: model.margin,
+      },
+      { read: cacheReadTokens, write: cacheWriteTokens }
+    );
+
+    const isPremiumModel = model.provider === "trolllm" || model.provider === "antigravity" || model.provider === "webproxy";
+    const finalCredits = isFreePool ? 0 : isPremiumModel ? 1 : Math.max(credits, 1);
+
+    let wasCharged = isFreePool;
+    let balanceAfter = reservation?.balanceAfterReserve ?? 0;
+    let chargedCredits = isFreePool ? 0 : finalCredits;
+    let billingStatus: "success" | "billing_failed" | "settlement_failed" = "success";
+
+    if (!isFreePool) {
+      if (reservation) {
+        wasCharged = true;
+        chargedCredits = reservation.reservedCredits;
+
+        const settlementDelta = finalCredits - reservation.reservedCredits;
+        if (settlementDelta > 0) {
+          if (keyInfo.isCustom && keyInfo.customCredits !== null) {
+            const { data: keyBalance, error: settleErr } = await supabase.rpc("deduct_custom_key_credits", {
+              p_key_id: keyInfo.keyId,
+              p_amount: settlementDelta,
+            });
+            if (settleErr || keyBalance === -1) {
+              // Settlement failed: drain the remaining custom-key balance to
+              // zero so the user pays at least everything they had. The user
+              // already received the response (we can't recall it).
+              billingStatus = "settlement_failed";
+              const remaining = (keyInfo.customCredits ?? 0) - reservation.reservedCredits;
+              if (remaining > 0 && keyInfo.keyId) {
+                const { data: drained } = await supabase.rpc("deduct_custom_key_credits", {
+                  p_key_id: keyInfo.keyId,
+                  p_amount: remaining,
+                });
+                if (typeof drained === "number" && drained >= 0) {
+                  chargedCredits += remaining;
+                  balanceAfter = drained as number;
+                }
+              }
+              // Disable the key — easier than letting it stay usable while in arrears.
+              if (keyInfo.keyId) {
+                await supabase.from("api_keys").update({ is_active: false, note: "Auto-disabled: settlement_failed" }).eq("id", keyInfo.keyId);
+              }
+            } else {
+              chargedCredits += settlementDelta;
+              balanceAfter = keyBalance as number;
+            }
+          } else {
+            const { data: newBalance, error: settleErr } = await supabase.rpc("deduct_credits", {
+              p_user_id: keyInfo.userId,
+              p_amount: settlementDelta,
+            });
+            if (settleErr || newBalance === -1) {
+              // Settlement failed on user balance: drain whatever's left so we
+              // don't silently give away the full delta. Then accrue debt as a
+              // negative `transactions` row marker for ops to follow up on.
+              billingStatus = "settlement_failed";
+              const totalAvailable = keyInfo.credits + keyInfo.dailyCredits;
+              const remaining = totalAvailable - reservation.reservedCredits;
+              if (remaining > 0) {
+                const { data: drained } = await supabase.rpc("deduct_credits", {
+                  p_user_id: keyInfo.userId,
+                  p_amount: remaining,
+                });
+                if (typeof drained === "number" && drained >= 0) {
+                  chargedCredits += remaining;
+                  balanceAfter = drained as number;
+                }
+              }
+            } else {
+              chargedCredits += settlementDelta;
+              balanceAfter = newBalance as number;
+            }
+          }
+        } else if (settlementDelta < 0) {
+          const refundAmount = Math.abs(settlementDelta);
+          if (keyInfo.isCustom && keyInfo.customCredits !== null) {
+            const { data: keyBalance, error: refundErr } = await supabase.rpc("add_custom_key_credits", {
+              p_key_id: keyInfo.keyId,
+              p_amount: refundAmount,
+            });
+            if (refundErr || keyBalance === -1) {
+              billingStatus = "settlement_failed";
+            } else {
+              chargedCredits -= refundAmount;
+              balanceAfter = keyBalance as number;
+            }
+          } else {
+            const { data: newBalance, error: refundErr } = await supabase.rpc("add_credits", {
+              p_user_id: keyInfo.userId,
+              p_amount: refundAmount,
+            });
+            if (refundErr || newBalance === -1) {
+              billingStatus = "settlement_failed";
+            } else {
+              chargedCredits -= refundAmount;
+              balanceAfter = newBalance as number;
+            }
+          }
+        }
+      } else {
+        // No reservation — should not normally happen for paid usage.
+        if (keyInfo.isCustom && keyInfo.customCredits !== null) {
+          const { data: keyBalance, error: keyErr } = await supabase.rpc("deduct_custom_key_credits", {
+            p_key_id: keyInfo.keyId,
+            p_amount: finalCredits,
+          });
+          wasCharged = !keyErr && typeof keyBalance === "number" && keyBalance >= 0;
+          balanceAfter = (keyBalance as number) ?? 0;
+        } else {
+          const { data: newBalance, error: deductError } = await supabase.rpc("deduct_credits", {
+            p_user_id: keyInfo.userId,
+            p_amount: finalCredits,
+          });
+          wasCharged = !deductError && typeof newBalance === "number" && newBalance >= 0;
+          balanceAfter = (newBalance as number) ?? 0;
+        }
+        if (!wasCharged) {
+          billingStatus = "billing_failed";
+          chargedCredits = 0;
+        }
+      }
+    }
+
+    const durationMs = Date.now() - startTime;
+    const isPremium = model.provider === "trolllm" || model.provider === "antigravity" || model.provider === "webproxy";
+    const streamPremiumCost = isPremium && !activeEventId ? Number(model.premium_request_cost ?? 1) : 0;
+    const { error: usageLogError } = await supabase.from("usage_logs").insert({
+      user_id: keyInfo.userId,
+      api_key_id: keyInfo.keyId,
+      model_id: model.id,
+      prompt_tokens: totalPromptTokens,
+      completion_tokens: totalCompletionTokens,
+      total_tokens: totalTokens,
+      cache_read_tokens: cacheReadTokens,
+      cache_write_tokens: cacheWriteTokens,
+      credits_charged: chargedCredits,
+      cost_usd: costUsd,
+      status: isFreePool ? "success" : (reason === "aborted" ? "aborted" : billingStatus),
+      duration_ms: durationMs,
+      premium_cost: streamPremiumCost,
+      source: keyInfo.source,
+    });
+    if (usageLogError) {
+      console.error("Failed to write streaming usage log:", usageLogError.message);
+    }
+
+    if (!isFreePool && chargedCredits > 0) {
+      const settlementSuffix = billingStatus === "success" ? "" : ` [${billingStatus}]`;
+      const { error: txError } = await supabase.from("transactions").insert({
+        user_id: keyInfo.userId,
+        amount: -chargedCredits,
+        balance: balanceAfter,
+        type: keyInfo.isCustom ? "custom_key_usage" : "usage",
+        description: `${model.id} - ${totalTokens} tokens (stream${reason === "aborted" ? ":aborted" : ""})${settlementSuffix}`,
+      });
+      if (txError) {
+        console.error("Failed to write streaming transaction log:", txError.message);
+      }
+    }
+
+    try {
+      if (activeEventId) {
+        await incrementFreeEventTokens(supabase, activeEventId, totalTokens);
+      }
+    } catch (postAccountingError) {
+      console.error("Post-stream pool accounting failed:", postAccountingError);
+    }
+  }
 
   const transformStream = new TransformStream({
     transform(chunk, controller) {
       controller.enqueue(chunk);
 
-      // Try to parse usage from streamed chunks
       const text = decoder.decode(chunk, { stream: true });
       const lines = text.split("\n").filter((l) => l.startsWith("data: "));
 
@@ -1018,11 +1315,10 @@ async function handleStreamingResponse(
             hasUsageData = true;
             totalPromptTokens = parsed.usage.prompt_tokens ?? totalPromptTokens;
             totalCompletionTokens = parsed.usage.completion_tokens ?? totalCompletionTokens;
-            const streamCache = extractCacheTokens(parsed.usage);
+            const streamCache = extractCacheTokens(parsed.usage, Number(parsed.usage.prompt_tokens) || 0);
             if (streamCache.read > 0) cacheReadTokens = streamCache.read;
             if (streamCache.write > 0) cacheWriteTokens = streamCache.write;
           }
-          // Accumulate completion text for fallback estimation
           const delta = parsed.choices?.[0]?.delta?.content;
           if (typeof delta === "string") {
             completionText += delta;
@@ -1034,164 +1330,7 @@ async function handleStreamingResponse(
     },
 
     async flush() {
-      // If provider didn't send usage data, estimate tokens
-      if (!hasUsageData) {
-        totalPromptTokens = estimatedPromptTokens;
-        totalCompletionTokens = estimateTokens(completionText);
-      }
-
-      const totalTokens = totalPromptTokens + totalCompletionTokens;
-      const { credits, costUsd } = calculateCredits(
-        totalPromptTokens,
-        totalCompletionTokens,
-        {
-          cost_per_m_input: model.cost_per_m_input,
-          cost_per_m_output: model.cost_per_m_output,
-          cost_per_m_cache_read: model.cost_per_m_cache_read ?? 0,
-          cost_per_m_cache_write: model.cost_per_m_cache_write ?? 0,
-          margin: model.margin,
-        },
-        { read: cacheReadTokens, write: cacheWriteTokens }
-      );
-
-      const isPremiumModel = model.provider === "trolllm" || model.provider === "antigravity" || model.provider === "webproxy";
-      // Premium-request models (t/, an/, w/) are flat-rate: 1 credit + N premium-request budget.
-      const finalCredits = isFreePool ? 0 : isPremiumModel ? 1 : Math.max(credits, 1);
-
-      let wasCharged = isFreePool; // free pool is always "success" for logging
-      let balanceAfter = reservation?.balanceAfterReserve ?? 0;
-      let chargedCredits = isFreePool ? 0 : finalCredits;
-      let billingStatus: "success" | "billing_failed" | "settlement_failed" = "success";
-
-      if (!isFreePool) {
-        if (reservation) {
-          wasCharged = true;
-          chargedCredits = reservation.reservedCredits;
-
-          const settlementDelta = finalCredits - reservation.reservedCredits;
-          if (settlementDelta > 0) {
-            if (keyInfo.isCustom && keyInfo.customCredits !== null) {
-              const { data: keyBalance, error: settleErr } = await supabase.rpc("deduct_custom_key_credits", {
-                p_key_id: keyInfo.keyId,
-                p_amount: settlementDelta,
-              });
-
-              if (settleErr || keyBalance === -1) {
-                billingStatus = "settlement_failed";
-              } else {
-                chargedCredits += settlementDelta;
-                balanceAfter = keyBalance as number;
-              }
-            } else {
-              const { data: newBalance, error: settleErr } = await supabase.rpc("deduct_credits", {
-                p_user_id: keyInfo.userId,
-                p_amount: settlementDelta,
-              });
-
-              if (settleErr || newBalance === -1) {
-                billingStatus = "settlement_failed";
-              } else {
-                chargedCredits += settlementDelta;
-                balanceAfter = newBalance as number;
-              }
-            }
-          } else if (settlementDelta < 0) {
-            const refundAmount = Math.abs(settlementDelta);
-            if (keyInfo.isCustom && keyInfo.customCredits !== null) {
-              const { data: keyBalance, error: refundErr } = await supabase.rpc("add_custom_key_credits", {
-                p_key_id: keyInfo.keyId,
-                p_amount: refundAmount,
-              });
-
-              if (refundErr || keyBalance === -1) {
-                billingStatus = "settlement_failed";
-              } else {
-                chargedCredits -= refundAmount;
-                balanceAfter = keyBalance as number;
-              }
-            } else {
-              const { data: newBalance, error: refundErr } = await supabase.rpc("add_credits", {
-                p_user_id: keyInfo.userId,
-                p_amount: refundAmount,
-              });
-
-              if (refundErr || newBalance === -1) {
-                billingStatus = "settlement_failed";
-              } else {
-                chargedCredits -= refundAmount;
-                balanceAfter = newBalance as number;
-              }
-            }
-          }
-        } else {
-          if (keyInfo.isCustom && keyInfo.customCredits !== null) {
-            const { data: keyBalance, error: keyErr } = await supabase.rpc("deduct_custom_key_credits", {
-              p_key_id: keyInfo.keyId,
-              p_amount: finalCredits,
-            });
-            wasCharged = !keyErr && typeof keyBalance === "number" && keyBalance >= 0;
-            balanceAfter = (keyBalance as number) ?? 0;
-          } else {
-            const { data: newBalance, error: deductError } = await supabase.rpc("deduct_credits", {
-              p_user_id: keyInfo.userId,
-              p_amount: finalCredits,
-            });
-            wasCharged = !deductError && typeof newBalance === "number" && newBalance >= 0;
-            balanceAfter = (newBalance as number) ?? 0;
-          }
-
-          if (!wasCharged) {
-            billingStatus = "billing_failed";
-            chargedCredits = 0;
-          }
-        }
-      }
-
-      const durationMs = Date.now() - startTime;
-      const isPremium = model.provider === "trolllm" || model.provider === "antigravity" || model.provider === "webproxy";
-      const streamPremiumCost = isPremium && !activeEventId ? Number(model.premium_request_cost ?? 1) : 0;
-      const { error: usageLogError } = await supabase.from("usage_logs").insert({
-        user_id: keyInfo.userId,
-        api_key_id: keyInfo.keyId,
-        model_id: model.id,
-        prompt_tokens: totalPromptTokens,
-        completion_tokens: totalCompletionTokens,
-        total_tokens: totalTokens,
-        cache_read_tokens: cacheReadTokens,
-        cache_write_tokens: cacheWriteTokens,
-        credits_charged: chargedCredits,
-        cost_usd: costUsd,
-        status: isFreePool ? "success" : billingStatus,
-        duration_ms: durationMs,
-        premium_cost: streamPremiumCost,
-        source: keyInfo.source,
-      });
-      if (usageLogError) {
-        console.error("Failed to write streaming usage log:", usageLogError.message);
-      }
-
-      if (!isFreePool && chargedCredits > 0) {
-        const settlementSuffix = billingStatus === "success" ? "" : ` [${billingStatus}]`;
-        const { error: txError } = await supabase.from("transactions").insert({
-          user_id: keyInfo.userId,
-          amount: -chargedCredits,
-          balance: balanceAfter,
-          type: keyInfo.isCustom ? "custom_key_usage" : "usage",
-          description: `${model.id} - ${totalTokens} tokens (stream)${settlementSuffix}`,
-        });
-        if (txError) {
-          console.error("Failed to write streaming transaction log:", txError.message);
-        }
-      }
-
-      try {
-        // Increment active free event token pool
-        if (activeEventId) {
-          await incrementFreeEventTokens(supabase, activeEventId, totalTokens);
-        }
-      } catch (postAccountingError) {
-        console.error("Post-stream pool accounting failed:", postAccountingError);
-      }
+      await finalize("complete");
     },
   });
 
@@ -1203,8 +1342,31 @@ async function handleStreamingResponse(
     );
   }
 
+  // Wire client-abort → finalize("aborted") so reservations are refunded
+  // (or at least settled with what we observed) when the consumer disconnects.
+  // Also propagate the abort to the upstream fetch so we stop being billed.
+  if (clientSignal) {
+    if (clientSignal.aborted) {
+      // Already aborted by the time we got here — refund and bail.
+      finalize("aborted").catch((e) => console.error("finalize on already-aborted:", e));
+    } else {
+      clientSignal.addEventListener(
+        "abort",
+        () => {
+          finalize("aborted").catch((e) => console.error("finalize on abort:", e));
+        },
+        { once: true }
+      );
+    }
+  }
+
   body.pipeTo(transformStream.writable).catch((streamPipeError) => {
     console.error("Streaming pipeline failed:", streamPipeError);
+    // Pipe failures (upstream RST, etc.) also need finalization so we don't
+    // orphan the reservation. Treat as abort if no usage was ever observed.
+    finalize(hasUsageData ? "complete" : "aborted").catch((e) =>
+      console.error("finalize on pipe failure:", e)
+    );
   });
 
   return new Response(transformStream.readable, {

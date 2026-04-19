@@ -26,6 +26,14 @@ export async function POST(req: NextRequest) {
   const admin = createAdminClient();
 
   // Idempotency: process each Stripe event only once.
+  //
+  // SECURITY: previously, on retry the row was reset (`processed_at = null`)
+  // and the entire switch re-ran. If `add_credits` had already succeeded but
+  // a later step (e.g. transactions insert, period retrieval) crashed, Stripe
+  // would redeliver and we'd grant credits a second time. We now refuse retry
+  // outright once the row exists — operators must inspect/clear it manually.
+  // Failed-once events are ack'd so Stripe stops retrying; we'd rather
+  // alert+investigate than silently double-spend.
   const { error: lockError } = await admin
     .from("stripe_webhook_events")
     .insert({
@@ -37,35 +45,22 @@ export async function POST(req: NextRequest) {
   if (lockError) {
     const maybeCode = (lockError as { code?: string }).code;
     if (maybeCode === "23505") {
-      const { data: existing, error: existingErr } = await admin
+      const { data: existing } = await admin
         .from("stripe_webhook_events")
-        .select("success")
+        .select("success, error")
         .eq("event_id", event.id)
         .maybeSingle();
 
-      if (existingErr) {
-        console.error("Failed to read existing webhook event:", existingErr);
-        return NextResponse.json({ error: "Webhook idempotency check failed" }, { status: 500 });
-      }
-
-      if (existing?.success) {
-        return NextResponse.json({ received: true, duplicate: true });
-      }
-
-      // Previous processing failed; allow retry and overwrite stale error state.
-      const { error: retryLockErr } = await admin
-        .from("stripe_webhook_events")
-        .update({ event_type: event.type, error: null, processed_at: null })
-        .eq("event_id", event.id);
-
-      if (retryLockErr) {
-        console.error("Failed to prepare failed webhook event for retry:", retryLockErr);
-        return NextResponse.json({ error: "Webhook retry lock failed" }, { status: 500 });
-      }
-    } else {
-      console.error("Failed to acquire webhook idempotency lock:", lockError);
-      return NextResponse.json({ error: "Webhook lock failed" }, { status: 500 });
+      // Always treat the event as already-handled. If the previous attempt
+      // genuinely failed before any side-effect, manual replay (after
+      // deleting the row) is the safe path.
+      console.warn(
+        `[stripe-webhook] duplicate delivery for ${event.id} (success=${existing?.success}, prev_error=${existing?.error}) — refusing to re-run`
+      );
+      return NextResponse.json({ received: true, duplicate: true });
     }
+    console.error("Failed to acquire webhook idempotency lock:", lockError);
+    return NextResponse.json({ error: "Webhook lock failed" }, { status: 500 });
   }
 
   try {

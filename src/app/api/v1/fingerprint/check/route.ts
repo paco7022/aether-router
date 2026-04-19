@@ -16,15 +16,17 @@ export async function POST(req: NextRequest) {
 
   if (decision?.blocked) {
     if (decision.statusCode === 403) {
-      return NextResponse.json({ banned: true, reason: decision.reason, source: decision.source });
+      // Do NOT leak the admin-written `reason` or the `source` discriminator
+      // here — this endpoint is unauthenticated and would otherwise serve as
+      // an enumeration oracle for moderator notes / banned-fingerprint sets.
+      return NextResponse.json({ banned: true });
     }
 
     return NextResponse.json(
-      { error: "Ban check unavailable", reason: decision.reason },
+      { error: "Ban check unavailable" },
       { status: 503 }
     );
   }
 
-  // Don't expose account count — it leaks information about other users.
   return NextResponse.json({ banned: false });
 }

@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { requireCsrf } from "@/lib/csrf";
 
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  // GET is read-only and JSON; not strictly CSRF-able but require the header
+  // anyway for consistency and to prevent accidental cross-origin reads.
+  const csrfError = requireCsrf(req);
+  if (csrfError) return csrfError;
+
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
@@ -25,6 +31,9 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const csrfError = requireCsrf(req);
+  if (csrfError) return csrfError;
+
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {

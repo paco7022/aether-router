@@ -6,7 +6,16 @@ import { evaluateBanStatus } from "@/lib/ban";
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/dashboard";
+  const rawNext = searchParams.get("next") ?? "/dashboard";
+
+  // SECURITY: prevent open redirects. `next` must be a same-origin absolute
+  // path. Attackers try variants like `//evil.com/x`, `/\evil.com`, or
+  // `http://evil.com/x`; we reject anything that doesn't start with a single
+  // `/` followed by a non-slash, non-backslash character.
+  const safeNext =
+    rawNext.startsWith("/") && !rawNext.startsWith("//") && !rawNext.startsWith("/\\")
+      ? rawNext
+      : "/dashboard";
 
   if (code) {
     const cookieStore = await cookies();
@@ -46,7 +55,7 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      return NextResponse.redirect(`${origin}${next}`);
+      return NextResponse.redirect(`${origin}${safeNext}`);
     }
   }
 

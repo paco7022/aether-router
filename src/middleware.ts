@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { evaluateBanStatus } from "@/lib/ban";
+import { getClientIp } from "@/lib/client-ip";
 
 // [SECURITY] Allowed origins for CORS. Only these origins may make
 // cross-origin requests. Configure via ALLOWED_ORIGINS env var
@@ -12,26 +13,67 @@ const ALLOWED_ORIGINS = new Set(
     .filter(Boolean)
 );
 
+/**
+ * CORS headers.
+ *
+ * We have two different security postures:
+ *
+ *   - **Bearer-only routes** (`/api/v1/chat/completions` when the request
+ *     carries an `Authorization: Bearer …` header, `/api/v1/models`): these
+ *     are intended for third-party API consumers (CLIs, external apps). Since
+ *     Bearer tokens are NOT sent automatically by browsers, we can safely
+ *     allow any origin here — *without credentials*.
+ *
+ *   - **Session routes** (everything else, including `/api/v1/chat/completions`
+ *     when the client uses a cookie): cookies ARE sent automatically, so we
+ *     MUST restrict the allowed origin to our own allowlist; otherwise any
+ *     attacker website can make the victim's browser spend credits.
+ *
+ * The previous implementation reflected the attacker's Origin while setting
+ * `Access-Control-Allow-Credentials: true` on the same request — that's a
+ * textbook CSRF + data-exfil primitive because `/api/v1/chat/completions`
+ * accepts session cookies. Do NOT revert.
+ */
 function getCorsHeaders(request: NextRequest): Record<string, string> {
   const origin = request.headers.get("origin") || "";
+  const pathname = request.nextUrl.pathname;
 
-  // API-key authenticated endpoints (chat/completions, models) need broad
-  // CORS since CLI tools and third-party apps call them. Session-based
-  // endpoints (admin, billing, account, fingerprint) are restricted.
-  const isApiKeyRoute =
-    request.nextUrl.pathname === "/api/v1/chat/completions" ||
-    request.nextUrl.pathname === "/api/v1/models";
+  const auth = request.headers.get("authorization") || "";
+  const hasBearer = auth.toLowerCase().startsWith("bearer ");
 
-  const allowedOrigin =
-    ALLOWED_ORIGINS.has(origin) ? origin : isApiKeyRoute ? origin : "";
+  const isModelsRoute = pathname === "/api/v1/models";
+  const isBearerRoute =
+    pathname === "/api/v1/chat/completions" && hasBearer;
 
+  // Origin is in our trusted allowlist: full credentialed access.
+  if (origin && ALLOWED_ORIGINS.has(origin)) {
+    return {
+      "Access-Control-Allow-Origin": origin,
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS, DELETE, PATCH",
+      "Access-Control-Allow-Headers":
+        "Content-Type, Authorization, x-api-key, X-Requested-With, X-Device-Fingerprint",
+      "Access-Control-Allow-Credentials": "true",
+      "Access-Control-Max-Age": "86400",
+      Vary: "Origin",
+    };
+  }
+
+  // Cross-origin Bearer routes: allow any origin BUT deny credentials so a
+  // victim's session cookie can never be used cross-origin.
+  if (isBearerRoute || isModelsRoute) {
+    return {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Headers":
+        "Content-Type, Authorization, x-api-key, X-Device-Fingerprint",
+      "Access-Control-Max-Age": "86400",
+      Vary: "Origin",
+    };
+  }
+
+  // Everything else: no CORS. Browsers will block the response.
   return {
-    "Access-Control-Allow-Origin": allowedOrigin,
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS, DELETE",
-    "Access-Control-Allow-Headers":
-      "Content-Type, Authorization, x-api-key, X-Requested-With",
-    "Access-Control-Allow-Credentials": "true",
-    "Access-Control-Max-Age": "86400",
+    "Access-Control-Allow-Origin": "",
     Vary: "Origin",
   };
 }
@@ -53,6 +95,17 @@ function isRateLimited(ip: string): boolean {
   return entry.count > RATE_MAX_HITS;
 }
 
+// Periodic cleanup so the map can't grow unbounded from attacker-rotated IPs.
+// (With a proxy-aware getClientIp() the attack surface is much smaller, but
+// defense-in-depth: cap the map at ~50k entries.)
+function pruneIpHits() {
+  if (ipHits.size < 50_000) return;
+  const now = Date.now();
+  for (const [k, v] of ipHits) {
+    if (v.resetAt < now) ipHits.delete(k);
+  }
+}
+
 // Endpoints that are public (no auth) and need rate limiting
 const RATE_LIMITED_PATHS = new Set([
   "/api/v1/fingerprint/check",
@@ -62,12 +115,10 @@ const RATE_LIMITED_PATHS = new Set([
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Rate limit unauthenticated endpoints
+  // Rate limit unauthenticated endpoints — use trusted client IP (see client-ip.ts).
   if (RATE_LIMITED_PATHS.has(pathname)) {
-    const ip =
-      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-      request.headers.get("x-real-ip") ||
-      "unknown";
+    pruneIpHits();
+    const ip = getClientIp(request.headers);
     if (isRateLimited(ip)) {
       return NextResponse.json(
         { error: { message: "Too many requests", type: "rate_limit" } },

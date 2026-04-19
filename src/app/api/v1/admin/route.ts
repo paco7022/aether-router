@@ -349,7 +349,37 @@ export async function POST(req: NextRequest) {
     case "update_plan": {
       const { plan_id, ...updates } = body;
       delete updates.action;
-      const { error } = await supabase.from("plans").update(updates).eq("id", plan_id);
+      if (!plan_id) {
+        return NextResponse.json({ error: "plan_id required" }, { status: 400 });
+      }
+
+      // Whitelist of fields an admin may update on a plan. Everything else
+      // (id, created_at, stripe_price_id, etc.) is rejected so a compromised
+      // admin session or a future XSS can't repoint billing to attacker-owned
+      // Stripe products or rewrite arbitrary columns.
+      const ALLOWED_PLAN_FIELDS = [
+        "name",
+        "description",
+        "price_usd",
+        "credits_per_day",
+        "monthly_credit_grant",
+        "gm_daily_requests",
+        "gm_max_context",
+        "is_active",
+        "sort_order",
+        "features",
+      ];
+
+      const filtered: Record<string, unknown> = {};
+      for (const field of ALLOWED_PLAN_FIELDS) {
+        if (updates[field] !== undefined) filtered[field] = updates[field];
+      }
+
+      if (Object.keys(filtered).length === 0) {
+        return NextResponse.json({ error: "no updatable fields supplied" }, { status: 400 });
+      }
+
+      const { error } = await supabase.from("plans").update(filtered).eq("id", plan_id);
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
       return NextResponse.json({ ok: true });
     }

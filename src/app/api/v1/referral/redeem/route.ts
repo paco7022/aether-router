@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireCsrf } from "@/lib/csrf";
+import { getClientIp } from "@/lib/client-ip";
 
 export async function POST(req: NextRequest) {
   const csrfError = requireCsrf(req);
@@ -20,10 +21,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "code required" }, { status: 400 });
   }
 
-  const ip =
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    req.headers.get("x-real-ip") ||
-    "unknown";
+  // Use trusted client IP — never the raw `x-forwarded-for` first token,
+  // which is attacker-controlled and would let a Sybil farm bypass the
+  // per-IP global dedupe by rotating the header.
+  const ip = getClientIp(req.headers);
 
   const admin = createAdminClient();
   const { data, error } = await admin.rpc("redeem_referral", {
