@@ -101,7 +101,8 @@ export default async function ModelsPage() {
                 const isPremium =
                   model.provider === "trolllm" ||
                   model.provider === "antigravity" ||
-                  model.provider === "webproxy";
+                  model.provider === "webproxy" ||
+                  model.provider === "hapuppy";
                 const creditsInput = pricePerMTokens(model.cost_per_m_input, model.margin);
                 const creditsOutput = pricePerMTokens(model.cost_per_m_output, model.margin);
                 const priceInput = creditsToUsd(creditsInput);

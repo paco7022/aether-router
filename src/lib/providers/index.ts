@@ -5,6 +5,7 @@ import { trolllmProvider } from "./trolllm";
 import { antigravityProvider } from "./antigravity";
 import { nanoProvider } from "./nano";
 import { webproxyProvider } from "./webproxy";
+import { hapuppyProvider } from "./hapuppy";
 
 const providers: Record<string, Provider> = {
   airforce: airforceProvider,
@@ -13,6 +14,7 @@ const providers: Record<string, Provider> = {
   antigravity: antigravityProvider,
   nano: nanoProvider,
   webproxy: webproxyProvider,
+  hapuppy: hapuppyProvider,
 };
 
 export function getProvider(name: string): Provider | undefined {
