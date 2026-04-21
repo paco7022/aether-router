@@ -1,40 +1,38 @@
 /**
- * Token estimator fallback for when providers don't return usage data.
+ * Token estimator for pre-flight context cap checks and billing fallback
+ * when upstream providers omit usage data.
  *
- * Uses a word/punctuation-based heuristic instead of naive chars/4, which
- * over-counts when messages contain JSON markup, HTML, or long system prompts.
+ * Uses the real `o200k_base` BPE tokenizer (OpenAI GPT-4o / GPT-5 family)
+ * as the primary counter. Claude, Gemini, and DeepSeek use different
+ * tokenizers, but o200k is within ~5% of their counts on normal content —
+ * accurate enough for a pre-flight heuristic and much more accurate than
+ * the previous `max(words*1.33, chars/3)` fallback which over-counted
+ * markdown-heavy content (JanitorAI RP) by ~50%.
  *
- * Rule of thumb (from OpenAI docs): ~0.75 words per token for English,
- * so 1 token ≈ 1.33 words. We use a slightly conservative 1.25 to avoid
- * under-charging, but it's far more accurate than chars/4.
- *
- * WARNING: This estimator is used for BILLING when providers omit usage data
- * AND for the pre-flight context cap check. For code-heavy content it can
- * over-count (~2x); for non-English text or minified content it can under-count.
+ * Binary / multimodal blocks (images, PDFs, audio) aren't visible to a
+ * text tokenizer, so they still get placeholder estimates below.
  */
 
-const WORD_SPLIT = /[\s,.!?;:(){}\[\]"'`<>\/\\|@#$%^&*+=~]+/;
+import { encode as encodeO200k } from "gpt-tokenizer/encoding/o200k_base";
 
 // Per-block placeholder costs for non-text content. These are conservative
 // upper bounds — the real provider counts may be lower, but the goal of the
 // estimator is to PREVENT users from sneaking past the context cap with
-// content the heuristic can't see (PDFs, images, base64 blobs).
+// content the text tokenizer can't see (PDFs, images, base64 blobs).
 const TOKENS_PER_IMAGE = 1500;       // ~1.5k for typical 1024px image
 const TOKENS_PER_AUDIO_SECOND = 25;
 const BASE64_BYTES_PER_TOKEN = 3;    // 1 token ≈ 3 base64 chars for binary docs
 
 export function estimateTokens(text: string): number {
   if (!text) return 0;
-  const words = text.split(WORD_SPLIT).filter(Boolean).length;
-  const wordBased = Math.ceil(words * 1.33);
-  // Character-based floor. The word-split heuristic badly under-counts
-  // markdown-heavy prose (JanitorAI RP) and non-space-separated scripts
-  // (CJK) because punctuation and whole paragraphs collapse into one
-  // "word". chars/3 is a conservative upper bound that still over-counts
-  // by ~20% for normal English but prevents the 3x under-count that let
-  // Pro users sneak 66k prompts past a 32k cap.
-  const charBased = Math.ceil(text.length / 3);
-  return Math.max(wordBased, charBased);
+  try {
+    return encodeO200k(text).length;
+  } catch {
+    // Defensive fallback: if the BPE table fails to load for any reason,
+    // fall back to a conservative character-based estimate so the pre-flight
+    // check still blocks oversized prompts.
+    return Math.ceil(text.length / 3);
+  }
 }
 
 /**
