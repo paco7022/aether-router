@@ -466,7 +466,7 @@ export default function AdminPage() {
     { id: "events", label: "Events" },
   ];
 
-  const ALL_PLANS = ["free", "pro", "creator", "master", "ultra", "ultimate"];
+  const ALL_PLANS = ["free", "pro", "creator", "master", "ultra", "ultimate", "max"];
 
   return (
     <div>
@@ -631,6 +631,7 @@ export default function AdminPage() {
                       <option value="master">master</option>
                       <option value="ultra">ultra</option>
                       <option value="ultimate">ultimate</option>
+                      <option value="max">max</option>
                     </select>
                     <button onClick={handleSetPlan} className="btn-aurora text-xs font-medium px-3 py-1.5">Set</button>
                   </div>
