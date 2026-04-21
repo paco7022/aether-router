@@ -340,7 +340,13 @@ export async function POST(req: NextRequest) {
 
     if (eventLookupError) {
       console.error("Failed to resolve active free event:", eventLookupError.message);
-    } else if (eventRow) {
+    } else if (eventRow && (eventRow as { id?: string | null }).id) {
+      // PostgREST serializes a NULL composite return value as an object with
+      // all fields null ({ id: null, ... }) — which is truthy in JS. Guard on
+      // the `id` field so we only treat the row as a real event when it exists.
+      // Without this check, `activeEvent` becomes a ghost row, `isFreePool`
+      // flips to true, credit reservation is skipped, and every request for a
+      // non-custom user is effectively free.
       activeEvent = eventRow as unknown as FreeEvent;
     }
   }
