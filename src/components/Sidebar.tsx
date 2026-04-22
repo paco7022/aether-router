@@ -170,37 +170,67 @@ export function Sidebar({
             >
               <span className="aurora-text font-bold">A</span>
             </div>
-            <div>
+            <div className="min-w-0 flex-1">
               <h1 className="text-[15px] font-bold tracking-tight text-white/90">Aether Router</h1>
-              <p className="text-[10px] text-[var(--text-dim)] tracking-widest uppercase">AI Model Proxy</p>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <span className="live-dot" style={{ width: 6, height: 6 }} />
+                <p className="text-[10px] text-emerald-300/80 tracking-[0.15em] uppercase">online</p>
+              </div>
             </div>
           </div>
         </div>
 
         {/* Balance */}
         <div className="px-5 py-4 border-b border-white/[0.04]">
-          <p className="text-[10px] text-[var(--text-dim)] uppercase tracking-[0.15em] mb-2">Balance</p>
-          <p className="text-2xl font-bold aurora-text">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-[10px] text-[var(--text-dim)] uppercase tracking-[0.15em]">Balance</p>
+            {user.planName && (
+              <div className="inline-flex items-center px-2 py-0.5 rounded-full text-[9.5px] font-medium badge-violet">
+                {user.planName}
+              </div>
+            )}
+          </div>
+          <p className="text-2xl font-bold aurora-text leading-none tracking-tight">
             {(user.credits + user.dailyCredits).toLocaleString()}
           </p>
-          <p className="text-[11px] text-[var(--text-muted)] mt-0.5">credits</p>
-          <div className="flex gap-3 mt-2">
-            <span className="inline-flex items-center gap-1.5 text-[10px]">
-              <span className="w-1.5 h-1.5 rounded-full bg-teal-400/60" />
-              <span className="text-teal-400/80">{user.dailyCredits.toLocaleString()} daily</span>
-            </span>
-            <span className="inline-flex items-center gap-1.5 text-[10px]">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400/60" />
-              <span className="text-emerald-400/80">{user.credits.toLocaleString()} perm</span>
-            </span>
-          </div>
-          {user.planName && (
-            <div
-              className="mt-2.5 inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-medium badge-violet"
-            >
-              {user.planName}
+          <p className="text-[11px] text-[var(--text-muted)] mt-0.5">
+            credits &middot; <span className="text-emerald-400/70">${((user.credits + user.dailyCredits) / 10_000).toFixed(2)}</span>
+          </p>
+
+          {/* Split bar showing daily vs permanent */}
+          {(user.credits + user.dailyCredits) > 0 && (
+            <div className="mt-3">
+              <div className="stat-bar" style={{ height: 5 }}>
+                <div className="flex h-full">
+                  <div
+                    style={{
+                      width: `${(user.dailyCredits / (user.credits + user.dailyCredits)) * 100}%`,
+                      background: "linear-gradient(90deg, #14b8a6, #22d3ee)",
+                    }}
+                  />
+                  <div
+                    style={{
+                      width: `${(user.credits / (user.credits + user.dailyCredits)) * 100}%`,
+                      background: "linear-gradient(90deg, #34d399, #10b981)",
+                    }}
+                  />
+                </div>
+              </div>
             </div>
           )}
+
+          <div className="flex gap-3 mt-2.5">
+            <span className="inline-flex items-center gap-1.5 text-[10px]">
+              <span className="w-1.5 h-1.5 rounded-full bg-teal-400" />
+              <span className="text-teal-400/90 font-mono">{user.dailyCredits.toLocaleString()}</span>
+              <span className="text-[var(--text-dim)]">diario</span>
+            </span>
+            <span className="inline-flex items-center gap-1.5 text-[10px]">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+              <span className="text-emerald-400/90 font-mono">{user.credits.toLocaleString()}</span>
+              <span className="text-[var(--text-dim)]">perm</span>
+            </span>
+          </div>
         </div>
 
         {/* Navigation */}

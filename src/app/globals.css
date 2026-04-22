@@ -480,3 +480,473 @@ pre, code {
   border: none;
   margin: 2rem 0;
 }
+
+/* =====================================================
+   v2 design primitives
+   Hero, sparkline, live dot, rings, mesh, timeline, kbd
+   ===================================================== */
+
+/* ----- Hero card: premium aurora gradient ----- */
+.hero-card {
+  position: relative;
+  border-radius: var(--radius-xl);
+  padding: 1px;
+  background: linear-gradient(
+    135deg,
+    rgba(34, 211, 238, 0.35) 0%,
+    rgba(139, 92, 246, 0.3) 35%,
+    rgba(217, 70, 239, 0.25) 70%,
+    rgba(20, 184, 166, 0.3) 100%
+  );
+  overflow: hidden;
+}
+
+.hero-card-inner {
+  position: relative;
+  border-radius: calc(var(--radius-xl) - 1px);
+  background:
+    radial-gradient(ellipse 80% 60% at 100% 0%, rgba(139, 92, 246, 0.15), transparent 60%),
+    radial-gradient(ellipse 80% 60% at 0% 100%, rgba(34, 211, 238, 0.1), transparent 60%),
+    linear-gradient(135deg, rgba(15, 15, 35, 0.92), rgba(10, 10, 25, 0.95));
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  overflow: hidden;
+}
+
+.hero-card-inner::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: radial-gradient(ellipse 80% 80% at 50% 50%, black 40%, transparent 80%);
+  -webkit-mask-image: radial-gradient(ellipse 80% 80% at 50% 50%, black 40%, transparent 80%);
+  pointer-events: none;
+}
+
+/* ----- Live status dot with ping ----- */
+.live-dot {
+  position: relative;
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 8px rgba(52, 211, 153, 0.6);
+}
+
+.live-dot::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 1px solid rgba(52, 211, 153, 0.5);
+  animation: live-ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+@keyframes live-ping {
+  0% { transform: scale(0.8); opacity: 1; }
+  75%, 100% { transform: scale(2); opacity: 0; }
+}
+
+/* ----- Sparkline area gradient (used by Sparkline component) ----- */
+.sparkline-gradient-cyan { stop-color: rgba(34, 211, 238, 0.35); }
+.sparkline-gradient-violet { stop-color: rgba(139, 92, 246, 0.35); }
+.sparkline-gradient-teal { stop-color: rgba(20, 184, 166, 0.35); }
+.sparkline-gradient-emerald { stop-color: rgba(52, 211, 153, 0.35); }
+
+/* ----- Progress ring container ----- */
+.progress-ring {
+  transform: rotate(-90deg);
+  transform-origin: center;
+}
+
+.progress-ring-track {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.06);
+}
+
+.progress-ring-indicator {
+  fill: none;
+  stroke: url(#auroraGradient);
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ----- Timeline (for activity feed) ----- */
+.timeline {
+  position: relative;
+  padding-left: 1.5rem;
+}
+
+.timeline::before {
+  content: "";
+  position: absolute;
+  left: 7px;
+  top: 8px;
+  bottom: 8px;
+  width: 1px;
+  background: linear-gradient(
+    180deg,
+    rgba(139, 92, 246, 0.25) 0%,
+    rgba(34, 211, 238, 0.15) 50%,
+    transparent 100%
+  );
+}
+
+.timeline-item {
+  position: relative;
+  padding: 0.625rem 0;
+}
+
+.timeline-item::before {
+  content: "";
+  position: absolute;
+  left: -1.5rem;
+  top: 1.125rem;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--bg-card-solid);
+  border: 2px solid rgba(139, 92, 246, 0.4);
+  transition: all 0.2s ease;
+}
+
+.timeline-item.success::before {
+  border-color: rgba(52, 211, 153, 0.5);
+  box-shadow: 0 0 10px rgba(52, 211, 153, 0.3);
+}
+
+.timeline-item.error::before {
+  border-color: rgba(248, 113, 113, 0.55);
+  box-shadow: 0 0 10px rgba(248, 113, 113, 0.3);
+}
+
+.timeline-item:hover::before {
+  transform: scale(1.15);
+}
+
+/* ----- Kbd style (for shortcut hints) ----- */
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  min-width: 20px;
+  height: 20px;
+  justify-content: center;
+  font-family: "JetBrains Mono", "SF Mono", monospace;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: rgba(200, 200, 240, 0.7);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  line-height: 1;
+}
+
+/* ----- Mesh backdrop for auth pages (marketing side) ----- */
+.mesh-hero {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse 60% 80% at 100% 0%, rgba(139, 92, 246, 0.22), transparent 60%),
+    radial-gradient(ellipse 60% 80% at 0% 100%, rgba(34, 211, 238, 0.18), transparent 60%),
+    radial-gradient(ellipse 40% 50% at 80% 80%, rgba(217, 70, 239, 0.14), transparent 55%),
+    linear-gradient(135deg, #08081a 0%, #0a0a24 100%);
+}
+
+.mesh-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse 100% 100% at 50% 50%, black 30%, transparent 90%);
+  -webkit-mask-image: radial-gradient(ellipse 100% 100% at 50% 50%, black 30%, transparent 90%);
+  pointer-events: none;
+}
+
+.mesh-hero::after {
+  content: "";
+  position: absolute;
+  top: -20%;
+  right: -20%;
+  width: 80%;
+  height: 80%;
+  background: radial-gradient(ellipse at center, rgba(139, 92, 246, 0.08), transparent 70%);
+  animation: aurora-drift-1 18s ease-in-out infinite;
+  filter: blur(60px);
+  pointer-events: none;
+}
+
+/* ----- Quick action tile (gradient CTA) ----- */
+.action-tile {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  padding: 0.875rem 1rem;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  transition: all 0.25s ease;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.action-tile::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.08), rgba(34, 211, 238, 0.04));
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+.action-tile:hover {
+  border-color: rgba(139, 92, 246, 0.2);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px -12px rgba(139, 92, 246, 0.4);
+}
+
+.action-tile:hover::before {
+  opacity: 1;
+}
+
+.action-tile > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* ----- Aurora text variants ----- */
+.aurora-text-warm {
+  background: linear-gradient(135deg, #fbbf24, #d946ef, #8b5cf6);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.aurora-text-cool {
+  background: linear-gradient(135deg, #22d3ee, #3b82f6, #8b5cf6);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* ----- Model avatar (generated from id hash) ----- */
+.model-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: rgba(255, 255, 255, 0.85);
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  text-transform: uppercase;
+}
+
+.model-avatar.g { background: linear-gradient(135deg, #4285F4, #34A853); }
+.model-avatar.o { background: linear-gradient(135deg, #10a37f, #19c37d); }
+.model-avatar.c { background: linear-gradient(135deg, #d97706, #f59e0b); }
+.model-avatar.x { background: linear-gradient(135deg, #6b7280, #111827); }
+.model-avatar.m { background: linear-gradient(135deg, #ff7000, #ff3d00); }
+.model-avatar.w { background: linear-gradient(135deg, #8b5cf6, #ec4899); }
+.model-avatar.default { background: linear-gradient(135deg, #334155, #1e293b); }
+
+/* ----- Animated gradient border (premium accent) ----- */
+@keyframes gradient-rotate {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.gradient-border-animated {
+  position: relative;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.gradient-border-animated::before {
+  content: "";
+  position: absolute;
+  inset: -50%;
+  background: conic-gradient(
+    from 0deg,
+    rgba(34, 211, 238, 0.4),
+    rgba(139, 92, 246, 0.4),
+    rgba(217, 70, 239, 0.3),
+    rgba(20, 184, 166, 0.4),
+    rgba(34, 211, 238, 0.4)
+  );
+  animation: gradient-rotate 8s linear infinite;
+  z-index: -2;
+}
+
+.gradient-border-animated::after {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  border-radius: calc(var(--radius-lg) - 1px);
+  background: var(--bg-card-solid);
+  z-index: -1;
+}
+
+/* ----- Stat bar (inline mini bar chart) ----- */
+.stat-bar {
+  position: relative;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.stat-bar-fill {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  transform-origin: left;
+  animation: stat-bar-fill-in 0.9s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes stat-bar-fill-in {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+/* ----- Floating label input ----- */
+.field {
+  position: relative;
+}
+
+.field input {
+  width: 100%;
+  background: var(--bg-input);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-md);
+  padding: 0.9rem 1rem 0.45rem;
+  font-size: 0.875rem;
+  color: rgba(255, 255, 255, 0.9);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.field label {
+  position: absolute;
+  top: 0.75rem;
+  left: 1rem;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  pointer-events: none;
+  transition: all 0.18s ease;
+  background: transparent;
+}
+
+.field input:focus + label,
+.field input:not(:placeholder-shown) + label {
+  top: 0.2rem;
+  font-size: 0.625rem;
+  color: rgba(167, 139, 250, 0.85);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+/* ----- Auth split layout ----- */
+.auth-shell {
+  display: grid;
+  grid-template-columns: 1fr;
+  min-height: 100vh;
+}
+
+@media (min-width: 1024px) {
+  .auth-shell {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+/* ----- Feature bullet (for marketing side) ----- */
+.feature-bullet {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.625rem 0;
+}
+
+.feature-bullet-icon {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.12), rgba(139, 92, 246, 0.15));
+  border: 1px solid rgba(139, 92, 246, 0.18);
+  color: rgba(200, 200, 240, 0.9);
+}
+
+/* ----- Marquee / subtle scroll ----- */
+@keyframes marquee {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.marquee {
+  display: flex;
+  gap: 2rem;
+  animation: marquee 22s linear infinite;
+  white-space: nowrap;
+}
+
+.marquee-container {
+  overflow: hidden;
+  mask-image: linear-gradient(90deg, transparent, black 10%, black 90%, transparent);
+  -webkit-mask-image: linear-gradient(90deg, transparent, black 10%, black 90%, transparent);
+}
+
+/* ----- Number reveal (for big hero stats) ----- */
+@keyframes number-reveal {
+  from { opacity: 0; transform: translateY(6px); letter-spacing: 0.02em; }
+  to { opacity: 1; transform: translateY(0); letter-spacing: normal; }
+}
+
+.number-reveal {
+  animation: number-reveal 0.6s cubic-bezier(0.2, 0, 0.2, 1);
+}
+
+/* ----- Empty state icon halo ----- */
+.empty-halo {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border-radius: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.12), rgba(34, 211, 238, 0.08));
+  border: 1px solid rgba(139, 92, 246, 0.15);
+  overflow: hidden;
+}
+
+.empty-halo::before {
+  content: "";
+  position: absolute;
+  inset: -50%;
+  background: conic-gradient(from 0deg, rgba(139, 92, 246, 0.3), transparent 30%);
+  animation: gradient-rotate 4s linear infinite;
+  opacity: 0.4;
+}
+
+.empty-halo > * {
+  position: relative;
+  z-index: 1;
+}
