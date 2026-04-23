@@ -24,7 +24,8 @@ export async function GET(req: NextRequest) {
     .limit(200);
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("Failed to list conversations:", error.message);
+    return NextResponse.json({ error: "Failed to load conversations" }, { status: 500 });
   }
 
   return NextResponse.json({ conversations: data });
@@ -74,7 +75,8 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("Failed to create conversation:", error.message);
+    return NextResponse.json({ error: "Failed to create conversation" }, { status: 500 });
   }
 
   return NextResponse.json({ conversation: data });

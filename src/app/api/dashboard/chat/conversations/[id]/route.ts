@@ -133,7 +133,8 @@ export async function PATCH(req: NextRequest, { params }: Ctx) {
     .single();
 
   if (error || !data) {
-    return NextResponse.json({ error: error?.message ?? "not found" }, { status: 404 });
+    if (error) console.error("Failed to update conversation:", error.message);
+    return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
   return NextResponse.json({ conversation: data });
@@ -157,7 +158,8 @@ export async function DELETE(_req: NextRequest, { params }: Ctx) {
     .eq("user_id", user.id);
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("Failed to delete conversation:", error.message);
+    return NextResponse.json({ error: "Failed to delete conversation" }, { status: 500 });
   }
 
   return NextResponse.json({ ok: true });

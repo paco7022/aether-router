@@ -14,7 +14,7 @@ function escapeLike(input: string): string {
 async function requireAdmin(req: NextRequest) {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user || !isAdmin(user.email)) {
+  if (!user || !isAdmin(user.email, user.id)) {
     return null;
   }
   return user;

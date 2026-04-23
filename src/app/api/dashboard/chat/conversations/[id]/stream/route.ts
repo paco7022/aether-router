@@ -172,7 +172,8 @@ export async function POST(req: NextRequest, { params }: Ctx) {
     .single();
 
   if (userMsgErr || !userMsgRow) {
-    return NextResponse.json({ error: userMsgErr?.message ?? "failed to save message" }, { status: 500 });
+    if (userMsgErr) console.error("Failed to save user message:", userMsgErr.message);
+    return NextResponse.json({ error: "Failed to save message" }, { status: 500 });
   }
 
   // 6. Build forwarded messages. For each historical message, if it contains
@@ -191,10 +192,16 @@ export async function POST(req: NextRequest, { params }: Ctx) {
   forwardMessages.push({ role: "user", content: newInlined });
 
   // 7. Forward to /v1/chat/completions with session cookie (same billing path)
-  // Use an env-configured base URL if set; otherwise fall back to the
-  // request's derived origin. Do NOT derive origin from the Host header in
-  // untrusted deployments — in that case set NEXT_PUBLIC_SITE_URL.
-  const origin = process.env.NEXT_PUBLIC_SITE_URL || req.nextUrl.origin;
+  // Use an env-configured base URL if set; reject if not configured in
+  // production to prevent SSRF via Host header manipulation.
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
+  if (!siteUrl && process.env.NODE_ENV === "production") {
+    return NextResponse.json(
+      { error: "Server misconfiguration: NEXT_PUBLIC_SITE_URL is required" },
+      { status: 500 }
+    );
+  }
+  const origin = siteUrl || req.nextUrl.origin;
   const cookieHeader = req.headers.get("cookie") ?? "";
 
   let upstream: Response;
@@ -220,9 +227,9 @@ export async function POST(req: NextRequest, { params }: Ctx) {
       role: "assistant",
       content: { type: "text", text: "" },
       model_id: conv.model_id,
-      error: (e as Error).message,
+      error: "Failed to connect to chat service",
     });
-    return NextResponse.json({ error: (e as Error).message }, { status: 502 });
+    return NextResponse.json({ error: "Failed to connect to chat service" }, { status: 502 });
   }
 
   if (!upstream.ok) {

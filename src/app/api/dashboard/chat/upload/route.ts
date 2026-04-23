@@ -87,6 +87,7 @@ export async function POST(req: NextRequest) {
     .from("chat_conversations")
     .select("id")
     .eq("id", conversationId)
+    .eq("user_id", user.id)
     .single();
   if (!conv) {
     return NextResponse.json({ error: "conversation not found" }, { status: 404 });
@@ -117,7 +118,8 @@ export async function POST(req: NextRequest) {
     });
 
   if (upErr) {
-    return NextResponse.json({ error: upErr.message }, { status: 500 });
+    console.error("Upload failed:", upErr.message);
+    return NextResponse.json({ error: "Upload failed" }, { status: 500 });
   }
 
   // Return a short-lived signed URL for the client to preview immediately.

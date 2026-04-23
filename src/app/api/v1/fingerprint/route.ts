@@ -64,7 +64,8 @@ export async function POST(req: NextRequest) {
   );
 
   if (upsertErr) {
-    return NextResponse.json({ error: upsertErr.message }, { status: 500 });
+    console.error("Fingerprint upsert failed:", upsertErr.message);
+    return NextResponse.json({ error: "Failed to save fingerprint" }, { status: 500 });
   }
 
   return NextResponse.json({ banned: false });
