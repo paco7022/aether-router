@@ -1017,6 +1017,7 @@ export async function POST(req: NextRequest) {
       duration_ms: durationMs,
       premium_cost: premiumCost,
       source: keyInfo.source,
+      estimated_prompt_tokens: estimatedPrompt,
     });
     if (usageLogError) {
       console.error("Failed to write usage log:", usageLogError.message);
@@ -1286,6 +1287,7 @@ async function handleStreamingResponse(
       duration_ms: durationMs,
       premium_cost: streamPremiumCost,
       source: keyInfo.source,
+      estimated_prompt_tokens: estimatedPromptTokens,
     });
     if (usageLogError) {
       console.error("Failed to write streaming usage log:", usageLogError.message);
