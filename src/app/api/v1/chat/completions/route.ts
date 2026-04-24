@@ -311,7 +311,8 @@ export async function POST(req: NextRequest) {
     model.provider === "trolllm" ||
     model.provider === "antigravity" ||
     model.provider === "webproxy" ||
-    model.provider === "hapuppy";
+    model.provider === "hapuppy" ||
+    model.provider === "gameron";
 
   // 5.4. Active free event lookup (admin-created pools that make a model
   // prefix free for a set of plans, with their own per-user limits).
@@ -475,7 +476,7 @@ export async function POST(req: NextRequest) {
     // concurrent requests can't all pass the check before the first log is
     // written. Defaults: 60s rate-limit for premium providers, no rate-limit
     // otherwise; daily limit from key config (0 = unlimited).
-    const isPremium = model.provider === "trolllm" || model.provider === "antigravity" || model.provider === "webproxy" || model.provider === "hapuppy";
+    const isPremium = model.provider === "trolllm" || model.provider === "antigravity" || model.provider === "webproxy" || model.provider === "hapuppy" || model.provider === "gameron";
     const rlSeconds = keyInfo.rateLimitSeconds ?? (isPremium ? 60 : 0);
     const dailyReqLimit = keyInfo.dailyRequestLimit ?? 0;
 
@@ -510,7 +511,7 @@ export async function POST(req: NextRequest) {
       customKeyRequestReserved = true;
     }
   } else if (!activeEvent) {
-    // 5.5b-normal. Premium plan limits (requests/day + context cap) — applies to trolllm, antigravity, webproxy, hapuppy.
+    // 5.5b-normal. Premium plan limits (requests/day + context cap) — applies to trolllm, antigravity, webproxy, hapuppy, gameron.
     // Skipped entirely when an active event covers this model for the user's plan.
     if (isPremiumProvider) {
       // Block an/ models for free tier — they only get t/ and w/ models
@@ -1148,7 +1149,7 @@ async function handleStreamingResponse(
       { read: cacheReadTokens, write: cacheWriteTokens }
     );
 
-    const isPremiumModel = model.provider === "trolllm" || model.provider === "antigravity" || model.provider === "webproxy" || model.provider === "hapuppy";
+    const isPremiumModel = model.provider === "trolllm" || model.provider === "antigravity" || model.provider === "webproxy" || model.provider === "hapuppy" || model.provider === "gameron";
     const finalCredits = isFreePool ? 0 : isPremiumModel ? 1 : Math.max(credits, 1);
 
     let wasCharged = isFreePool;
@@ -1270,7 +1271,7 @@ async function handleStreamingResponse(
     }
 
     const durationMs = Date.now() - startTime;
-    const isPremium = model.provider === "trolllm" || model.provider === "antigravity" || model.provider === "webproxy" || model.provider === "hapuppy";
+    const isPremium = model.provider === "trolllm" || model.provider === "antigravity" || model.provider === "webproxy" || model.provider === "hapuppy" || model.provider === "gameron";
     const streamPremiumCost = isPremium && !activeEventId ? Number(model.premium_request_cost ?? 1) : 0;
     const { error: usageLogError } = await supabase.from("usage_logs").insert({
       user_id: keyInfo.userId,

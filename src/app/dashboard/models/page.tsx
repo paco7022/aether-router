@@ -76,7 +76,9 @@ export default async function ModelsPage() {
             <span className="font-semibold text-violet-200/95">Premium-request models</span>{" "}
             (<code className="font-mono text-[11px] px-1 py-0.5 rounded bg-white/[0.04]">t/</code>,{" "}
             <code className="font-mono text-[11px] px-1 py-0.5 rounded bg-white/[0.04]">an/</code>,{" "}
-            <code className="font-mono text-[11px] px-1 py-0.5 rounded bg-white/[0.04]">w/</code>)
+            <code className="font-mono text-[11px] px-1 py-0.5 rounded bg-white/[0.04]">w/</code>,{" "}
+            <code className="font-mono text-[11px] px-1 py-0.5 rounded bg-white/[0.04]">h/</code>,{" "}
+            <code className="font-mono text-[11px] px-1 py-0.5 rounded bg-white/[0.04]">gm/</code>)
             are flat-rate: <span className="font-semibold">1 credit per request</span>, plus they consume the
             number of premium requests shown in the &quot;Premium Cost&quot; column from your daily premium pool.
           </p>
@@ -102,7 +104,8 @@ export default async function ModelsPage() {
                   model.provider === "trolllm" ||
                   model.provider === "antigravity" ||
                   model.provider === "webproxy" ||
-                  model.provider === "hapuppy";
+                  model.provider === "hapuppy" ||
+                  model.provider === "gameron";
                 const creditsInput = pricePerMTokens(model.cost_per_m_input, model.margin);
                 const creditsOutput = pricePerMTokens(model.cost_per_m_output, model.margin);
                 const priceInput = creditsToUsd(creditsInput);

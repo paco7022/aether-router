@@ -124,7 +124,7 @@ interface Stats {
   topUsersToday: { user_id: string; email: string; requests: number }[];
 }
 
-const ALL_PROVIDERS = ["trolllm", "airforce", "gemini-cli", "antigravity", "webproxy", "hapuppy"];
+const ALL_PROVIDERS = ["trolllm", "airforce", "gemini-cli", "antigravity", "webproxy", "hapuppy", "gameron"];
 
 async function api(method: "GET" | "POST", params?: Record<string, string>, body?: unknown) {
   if (method === "GET") {

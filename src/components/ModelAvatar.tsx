@@ -3,6 +3,7 @@ function getPrefix(modelId: string): string {
   if (lower.startsWith("g/") || lower.startsWith("gemini")) return "g";
   if (lower.startsWith("o/") || lower.startsWith("openai") || lower.startsWith("gpt")) return "o";
   if (lower.startsWith("an/") || lower.startsWith("c/") || lower.startsWith("claude") || lower.startsWith("anthropic")) return "c";
+  if (lower.startsWith("gm/")) return "c";
   if (lower.startsWith("x/") || lower.startsWith("grok") || lower.startsWith("xai")) return "x";
   if (lower.startsWith("m/") || lower.startsWith("mistral")) return "m";
   if (lower.startsWith("w/")) return "w";
