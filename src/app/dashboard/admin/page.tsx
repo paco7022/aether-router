@@ -890,42 +890,42 @@ export default function AdminPage() {
               <div className="space-y-1.5">
                 <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Key Name</label>
                 <input type="text" value={ckForm.name} onChange={(e) => setCkForm((f) => ({ ...f, name: e.target.value }))}
-                  placeholder="e.g. Evento Discord Mayo"
+                  placeholder="e.g. Discord Event May"
                   className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-white/90 placeholder-[var(--text-dim)]" />
               </div>
               <div className="space-y-1.5">
-                <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Credits (pool propio)</label>
+                <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Credits (own pool)</label>
                 <input type="number" value={ckForm.custom_credits} onChange={(e) => setCkForm((f) => ({ ...f, custom_credits: e.target.value }))}
-                  placeholder="e.g. 50000 (vacio = usa los del user)"
+                  placeholder="e.g. 50000 (empty = inherit from user)"
                   className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-white/90 placeholder-[var(--text-dim)]" />
               </div>
               <div className="space-y-1.5">
                 <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Max Context (tokens)</label>
                 <input type="number" value={ckForm.max_context} onChange={(e) => setCkForm((f) => ({ ...f, max_context: e.target.value }))}
-                  placeholder="e.g. 32768 (vacio = sin limite)"
+                  placeholder="e.g. 32768 (empty = no limit)"
                   className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-white/90 placeholder-[var(--text-dim)]" />
               </div>
               <div className="space-y-1.5">
                 <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Daily Request Limit</label>
                 <input type="number" value={ckForm.daily_request_limit} onChange={(e) => setCkForm((f) => ({ ...f, daily_request_limit: e.target.value }))}
-                  placeholder="e.g. 50 (vacio = sin limite diario)"
+                  placeholder="e.g. 50 (empty = no daily limit)"
                   className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-white/90 placeholder-[var(--text-dim)]" />
               </div>
               <div className="space-y-1.5">
-                <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Rate Limit (segundos entre requests)</label>
+                <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Rate Limit (seconds between requests)</label>
                 <input type="number" value={ckForm.rate_limit_seconds} onChange={(e) => setCkForm((f) => ({ ...f, rate_limit_seconds: e.target.value }))}
                   placeholder="e.g. 30 (default 60 premium, 0 free)"
                   className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-white/90 placeholder-[var(--text-dim)]" />
               </div>
               <div className="space-y-1.5">
-                <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Expira</label>
+                <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Expires</label>
                 <input type="datetime-local" value={ckForm.expires_at} onChange={(e) => setCkForm((f) => ({ ...f, expires_at: e.target.value }))}
                   className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-white/90" />
               </div>
               <div className="space-y-1.5">
-                <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Nota</label>
+                <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Note</label>
                 <input type="text" value={ckForm.note} onChange={(e) => setCkForm((f) => ({ ...f, note: e.target.value }))}
-                  placeholder="e.g. Giveaway Twitter abril"
+                  placeholder="e.g. Twitter giveaway April"
                   className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-white/90 placeholder-[var(--text-dim)]" />
               </div>
             </div>
@@ -933,7 +933,7 @@ export default function AdminPage() {
             {/* Provider toggles */}
             <div className="mt-4 space-y-1.5">
               <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">
-                Providers permitidos {ckForm.allowed_providers.length === 0 && <span className="text-cyan-300/50">(vacio = todos)</span>}
+                Allowed providers {ckForm.allowed_providers.length === 0 && <span className="text-cyan-300/50">(empty = all)</span>}
               </label>
               <div className="flex flex-wrap gap-2">
                 {ALL_PROVIDERS.map((p) => (
@@ -961,7 +961,7 @@ export default function AdminPage() {
 
             <button onClick={handleCreateCustomKey}
               className="mt-5 btn-aurora text-sm font-medium px-5 py-2.5 rounded-xl">
-              Crear Key
+              Create Key
             </button>
           </div>
 
@@ -1045,11 +1045,11 @@ export default function AdminPage() {
           <div className="glass-card shimmer-line p-5">
             <h3 className="font-semibold text-sm text-white/85 mb-1">Create Free Event</h3>
             <p className="text-xs text-[var(--text-muted)] mb-4">
-              Abre temporalmente un pool gratis para un prefix de modelo. Los usuarios del plan seleccionado lo usan sin consumir credits hasta que el pool de tokens se agote.
+              Temporarily opens a free pool for a model prefix. Users on the selected plans can use it without spending credits until the token pool runs out.
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Nombre *</label>
+                <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Name *</label>
                 <input type="text" value={evForm.name} onChange={(e) => setEvForm((f) => ({ ...f, name: e.target.value }))}
                   placeholder="e.g. Gameron Free Night"
                   className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-white/90 placeholder-[var(--text-dim)]" />
@@ -1057,35 +1057,35 @@ export default function AdminPage() {
               <div className="space-y-1.5">
                 <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Model Prefix *</label>
                 <input type="text" value={evForm.model_prefix} onChange={(e) => setEvForm((f) => ({ ...f, model_prefix: e.target.value }))}
-                  placeholder="e.g. w/, c/, an/, na/ o model-id exacto"
+                  placeholder="e.g. w/, c/, an/, na/ or exact model-id"
                   className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-white/90 placeholder-[var(--text-dim)] font-mono" />
               </div>
               <div className="space-y-1.5">
-                <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Duración (minutos)</label>
+                <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Duration (minutes)</label>
                 <input type="number" value={evForm.duration_minutes} onChange={(e) => setEvForm((f) => ({ ...f, duration_minutes: e.target.value }))}
                   placeholder="120 = 2h"
                   className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-white/90 placeholder-[var(--text-dim)]" />
               </div>
               <div className="space-y-1.5">
-                <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Token Pool Global</label>
+                <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Global Token Pool</label>
                 <input type="number" value={evForm.token_pool_limit} onChange={(e) => setEvForm((f) => ({ ...f, token_pool_limit: e.target.value }))}
                   placeholder="5000000 = 5M tokens"
                   className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-white/90 placeholder-[var(--text-dim)]" />
               </div>
               <div className="space-y-1.5">
-                <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Msgs por usuario (0 = ilimitado)</label>
+                <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Messages per user (0 = unlimited)</label>
                 <input type="number" value={evForm.per_user_msg_limit} onChange={(e) => setEvForm((f) => ({ ...f, per_user_msg_limit: e.target.value }))}
                   placeholder="20"
                   className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-white/90 placeholder-[var(--text-dim)]" />
               </div>
               <div className="space-y-1.5">
-                <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Max Context (0 = sin límite)</label>
+                <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Max Context (0 = no limit)</label>
                 <input type="number" value={evForm.max_context} onChange={(e) => setEvForm((f) => ({ ...f, max_context: e.target.value }))}
                   placeholder="32768"
                   className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-white/90 placeholder-[var(--text-dim)]" />
               </div>
               <div className="space-y-1.5">
-                <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Rate limit (seg, 0 = off)</label>
+                <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Rate limit (sec, 0 = off)</label>
                 <input type="number" value={evForm.rate_limit_seconds} onChange={(e) => setEvForm((f) => ({ ...f, rate_limit_seconds: e.target.value }))}
                   placeholder="120 = 1 req / 2 min"
                   className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-white/90 placeholder-[var(--text-dim)]" />
@@ -1095,7 +1095,7 @@ export default function AdminPage() {
             {/* Target plans */}
             <div className="mt-4 space-y-1.5">
               <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">
-                Planes con acceso {evForm.target_plan_ids.length === 0 && <span className="text-cyan-300/50">(vacío = todos)</span>}
+                Plans with access {evForm.target_plan_ids.length === 0 && <span className="text-cyan-300/50">(empty = all)</span>}
               </label>
               <div className="flex flex-wrap gap-2">
                 {ALL_PLANS.map((p) => (
@@ -1123,7 +1123,7 @@ export default function AdminPage() {
 
             <button onClick={handleCreateEvent}
               className="mt-5 btn-aurora text-sm font-medium px-5 py-2.5 rounded-xl">
-              Crear Evento
+              Create Event
             </button>
           </div>
 

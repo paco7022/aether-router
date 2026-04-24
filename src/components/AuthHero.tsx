@@ -9,8 +9,8 @@ const providers = [
 
 const features = [
   {
-    title: "Una sola API, todos los modelos",
-    desc: "GPT, Claude, Gemini, Grok, Mistral y más con el mismo endpoint compatible con OpenAI.",
+    title: "One API, every model",
+    desc: "GPT, Claude, Gemini, Grok, Mistral and more behind the same OpenAI-compatible endpoint.",
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <polyline points="16 18 22 12 16 6" />
@@ -19,8 +19,8 @@ const features = [
     ),
   },
   {
-    title: "Créditos que no caducan",
-    desc: "Compra una vez y úsalos cuando quieras. También hay créditos diarios gratuitos con cada plan.",
+    title: "Credits that never expire",
+    desc: "Buy once, use whenever. Every plan also ships with free daily credits.",
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <line x1="12" y1="1" x2="12" y2="23" />
@@ -29,8 +29,8 @@ const features = [
     ),
   },
   {
-    title: "Analytics en tiempo real",
-    desc: "Tokens, latencia y costo por modelo con gráficas, historial y playground integrado.",
+    title: "Real-time analytics",
+    desc: "Tokens, latency and cost per model with charts, history and an integrated playground.",
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M3 3v18h18" />
@@ -71,15 +71,15 @@ export function AuthHero() {
             }}
           >
             <span className="live-dot" />
-            <span className="text-[10px] text-emerald-300/90 uppercase tracking-[0.15em] font-medium">Proxy operativo</span>
+            <span className="text-[10px] text-emerald-300/90 uppercase tracking-[0.15em] font-medium">Proxy operational</span>
           </div>
 
           <h2 className="text-4xl xl:text-5xl font-bold tracking-tight text-white/95 leading-[1.05]">
-            Un <span className="aurora-text">router</span> para <br /> todos tus modelos.
+            One <span className="aurora-text">router</span> for <br /> all your models.
           </h2>
           <p className="mt-5 text-[15px] text-[var(--text-muted)] leading-relaxed">
-            Accede a los mejores modelos de AI con una API unificada, pagos en créditos que no caducan y
-            herramientas de observabilidad integradas.
+            Access the best AI models through a unified API, credit-based pricing that never expires,
+            and built-in observability tools.
           </p>
 
           <div className="mt-8 space-y-1">
@@ -99,7 +99,7 @@ export function AuthHero() {
       {/* Provider marquee */}
       <div className="relative z-10 mt-10">
         <p className="text-[10px] text-[var(--text-dim)] uppercase tracking-[0.2em] mb-3">
-          Providers soportados
+          Supported providers
         </p>
         <div className="marquee-container">
           <div className="marquee">

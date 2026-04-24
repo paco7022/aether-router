@@ -48,7 +48,7 @@ export default function LoginPage() {
       const fingerprint = fpRef.current || (await getFingerprint().catch(() => null));
       if (!fingerprint) {
         await supabase.auth.signOut();
-        setError("No pudimos verificar tu dispositivo. Intenta de nuevo.");
+        setError("We couldn't verify your device. Please try again.");
         setLoading(false);
         return;
       }
@@ -64,7 +64,7 @@ export default function LoginPage() {
         const reason =
           (payload as { reason?: string; error?: string }).reason ||
           (payload as { reason?: string; error?: string }).error ||
-          "Este dispositivo está bloqueado.";
+          "This device is blocked.";
         await supabase.auth.signOut();
         setError(reason);
         setLoading(false);
@@ -105,14 +105,14 @@ export default function LoginPage() {
           </div>
 
           <div className="mb-6 hidden lg:block">
-            <p className="text-[10px] text-[var(--text-dim)] uppercase tracking-[0.2em] mb-2">Bienvenido de vuelta</p>
-            <h2 className="text-3xl font-bold text-white/95 tracking-tight">Inicia sesión</h2>
+            <p className="text-[10px] text-[var(--text-dim)] uppercase tracking-[0.2em] mb-2">Welcome back</p>
+            <h2 className="text-3xl font-bold text-white/95 tracking-tight">Sign in</h2>
             <p className="text-sm text-[var(--text-muted)] mt-2">
-              Entra a tu cuenta para continuar.
+              Sign in to your account to continue.
             </p>
           </div>
           <div className="mb-6 lg:hidden text-center">
-            <h2 className="text-xl font-semibold text-white/90">Inicia sesión</h2>
+            <h2 className="text-xl font-semibold text-white/90">Sign in</h2>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-4">
@@ -138,7 +138,7 @@ export default function LoginPage() {
                 <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
                 <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
               </svg>
-              Continuar con Google
+              Continue with Google
             </button>
 
             <div className="relative py-1">
@@ -146,7 +146,7 @@ export default function LoginPage() {
                 <div className="w-full border-t border-white/[0.06]" />
               </div>
               <div className="relative flex justify-center text-xs">
-                <span className="px-3 text-[var(--text-dim)]" style={{ background: "var(--bg)" }}>o con email</span>
+                <span className="px-3 text-[var(--text-dim)]" style={{ background: "var(--bg)" }}>or with email</span>
               </div>
             </div>
 
@@ -165,13 +165,13 @@ export default function LoginPage() {
 
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-[0.15em]">Contraseña</label>
+                <label className="block text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-[0.15em]">Password</label>
                 <button
                   type="button"
                   onClick={() => setShowPassword((v) => !v)}
                   className="text-[10px] text-[var(--text-dim)] hover:text-[var(--text-muted)] transition-colors uppercase tracking-wider"
                 >
-                  {showPassword ? "Ocultar" : "Mostrar"}
+                  {showPassword ? "Hide" : "Show"}
                 </button>
               </div>
               <input
@@ -195,11 +195,11 @@ export default function LoginPage() {
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="animate-spin">
                     <path d="M21 12a9 9 0 1 1-6.219-8.56" />
                   </svg>
-                  Entrando…
+                  Signing in…
                 </>
               ) : (
                 <>
-                  Entrar
+                  Sign in
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <line x1="5" y1="12" x2="19" y2="12" />
                     <polyline points="12 5 19 12 12 19" />
@@ -209,19 +209,19 @@ export default function LoginPage() {
             </button>
 
             <p className="text-center text-sm text-[var(--text-muted)] pt-2">
-              ¿No tienes cuenta?{" "}
+              Don&apos;t have an account?{" "}
               <Link href="/register" className="text-violet-400 hover:text-violet-300 transition-colors font-medium">
-                Crea una
+                Create one
               </Link>
             </p>
           </form>
 
           <p className="text-center text-[11px] text-[var(--text-dim)] mt-8 leading-relaxed">
-            Aether Router es un proxy de modelos. No controlamos su disponibilidad ni estabilidad.
+            Aether Router is a model proxy. We don&apos;t control upstream availability or stability.
             <br />
-            Al iniciar sesión aceptas nuestras{" "}
+            By signing in you agree to our{" "}
             <Link href="/policies" className="text-violet-400/80 hover:text-violet-300 transition-colors underline">
-              políticas
+              policies
             </Link>
             .
           </p>

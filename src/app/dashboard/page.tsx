@@ -125,7 +125,7 @@ export default async function DashboardPage() {
         <StatCard
           label="Requests · 7d"
           value={requests7d}
-          subtitle={`${requestsToday} hoy`}
+          subtitle={`${requestsToday} today`}
           tone="cyan"
           sparkline={requestsSpark}
           trend={{ value: trendPct, positive: trendPct >= 0 }}
@@ -152,7 +152,7 @@ export default async function DashboardPage() {
         <StatCard
           label="API Keys"
           value={activeKeys?.length || 0}
-          subtitle="activas"
+          subtitle="active"
           tone="teal"
           icon={
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -163,7 +163,7 @@ export default async function DashboardPage() {
         <StatCard
           label="Success rate"
           value={`${(successRate * 100).toFixed(1)}%`}
-          subtitle={successRate >= 0.95 ? "excelente" : successRate >= 0.85 ? "estable" : "revisar errores"}
+          subtitle={successRate >= 0.95 ? "excellent" : successRate >= 0.85 ? "steady" : "check errors"}
           tone={successRate >= 0.95 ? "emerald" : successRate >= 0.85 ? "cyan" : "amber"}
           icon={
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -180,8 +180,8 @@ export default async function DashboardPage() {
           actions={[
             {
               href: "/dashboard/api-keys",
-              label: "Crear API key",
-              hint: "Genera credenciales",
+              label: "Create API key",
+              hint: "Generate credentials",
               tone: "violet",
               icon: (
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(167, 139, 250, 0.95)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -191,8 +191,8 @@ export default async function DashboardPage() {
             },
             {
               href: "/dashboard/chat",
-              label: "Probar en Chat",
-              hint: "Playground integrado",
+              label: "Try in Chat",
+              hint: "Integrated playground",
               tone: "cyan",
               icon: (
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(103, 232, 249, 0.95)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -202,8 +202,8 @@ export default async function DashboardPage() {
             },
             {
               href: "/dashboard/billing",
-              label: "Comprar créditos",
-              hint: "Recarga permanente",
+              label: "Buy credits",
+              hint: "Top up your balance",
               tone: "teal",
               icon: (
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(94, 234, 212, 0.95)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -214,8 +214,8 @@ export default async function DashboardPage() {
             },
             {
               href: "/dashboard/docs",
-              label: "Leer docs",
-              hint: "Endpoints y ejemplos",
+              label: "Read docs",
+              hint: "Endpoints and examples",
               tone: "emerald",
               icon: (
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(110, 231, 183, 0.95)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -235,13 +235,13 @@ export default async function DashboardPage() {
           <div className="p-5 border-b border-white/[0.04] flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="live-dot" />
-              <h3 className="font-semibold text-white/90">Actividad reciente</h3>
+              <h3 className="font-semibold text-white/90">Recent activity</h3>
             </div>
             <Link
               href="/dashboard/usage"
               className="text-[11px] text-[var(--text-muted)] hover:text-[var(--text)] transition-colors flex items-center gap-1"
             >
-              Ver todo
+              View all
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="9 18 15 12 9 6" />
               </svg>
@@ -292,12 +292,12 @@ export default async function DashboardPage() {
                   <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
                 </svg>
               </div>
-              <p className="text-sm font-medium text-white/70 mb-1">Aún no hay actividad</p>
+              <p className="text-sm font-medium text-white/70 mb-1">No activity yet</p>
               <p className="text-xs text-[var(--text-dim)] max-w-xs mx-auto mb-4">
-                Crea una API key y empieza a hacer requests para ver tu historial aquí.
+                Create an API key and start making requests to see your history here.
               </p>
               <Link href="/dashboard/api-keys" className="inline-flex items-center gap-2 btn-aurora px-4 py-2 text-xs font-medium">
-                Crear API key
+                Create API key
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="9 18 15 12 9 6" />
                 </svg>
@@ -309,8 +309,8 @@ export default async function DashboardPage() {
         {/* Usage pulse */}
         <div className="glass-card shimmer-line p-5">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold text-white/90">Pulso · 7 días</h3>
-            <span className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">créditos/día</span>
+            <h3 className="font-semibold text-white/90">Pulse · 7 days</h3>
+            <span className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">credits/day</span>
           </div>
 
           <div className="space-y-3">
@@ -319,14 +319,14 @@ export default async function DashboardPage() {
               const pct = (d.credits / max) * 100;
               const date = new Date(sevenDaysAgo);
               date.setUTCDate(date.getUTCDate() + i);
-              const dayLabel = date.toLocaleDateString("es", { weekday: "short" });
+              const dayLabel = date.toLocaleDateString("en", { weekday: "short" });
               const isToday = i === 6;
               return (
                 <div key={i}>
                   <div className="flex items-center justify-between mb-1">
                     <span className={`text-[11px] ${isToday ? "text-white font-medium" : "text-[var(--text-muted)]"} capitalize`}>
                       {dayLabel}
-                      {isToday && <span className="ml-1.5 text-[9px] text-cyan-300/80 uppercase tracking-wider">hoy</span>}
+                      {isToday && <span className="ml-1.5 text-[9px] text-cyan-300/80 uppercase tracking-wider">today</span>}
                     </span>
                     <span className="text-[11px] text-white/70 font-mono">{d.credits.toLocaleString()}</span>
                   </div>
@@ -366,8 +366,8 @@ export default async function DashboardPage() {
 
       {/* Disclaimer */}
       <p className="text-xs text-[var(--text-dim)] mt-6 leading-relaxed">
-        Aether Router es un servicio proxy. No controlamos la disponibilidad, uptime ni calidad de salida de los modelos.
-        El precio incluye un margen del 55% sobre el costo del proveedor para mantener el servicio.
+        Aether Router is a proxy service. We don&apos;t control upstream availability, uptime, or output quality.
+        Prices include a 55% margin over provider cost to keep the service running.
       </p>
     </div>
   );

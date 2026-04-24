@@ -223,7 +223,7 @@ export function Sidebar({
             <span className="inline-flex items-center gap-1.5 text-[10px]">
               <span className="w-1.5 h-1.5 rounded-full bg-teal-400" />
               <span className="text-teal-400/90 font-mono">{user.dailyCredits.toLocaleString()}</span>
-              <span className="text-[var(--text-dim)]">diario</span>
+              <span className="text-[var(--text-dim)]">daily</span>
             </span>
             <span className="inline-flex items-center gap-1.5 text-[10px]">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />

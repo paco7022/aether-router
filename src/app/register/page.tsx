@@ -53,14 +53,14 @@ export default function RegisterPage() {
     setError("");
 
     if (password.length < 6) {
-      setError("La contraseña debe tener al menos 6 caracteres.");
+      setError("Password must be at least 6 characters.");
       setLoading(false);
       return;
     }
 
     const banCheck = await checkFingerprintBan();
     if (banCheck?.banned) {
-      setError(banCheck.reason || "Este dispositivo está bloqueado.");
+      setError(banCheck.reason || "This device is blocked.");
       setLoading(false);
       return;
     }
@@ -80,7 +80,7 @@ export default function RegisterPage() {
       const fingerprint = fpRef.current || (await getFingerprint().catch(() => null));
       if (!fingerprint) {
         await supabase.auth.signOut();
-        setError("No pudimos verificar tu dispositivo. Intenta de nuevo.");
+        setError("We couldn't verify your device. Please try again.");
         setLoading(false);
         return;
       }
@@ -96,7 +96,7 @@ export default function RegisterPage() {
         const reason =
           (payload as { reason?: string; error?: string }).reason ||
           (payload as { reason?: string; error?: string }).error ||
-          "Este dispositivo está bloqueado.";
+          "This device is blocked.";
         await supabase.auth.signOut();
         setError(reason);
         setLoading(false);
@@ -142,14 +142,14 @@ export default function RegisterPage() {
           </div>
 
           <div className="mb-6 hidden lg:block">
-            <p className="text-[10px] text-[var(--text-dim)] uppercase tracking-[0.2em] mb-2">Empieza gratis</p>
-            <h2 className="text-3xl font-bold text-white/95 tracking-tight">Crea tu cuenta</h2>
+            <p className="text-[10px] text-[var(--text-dim)] uppercase tracking-[0.2em] mb-2">Start for free</p>
+            <h2 className="text-3xl font-bold text-white/95 tracking-tight">Create your account</h2>
             <p className="text-sm text-[var(--text-muted)] mt-2">
-              Créditos diarios gratis al registrarte, sin tarjeta.
+              Free daily credits on signup. No card required.
             </p>
           </div>
           <div className="mb-6 lg:hidden text-center">
-            <h2 className="text-xl font-semibold text-white/90">Crea tu cuenta</h2>
+            <h2 className="text-xl font-semibold text-white/90">Create your account</h2>
           </div>
 
           {refCode && (
@@ -168,7 +168,7 @@ export default function RegisterPage() {
                 </svg>
               </div>
               <div className="min-w-0">
-                <p className="text-[11px] text-teal-300/80 uppercase tracking-wider font-medium">Invitación aplicada</p>
+                <p className="text-[11px] text-teal-300/80 uppercase tracking-wider font-medium">Invitation applied</p>
                 <p className="text-xs text-white/85 font-mono">{refCode}</p>
               </div>
             </div>
@@ -197,7 +197,7 @@ export default function RegisterPage() {
                 <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
                 <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
               </svg>
-              Continuar con Google
+              Continue with Google
             </button>
 
             <div className="relative py-1">
@@ -205,18 +205,18 @@ export default function RegisterPage() {
                 <div className="w-full border-t border-white/[0.06]" />
               </div>
               <div className="relative flex justify-center text-xs">
-                <span className="px-3 text-[var(--text-dim)]" style={{ background: "var(--bg)" }}>o con email</span>
+                <span className="px-3 text-[var(--text-dim)]" style={{ background: "var(--bg)" }}>or with email</span>
               </div>
             </div>
 
             <div>
-              <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1.5 uppercase tracking-[0.15em]">Nombre</label>
+              <label className="block text-[10px] font-medium text-[var(--text-muted)] mb-1.5 uppercase tracking-[0.15em]">Name</label>
               <input
                 type="text"
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
                 className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-xl px-4 py-3 text-sm text-white/90 placeholder-[var(--text-dim)] transition-all"
-                placeholder="Como quieres que te llamemos (opcional)"
+                placeholder="What should we call you? (optional)"
               />
             </div>
 
@@ -235,13 +235,13 @@ export default function RegisterPage() {
 
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-[0.15em]">Contraseña</label>
+                <label className="block text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-[0.15em]">Password</label>
                 <button
                   type="button"
                   onClick={() => setShowPassword((v) => !v)}
                   className="text-[10px] text-[var(--text-dim)] hover:text-[var(--text-muted)] transition-colors uppercase tracking-wider"
                 >
-                  {showPassword ? "Ocultar" : "Mostrar"}
+                  {showPassword ? "Hide" : "Show"}
                 </button>
               </div>
               <input
@@ -249,7 +249,7 @@ export default function RegisterPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-xl px-4 py-3 text-sm text-white/90 placeholder-[var(--text-dim)] transition-all"
-                placeholder="Mínimo 6 caracteres"
+                placeholder="At least 6 characters"
                 required
                 autoComplete="new-password"
               />
@@ -265,11 +265,11 @@ export default function RegisterPage() {
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="animate-spin">
                     <path d="M21 12a9 9 0 1 1-6.219-8.56" />
                   </svg>
-                  Creando cuenta…
+                  Creating account…
                 </>
               ) : (
                 <>
-                  Crear cuenta
+                  Create account
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <line x1="5" y1="12" x2="19" y2="12" />
                     <polyline points="12 5 19 12 12 19" />
@@ -279,19 +279,19 @@ export default function RegisterPage() {
             </button>
 
             <p className="text-center text-sm text-[var(--text-muted)] pt-2">
-              ¿Ya tienes cuenta?{" "}
+              Already have an account?{" "}
               <Link href="/login" className="text-violet-400 hover:text-violet-300 transition-colors font-medium">
-                Inicia sesión
+                Sign in
               </Link>
             </p>
           </form>
 
           <p className="text-center text-[11px] text-[var(--text-dim)] mt-8 leading-relaxed max-w-sm mx-auto">
-            Al crear una cuenta aceptas nuestras{" "}
+            By creating an account you agree to our{" "}
             <Link href="/policies" className="text-violet-400/80 hover:text-violet-300 transition-colors underline">
-              políticas
+              policies
             </Link>
-            , incluyendo las reglas de no-reembolso, no-compartir-keys y no-multicuenta.
+            , including the no-refund, no-key-sharing and no-multi-account rules.
           </p>
         </div>
       </div>
