@@ -1,7 +1,6 @@
 import { Suspense } from "react";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { PlanCard } from "@/components/PlanCard";
 import { BuyCreditsCard } from "@/components/BuyCreditsCard";
 import { ClaimDailyButton } from "@/components/ClaimDailyButton";
 import { GmRequestsCard } from "@/components/GmRequestsCard";
@@ -13,10 +12,12 @@ export default async function BillingPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
+  // Plan subscriptions are no longer offered — `plans` query intentionally
+  // dropped. Existing subscriptions keep flowing through the `subscription`
+  // query so the badge / claim button still work for current subscribers.
   const [
     { data: profile },
     { data: subscription },
-    { data: plans },
     { data: packages },
     { data: transactions },
   ] = await Promise.all([
@@ -27,7 +28,6 @@ export default async function BillingPage() {
       .eq("user_id", user!.id)
       .eq("status", "active")
       .single(),
-    supabase.from("plans").select("*").eq("is_active", true).order("sort_order"),
     supabase.from("credit_packages").select("*").eq("is_active", true).order("sort_order"),
     supabase
       .from("transactions")
@@ -59,7 +59,6 @@ export default async function BillingPage() {
   const permanentCredits = profile?.credits || 0;
   const dailyCredits = profile?.daily_credits || 0;
   const totalCredits = permanentCredits + dailyCredits;
-  const currentPlanId = profile?.plan_id || "free";
   const gmClaimedToday = profile?.gm_claimed_date === new Date().toISOString().split("T")[0];
   const today = new Date().toISOString().split("T")[0];
   const alreadyClaimed = subscription?.last_grant_date === today;
@@ -129,28 +128,7 @@ export default async function BillingPage() {
         />
       </div>
 
-      {/* Plans */}
-      <div className="mb-8">
-        <div className="flex items-center gap-2 mb-1">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--aurora-violet)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="opacity-60">
-            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-          </svg>
-          <h3 className="text-xl font-bold text-white/90">Plans</h3>
-        </div>
-        <p className="text-sm text-[var(--text-muted)] mb-5">
-          Subscribe monthly for daily temporary credits. They reset each day &mdash; use them or lose them.
-        </p>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {plans?.map((plan) => (
-            <PlanCard
-              key={plan.id}
-              plan={plan}
-              isCurrent={plan.id === currentPlanId}
-            />
-          ))}
-        </div>
-      </div>
+      {/* Plans section removed: subscriptions disabled, migrating to pay-as-you-go. */}
 
       {/* Buy Credits */}
       <div className="mb-8">
