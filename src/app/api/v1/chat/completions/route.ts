@@ -514,10 +514,12 @@ export async function POST(req: NextRequest) {
     // 5.5b-normal. Premium plan limits (requests/day + context cap) — applies to trolllm, antigravity, webproxy, hapuppy, gameron.
     // Skipped entirely when an active event covers this model for the user's plan.
     if (isPremiumProvider) {
-      // Block an/ models for free tier — they only get t/ and w/ models
-      if (model.provider === "antigravity" && keyInfo.planId === "free") {
+      // TEMP (2026-04-24): upstream premium providers are unstable. Block ALL
+      // premium models (t/, an/, w/, h/, gm/) for free tier until upstream
+      // recovers. Revert by restoring the antigravity-only check.
+      if (keyInfo.planId === "free") {
         return NextResponse.json(
-          { error: { message: "Oops, it seems that something has gone wrong, you do not have access to this model, try with t/ or w/ or upgrade your plan.", type: "plan_restricted" } },
+          { error: { message: "Premium models are temporarily disabled for the free tier while upstream providers recover. Try non-premium models or upgrade your plan.", type: "plan_restricted" } },
           { status: 403 }
         );
       }
@@ -575,11 +577,14 @@ export async function POST(req: NextRequest) {
       // usage_logs which had a TOCTOU window — concurrent streams could
       // all pass the check before any log was written.
       const premiumCost = Number(model.premium_request_cost ?? 1);
+      // TEMP (2026-04-24): upstream is flaky and users may need to retry quickly;
+      // disable the 60s/req rate limit until providers stabilize. Daily limits
+      // still apply. Revert to `60` to re-enable the per-minute rate limit.
       const { data: reserveResult, error: reserveErr } = await supabase.rpc("reserve_premium_request", {
         p_user_id: keyInfo.userId,
         p_cost: premiumCost,
         p_daily_limit: gmDailyRequests > 0 ? gmDailyRequests : 0,
-        p_rate_limit_seconds: 60,
+        p_rate_limit_seconds: 0,
       });
 
       if (reserveErr) {
@@ -952,6 +957,23 @@ export async function POST(req: NextRequest) {
       [key: string]: unknown;
     };
 
+    // Silent-upstream-failure guard: provider returned 200 OK but the body
+    // has no usage data AND no completion text. Treat as a provider error so
+    // unstable upstreams can't drain credits with empty replies. Refund the
+    // full reservation (credits + premium counter) and bubble a 502 up.
+    if ((!data.usage || !Number(data.usage.total_tokens)) && !extractCompletionText(data).trim()) {
+      await refundReservation();
+      return NextResponse.json(
+        {
+          error: {
+            message: "The model provider returned an empty response. No credits were charged. Please try again.",
+            type: "upstream_error",
+          },
+        },
+        { status: 502 }
+      );
+    }
+
     let usage: UsageLike = data.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
     let cacheTokens = extractCacheTokens(usage, Number(usage.prompt_tokens) || 0);
 
@@ -1125,6 +1147,17 @@ async function handleStreamingResponse(
     if (reason === "aborted" && !hasUsageData) {
       try { await refundReservation(); } catch (e) {
         console.error("Refund-on-abort failed:", e);
+      }
+      return;
+    }
+
+    // Silent-upstream-failure guard: stream ended cleanly but we never saw
+    // a usage payload AND no text was streamed. The provider returned 200 OK
+    // and emitted nothing useful — treat as a failure and refund so users
+    // don't get billed for empty replies during upstream outages.
+    if (reason === "complete" && !hasUsageData && !completionText.trim()) {
+      try { await refundReservation(); } catch (e) {
+        console.error("Refund-on-empty-stream failed:", e);
       }
       return;
     }
