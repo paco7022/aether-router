@@ -682,13 +682,24 @@ export async function POST(req: NextRequest) {
   // airforce deepseek-v3.2: fully free forever. Hard-capped at 200k/day per
   //                       user and 10M/day globally — crossing either returns
   //                       429. Never charges credits.
+  // op/deepseek-v4-flash: 3-day launch promo (ends 2026-04-28 00:00 UTC).
+  //                       Same soft-cap shape as nano; after the window
+  //                       ends the model becomes pay-as-you-go.
   //
   // All pools reset at UTC midnight.
+  const FLASH_PROMO_END = Date.parse("2026-04-28T00:00:00Z");
+  const isFlashPromo =
+    upstreamModel === "deepseek/deepseek-v4-flash" && Date.now() < FLASH_PROMO_END;
+
   let freePoolName: string | null = null;
   const freePoolReservationTokens = estimatedPrompt + reservedCompletionTokens;
 
-  if (!activeEventId && (model.provider === "nano" || upstreamModel === "deepseek-v3.2")) {
-    freePoolName = model.provider === "nano" ? "nano" : "deepseek-v3.2";
+  if (!activeEventId && (model.provider === "nano" || upstreamModel === "deepseek-v3.2" || isFlashPromo)) {
+    freePoolName = model.provider === "nano"
+      ? "nano"
+      : isFlashPromo
+        ? "deepseek-v4-flash"
+        : "deepseek-v3.2";
     const freePoolReservation = await reserveDailyFreePoolAllowance(
       supabase,
       freePoolName,

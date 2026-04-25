@@ -7,6 +7,7 @@ import { nanoProvider } from "./nano";
 import { webproxyProvider } from "./webproxy";
 import { hapuppyProvider } from "./hapuppy";
 import { gameronProvider } from "./gameron";
+import { openrouterProvider } from "./openrouter";
 
 const providers: Record<string, Provider> = {
   airforce: airforceProvider,
@@ -17,6 +18,7 @@ const providers: Record<string, Provider> = {
   webproxy: webproxyProvider,
   hapuppy: hapuppyProvider,
   gameron: gameronProvider,
+  openrouter: openrouterProvider,
 };
 
 export function getProvider(name: string): Provider | undefined {
