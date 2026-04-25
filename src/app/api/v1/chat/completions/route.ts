@@ -12,7 +12,12 @@ import {
   getRequestFingerprint,
   isApiKeyAuthHeader,
 } from "@/lib/chat-preflight";
-import { CLAUDE_BLOCK_MESSAGE, isClaudeModel } from "@/lib/claude-block";
+import {
+  CLAUDE_BLOCK_MESSAGE,
+  CLAUDE_PAID_ONLY_MESSAGE,
+  isAllowedClaudeProvider,
+  isClaudeModel,
+} from "@/lib/claude-block";
 
 export const runtime = "nodejs";
 // NOTE: If a Vercel function timeout kills a streaming request mid-flight,
@@ -308,15 +313,22 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Global block on Claude models across every provider (Anthropic policy
-  // change). No bypass — a single request through our keys risks revocation.
-  // Admin uses Claude directly via Anthropic. To revert, remove this block
-  // and the `claude-block.ts` helper.
+  // Claude policy gate. Anthropic policy change forced this — only the
+  // trolllm (`t/`) upstream is currently approved to route Claude, and only
+  // for paid plans. Everything else returns the block message.
   if (isClaudeModel(model)) {
-    return NextResponse.json(
-      { error: { message: CLAUDE_BLOCK_MESSAGE, type: "model_blocked" } },
-      { status: 403 }
-    );
+    if (!isAllowedClaudeProvider(model.provider)) {
+      return NextResponse.json(
+        { error: { message: CLAUDE_BLOCK_MESSAGE, type: "model_blocked" } },
+        { status: 403 }
+      );
+    }
+    if (keyInfo.planId === "free") {
+      return NextResponse.json(
+        { error: { message: CLAUDE_PAID_ONLY_MESSAGE, type: "plan_restricted" } },
+        { status: 403 }
+      );
+    }
   }
 
   const isPremiumProvider =
