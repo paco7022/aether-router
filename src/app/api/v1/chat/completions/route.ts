@@ -314,8 +314,9 @@ export async function POST(req: NextRequest) {
   }
 
   // Claude policy gate. Anthropic policy change forced this — only the
-  // trolllm (`t/`) upstream is currently approved to route Claude, and only
-  // for paid plans. Everything else returns the block message.
+  // upstreams listed in claude-block.ts (currently t/ and gm/) are approved
+  // to route Claude, and only for paid plans. Everything else returns the
+  // block message.
   if (isClaudeModel(model)) {
     if (!isAllowedClaudeProvider(model.provider)) {
       return NextResponse.json(

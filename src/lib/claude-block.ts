@@ -1,6 +1,6 @@
 // Claude policy gate. Anthropic policy change → most Claude routes are
-// blocked entirely. Trolllm (`t/`) is the only provider whose owner has
-// approved continued Claude routing, and only for paid plans.
+// blocked entirely. Only providers whose owners explicitly approved Claude
+// routing are allowed, and only for paid plans.
 //
 // To revert: remove the call site in /api/v1/chat/completions/route.ts.
 
@@ -10,8 +10,8 @@ export const CLAUDE_BLOCK_MESSAGE =
 export const CLAUDE_PAID_ONLY_MESSAGE =
   "Claude models are restricted to paid plans. Upgrade your plan to use them.";
 
-// The only provider currently allowed to route Claude requests.
-const ALLOWED_CLAUDE_PROVIDER = "trolllm";
+// Providers currently approved to route Claude requests.
+const ALLOWED_CLAUDE_PROVIDERS = new Set(["trolllm", "gameron"]);
 
 export function isClaudeModel(model: {
   id?: string | null;
@@ -24,5 +24,5 @@ export function isClaudeModel(model: {
 }
 
 export function isAllowedClaudeProvider(provider: string | null | undefined): boolean {
-  return provider === ALLOWED_CLAUDE_PROVIDER;
+  return !!provider && ALLOWED_CLAUDE_PROVIDERS.has(provider);
 }
