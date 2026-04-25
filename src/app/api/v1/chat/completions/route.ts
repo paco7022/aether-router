@@ -13,7 +13,6 @@ import {
   isApiKeyAuthHeader,
 } from "@/lib/chat-preflight";
 import { CLAUDE_BLOCK_MESSAGE, isClaudeModel } from "@/lib/claude-block";
-import { isAdmin } from "@/lib/admin";
 
 export const runtime = "nodejs";
 // NOTE: If a Vercel function timeout kills a streaming request mid-flight,
@@ -310,9 +309,10 @@ export async function POST(req: NextRequest) {
   }
 
   // Global block on Claude models across every provider (Anthropic policy
-  // change). Admins bypass so they can still route/test. To revert, remove
-  // this block and the `claude-block.ts` helper.
-  if (isClaudeModel(model) && !isAdmin(null, keyInfo.userId)) {
+  // change). No bypass — a single request through our keys risks revocation.
+  // Admin uses Claude directly via Anthropic. To revert, remove this block
+  // and the `claude-block.ts` helper.
+  if (isClaudeModel(model)) {
     return NextResponse.json(
       { error: { message: CLAUDE_BLOCK_MESSAGE, type: "model_blocked" } },
       { status: 403 }
