@@ -1072,8 +1072,10 @@ export async function POST(req: NextRequest) {
 
     // Accrue premium-request debt when a prompt sneaks past the pre-flight
     // context estimator and the real prompt_tokens end up over the user's
-    // plan cap. Only applies to the premium-provider flow (t/ an/ w/).
-    if (isPremiumProvider && !activeEventId && !keyInfo.isCustom) {
+    // plan cap. Free tier only — paid plans are exempt because the estimator
+    // under-counts often enough that paid users were getting hit with debt
+    // they didn't deserve.
+    if (isPremiumProvider && !activeEventId && !keyInfo.isCustom && keyInfo.planId === "free") {
       const { error: debtErr } = await supabase.rpc("accrue_prompt_cap_debt", {
         p_user_id: keyInfo.userId,
         p_plan_id: keyInfo.planId,
@@ -1352,8 +1354,9 @@ async function handleStreamingResponse(
     }
 
     // See non-streaming path: accrue debt when real prompt_tokens exceed
-    // the user's plan cap (estimator under-counted during pre-flight).
-    if (isPremium && !activeEventId && !keyInfo.isCustom) {
+    // the user's plan cap (estimator under-counted during pre-flight). Free
+    // tier only.
+    if (isPremium && !activeEventId && !keyInfo.isCustom && keyInfo.planId === "free") {
       const { error: debtErr } = await supabase.rpc("accrue_prompt_cap_debt", {
         p_user_id: keyInfo.userId,
         p_plan_id: keyInfo.planId,
