@@ -539,16 +539,6 @@ export async function POST(req: NextRequest) {
     // 5.5b-normal. Premium plan limits (requests/day + context cap) — applies to trolllm, antigravity, webproxy, hapuppy, gameron.
     // Skipped entirely when an active event covers this model for the user's plan.
     if (isPremiumProvider) {
-      // TEMP (2026-04-24): upstream premium providers are unstable. Block ALL
-      // premium models (t/, an/, w/, h/, gm/) for free tier until upstream
-      // recovers. Revert by restoring the antigravity-only check.
-      if (keyInfo.planId === "free") {
-        return NextResponse.json(
-          { error: { message: "Premium models are temporarily disabled for the free tier while upstream providers recover. Try non-premium models or upgrade your plan.", type: "plan_restricted" } },
-          { status: 403 }
-        );
-      }
-
       // Antigravity: require daily claim
       if (model.provider === "antigravity") {
         const today = new Date().toISOString().split("T")[0];
