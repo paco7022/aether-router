@@ -15,6 +15,8 @@ import {
 import {
   CLAUDE_BLOCK_MESSAGE,
   CLAUDE_PAID_ONLY_MESSAGE,
+  DLAB_NOT_APPROVED_MESSAGE,
+  claudePaidOnlyApplies,
   isAllowedClaudeProvider,
   isClaudeModel,
 } from "@/lib/claude-block";
@@ -313,10 +315,22 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // DLab (db/) gate: every user must be flipped on individually via
+  // profiles.dlab_approved before they can route here. Plan tier does
+  // NOT matter — admin approval is the only gate. Runs before the
+  // Claude policy gate so the more specific message wins.
+  if (model.provider === "dlab" && !keyInfo.dlabApproved) {
+    return NextResponse.json(
+      { error: { message: DLAB_NOT_APPROVED_MESSAGE, type: "model_blocked" } },
+      { status: 403 }
+    );
+  }
+
   // Claude policy gate. Anthropic policy change forced this — only the
-  // upstreams listed in claude-block.ts (currently t/ and gm/) are approved
-  // to route Claude, and only for paid plans. Everything else returns the
-  // block message.
+  // upstreams listed in claude-block.ts (currently t/, gm/, db/) are
+  // approved to route Claude, and only for paid plans. db/ is exempt
+  // from the paid-plan rule because its dlab_approved gate above is
+  // already a strict per-user admin opt-in.
   if (isClaudeModel(model)) {
     if (!isAllowedClaudeProvider(model.provider)) {
       return NextResponse.json(
@@ -324,7 +338,7 @@ export async function POST(req: NextRequest) {
         { status: 403 }
       );
     }
-    if (keyInfo.planId === "free") {
+    if (keyInfo.planId === "free" && claudePaidOnlyApplies(model.provider)) {
       return NextResponse.json(
         { error: { message: CLAUDE_PAID_ONLY_MESSAGE, type: "plan_restricted" } },
         { status: 403 }
@@ -337,7 +351,8 @@ export async function POST(req: NextRequest) {
     model.provider === "antigravity" ||
     model.provider === "webproxy" ||
     model.provider === "hapuppy" ||
-    model.provider === "gameron";
+    model.provider === "gameron" ||
+    model.provider === "dlab";
 
   // 5.4. Active free event lookup (admin-created pools that make a model
   // prefix free for a set of plans, with their own per-user limits).
@@ -501,7 +516,7 @@ export async function POST(req: NextRequest) {
     // concurrent requests can't all pass the check before the first log is
     // written. Defaults: 60s rate-limit for premium providers, no rate-limit
     // otherwise; daily limit from key config (0 = unlimited).
-    const isPremium = model.provider === "trolllm" || model.provider === "antigravity" || model.provider === "webproxy" || model.provider === "hapuppy" || model.provider === "gameron";
+    const isPremium = model.provider === "trolllm" || model.provider === "antigravity" || model.provider === "webproxy" || model.provider === "hapuppy" || model.provider === "gameron" || model.provider === "dlab";
     const rlSeconds = keyInfo.rateLimitSeconds ?? (isPremium ? 60 : 0);
     const dailyReqLimit = keyInfo.dailyRequestLimit ?? 0;
 
@@ -1210,7 +1225,7 @@ async function handleStreamingResponse(
       { read: cacheReadTokens, write: cacheWriteTokens }
     );
 
-    const isPremiumModel = model.provider === "trolllm" || model.provider === "antigravity" || model.provider === "webproxy" || model.provider === "hapuppy" || model.provider === "gameron";
+    const isPremiumModel = model.provider === "trolllm" || model.provider === "antigravity" || model.provider === "webproxy" || model.provider === "hapuppy" || model.provider === "gameron" || model.provider === "dlab";
     const finalCredits = isFreePool ? 0 : isPremiumModel ? 1 : Math.max(credits, 1);
 
     let wasCharged = isFreePool;
@@ -1332,7 +1347,7 @@ async function handleStreamingResponse(
     }
 
     const durationMs = Date.now() - startTime;
-    const isPremium = model.provider === "trolllm" || model.provider === "antigravity" || model.provider === "webproxy" || model.provider === "hapuppy" || model.provider === "gameron";
+    const isPremium = model.provider === "trolllm" || model.provider === "antigravity" || model.provider === "webproxy" || model.provider === "hapuppy" || model.provider === "gameron" || model.provider === "dlab";
     const streamPremiumCost = isPremium && !activeEventId ? Number(model.premium_request_cost ?? 1) : 0;
     const { error: usageLogError } = await supabase.from("usage_logs").insert({
       user_id: keyInfo.userId,

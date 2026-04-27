@@ -8,6 +8,7 @@ import { webproxyProvider } from "./webproxy";
 import { hapuppyProvider } from "./hapuppy";
 import { gameronProvider } from "./gameron";
 import { openrouterProvider } from "./openrouter";
+import { dlabProvider } from "./dlab";
 
 const providers: Record<string, Provider> = {
   airforce: airforceProvider,
@@ -19,6 +20,7 @@ const providers: Record<string, Provider> = {
   hapuppy: hapuppyProvider,
   gameron: gameronProvider,
   openrouter: openrouterProvider,
+  dlab: dlabProvider,
 };
 
 export function getProvider(name: string): Provider | undefined {

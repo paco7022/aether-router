@@ -14,7 +14,7 @@ function escapeLike(input: string): string {
 async function requireAdmin(req: NextRequest) {
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user || !isAdmin(user.email, user.id)) {
+  if (!user || !isAdmin(user.email)) {
     return null;
   }
   return user;
@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
       const search = req.nextUrl.searchParams.get("search") || "";
       let query = supabase
         .from("profiles")
-        .select("id, email, display_name, credits, daily_credits, plan_id, gm_claimed_date, created_at, updated_at")
+        .select("id, email, display_name, credits, daily_credits, plan_id, gm_claimed_date, dlab_approved, created_at, updated_at")
         .order("created_at", { ascending: false })
         .limit(100);
 
@@ -48,13 +48,13 @@ export async function GET(req: NextRequest) {
         const [{ data: byEmail }, { data: byName }] = await Promise.all([
           supabase
             .from("profiles")
-            .select("id, email, display_name, credits, daily_credits, plan_id, gm_claimed_date, created_at, updated_at")
+            .select("id, email, display_name, credits, daily_credits, plan_id, gm_claimed_date, dlab_approved, created_at, updated_at")
             .ilike("email", `%${safeSearch}%`)
             .order("created_at", { ascending: false })
             .limit(100),
           supabase
             .from("profiles")
-            .select("id, email, display_name, credits, daily_credits, plan_id, gm_claimed_date, created_at, updated_at")
+            .select("id, email, display_name, credits, daily_credits, plan_id, gm_claimed_date, dlab_approved, created_at, updated_at")
             .ilike("display_name", `%${safeSearch}%`)
             .order("created_at", { ascending: false })
             .limit(100),
@@ -588,6 +588,18 @@ export async function POST(req: NextRequest) {
       const { error } = await supabase.from("profiles").update({ gm_claimed_date: null }).eq("id", user_id);
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
       return NextResponse.json({ ok: true });
+    }
+
+    // ── DLab (db/) per-user approval ──
+    case "set_dlab_approval": {
+      const { user_id, approved } = body;
+      if (!user_id) return NextResponse.json({ error: "user_id required" }, { status: 400 });
+      const { error } = await supabase
+        .from("profiles")
+        .update({ dlab_approved: !!approved })
+        .eq("id", user_id);
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ ok: true, approved: !!approved });
     }
 
     default:
