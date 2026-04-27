@@ -6,10 +6,12 @@ import { useRouter } from "next/navigation";
 export function GmRequestsCard({
   used,
   limit,
+  debt = 0,
   claimed,
 }: {
   used: number;
   limit: number;
+  debt?: number;
   claimed: boolean;
 }) {
   const [loading, setLoading] = useState(false);
@@ -18,8 +20,11 @@ export function GmRequestsCard({
   const router = useRouter();
 
   const isUnlimited = limit === 0;
-  const remaining = isUnlimited ? Infinity : Math.max(0, limit - used);
-  const pct = isUnlimited ? 0 : limit > 0 ? Math.min((used / limit) * 100, 100) : 0;
+  // Debt counts against the daily cap inside reserve_premium_request, so
+  // surface it the same way: bar fill = used + debt vs limit.
+  const effectiveUsed = used + debt;
+  const remaining = isUnlimited ? Infinity : Math.max(0, limit - effectiveUsed);
+  const pct = isUnlimited ? 0 : limit > 0 ? Math.min((effectiveUsed / limit) * 100, 100) : 0;
 
   async function handleClaim() {
     setLoading(true);
@@ -52,21 +57,21 @@ export function GmRequestsCard({
           <div>
             <h4 className="font-semibold text-sm text-white/85">Premium Model Requests</h4>
             <p className="text-xs text-[var(--text-muted)]">
-              Daily usage for premium models (w/, c/ and an/)
+              Daily usage for premium models (t/, an/, w/, h/, gm/)
             </p>
           </div>
         </div>
         <div className="flex gap-1">
-          <span className="text-[10px] px-2.5 py-0.5 rounded-full font-medium badge-violet">w/</span>
-          <span className="text-[10px] px-2.5 py-0.5 rounded-full font-medium badge-cyan">c/</span>
-          <span className="text-[10px] px-2.5 py-0.5 rounded-full font-medium badge-amber">an/</span>
+          <span className="text-[10px] px-2.5 py-0.5 rounded-full font-medium badge-violet">t/</span>
+          <span className="text-[10px] px-2.5 py-0.5 rounded-full font-medium badge-cyan">h/</span>
+          <span className="text-[10px] px-2.5 py-0.5 rounded-full font-medium badge-amber">gm/</span>
         </div>
       </div>
 
       {needsClaim ? (
         <div className="text-center py-4">
           <p className="text-sm text-[var(--text-muted)] mb-3">
-            Claim your daily premium requests to use an/ models (w/ and c/ work without claim).
+            Claim your daily premium requests to use an/ models (t/, w/, h/, gm/ work without claim).
           </p>
           <button
             onClick={handleClaim}
@@ -89,7 +94,7 @@ export function GmRequestsCard({
                 {isUnlimited ? (
                   <>{used.toLocaleString()} <span className="text-[var(--text-muted)]">/ unlimited</span></>
                 ) : (
-                  <>{used.toLocaleString()} <span className="text-[var(--text-muted)]">/ {limit.toLocaleString()}</span></>
+                  <>{effectiveUsed.toLocaleString()} <span className="text-[var(--text-muted)]">/ {limit.toLocaleString()}</span></>
                 )}
               </span>
             </div>
@@ -125,8 +130,17 @@ export function GmRequestsCard({
             )}
           </div>
 
+          {debt > 0 && (
+            <div className="mt-2.5 px-3 py-2 rounded-md border border-red-500/20 bg-red-500/5">
+              <p className="text-[11px] text-red-300/90 leading-relaxed">
+                <span className="font-semibold">{debt} premium requests blocked by debt</span> —
+                accrued from prompts that exceeded your plan&apos;s context cap. Contact support to clear.
+              </p>
+            </div>
+          )}
+
           <p className="text-[10px] text-[var(--text-muted)] mt-2.5 leading-relaxed">
-            Claude models use <span className="text-red-400/80 font-medium">2 requests</span> per call · Gemini Pro uses <span className="text-amber-400/80 font-medium">1 request</span> · Gemini Flash uses <span className="text-green-400/80 font-medium">0.5 requests</span>
+            Cost depends on the model: Opus = <span className="text-red-400/80 font-medium">8-9</span>, Sonnet = <span className="text-amber-400/80 font-medium">2-3</span>, Haiku/Flash = <span className="text-green-400/80 font-medium">0.5-1</span> per call.
           </p>
         </>
       )}

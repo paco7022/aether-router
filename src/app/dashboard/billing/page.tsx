@@ -38,23 +38,29 @@ export default async function BillingPage() {
   ]);
 
   const admin = createAdminClient();
-  const todayStart = new Date();
-  todayStart.setUTCHours(0, 0, 0, 0);
 
-  const [{ data: premiumRows }, { data: currentPlan }] = await Promise.all([
+  // Read the same counter that `reserve_premium_request` enforces against,
+  // not a re-sum of usage_logs. Re-summing missed h/ and gm/ premium
+  // providers (the filter only included t/, an/, w/), so the bar showed
+  // less than the API actually counted and users hit "daily limit reached"
+  // while the page still read e.g. 51%.
+  const [{ data: premiumCounters }, { data: currentPlan }] = await Promise.all([
     admin
-      .from("usage_logs")
-      .select("premium_cost")
-      .eq("user_id", user!.id)
-      .or("model_id.like.t/%,model_id.like.an/%,model_id.like.w/%")
-      .gte("created_at", todayStart.toISOString()),
+      .from("profiles")
+      .select("premium_requests_today, premium_requests_date, premium_request_debt")
+      .eq("id", user!.id)
+      .single(),
     admin
       .from("plans")
       .select("gm_daily_requests, gm_max_context")
       .eq("id", profile?.plan_id || "free")
       .single(),
   ]);
-  const premiumUsedToday = (premiumRows ?? []).reduce((sum: number, row: { premium_cost: number }) => sum + Number(row.premium_cost), 0);
+  const todayUtc = new Date().toISOString().split("T")[0];
+  const premiumUsedToday = premiumCounters?.premium_requests_date === todayUtc
+    ? Number(premiumCounters?.premium_requests_today ?? 0)
+    : 0;
+  const premiumDebt = Number(premiumCounters?.premium_request_debt ?? 0);
 
   const permanentCredits = profile?.credits || 0;
   const dailyCredits = profile?.daily_credits || 0;
@@ -124,6 +130,7 @@ export default async function BillingPage() {
         <GmRequestsCard
           used={premiumUsedToday}
           limit={currentPlan?.gm_daily_requests ?? 15}
+          debt={premiumDebt}
           claimed={gmClaimedToday}
         />
       </div>
