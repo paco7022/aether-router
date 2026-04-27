@@ -34,11 +34,11 @@ INSERT INTO models (
   cost_per_m_cache_read, cost_per_m_cache_write,
   margin, is_active, premium_request_cost, capabilities
 ) VALUES
-  ('db/claude-opus-4.7',   'dlab', 'claude-opus-4.7',   'Claude Opus 4.7 (DLab)',   15.0000, 75.0000, 1.5000, 18.7500, 1.5500, true, 12.00, '["tool_calling", "vision", "streaming", "system_message", "pdf_input"]'::jsonb),
-  ('db/claude-opus-4.6',   'dlab', 'claude-opus-4.6',   'Claude Opus 4.6 (DLab)',   15.0000, 75.0000, 1.5000, 18.7500, 1.5500, true, 12.00, '["tool_calling", "vision", "streaming", "system_message", "pdf_input"]'::jsonb),
-  ('db/claude-opus-4.5',   'dlab', 'claude-opus-4.5',   'Claude Opus 4.5 (DLab)',   15.0000, 75.0000, 1.5000, 18.7500, 1.5500, true, 12.00, '["tool_calling", "vision", "streaming", "system_message", "pdf_input"]'::jsonb),
-  ('db/claude-sonnet-4.6', 'dlab', 'claude-sonnet-4.6', 'Claude Sonnet 4.6 (DLab)',  3.0000, 15.0000, 0.3000,  3.7500, 1.5500, true,  6.00, '["tool_calling", "vision", "streaming", "system_message", "pdf_input"]'::jsonb),
-  ('db/claude-sonnet-4.5', 'dlab', 'claude-sonnet-4.5', 'Claude Sonnet 4.5 (DLab)',  3.0000, 15.0000, 0.3000,  3.7500, 1.5500, true,  6.00, '["tool_calling", "vision", "streaming", "system_message", "pdf_input"]'::jsonb)
+  ('db/claude-opus-4.7',   'dlab', 'claude-opus-4.7',   'Claude Opus 4.7',   15.0000, 75.0000, 1.5000, 18.7500, 1.5500, true, 12.00, '["tool_calling", "vision", "streaming", "system_message", "pdf_input"]'::jsonb),
+  ('db/claude-opus-4.6',   'dlab', 'claude-opus-4.6',   'Claude Opus 4.6',   15.0000, 75.0000, 1.5000, 18.7500, 1.5500, true, 12.00, '["tool_calling", "vision", "streaming", "system_message", "pdf_input"]'::jsonb),
+  ('db/claude-opus-4.5',   'dlab', 'claude-opus-4.5',   'Claude Opus 4.5',   15.0000, 75.0000, 1.5000, 18.7500, 1.5500, true, 12.00, '["tool_calling", "vision", "streaming", "system_message", "pdf_input"]'::jsonb),
+  ('db/claude-sonnet-4.6', 'dlab', 'claude-sonnet-4.6', 'Claude Sonnet 4.6',  3.0000, 15.0000, 0.3000,  3.7500, 1.5500, true,  6.00, '["tool_calling", "vision", "streaming", "system_message", "pdf_input"]'::jsonb),
+  ('db/claude-sonnet-4.5', 'dlab', 'claude-sonnet-4.5', 'Claude Sonnet 4.5',  3.0000, 15.0000, 0.3000,  3.7500, 1.5500, true,  6.00, '["tool_calling", "vision", "streaming", "system_message", "pdf_input"]'::jsonb)
 ON CONFLICT (id) DO UPDATE SET
   provider               = EXCLUDED.provider,
   upstream_model_id      = EXCLUDED.upstream_model_id,
