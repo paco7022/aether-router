@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { parseMessage, type Artifact } from "@/lib/chat/artifacts";
+import { MessageContent } from "@/components/chat/MessageContent";
+import { ArtifactsPanel } from "@/components/chat/ArtifactsPanel";
 
 type ConversationSummary = {
   id: string;
@@ -70,45 +73,6 @@ function extractImages(content: unknown): string[] {
   return urls;
 }
 
-/** Minimal markdown-ish renderer: preserves whitespace, highlights fenced code blocks. */
-function renderContent(raw: string): React.ReactElement {
-  const parts: React.ReactElement[] = [];
-  const fence = /```([\w-]*)\n([\s\S]*?)```/g;
-  let last = 0;
-  let m: RegExpExecArray | null;
-  let idx = 0;
-  while ((m = fence.exec(raw)) !== null) {
-    if (m.index > last) {
-      parts.push(
-        <span key={`t${idx++}`} style={{ whiteSpace: "pre-wrap" }}>
-          {raw.slice(last, m.index)}
-        </span>
-      );
-    }
-    parts.push(
-      <pre
-        key={`c${idx++}`}
-        className="my-2 rounded-lg p-3 text-xs overflow-x-auto font-mono"
-        style={{
-          background: "rgba(0, 0, 0, 0.3)",
-          border: "1px solid rgba(255, 255, 255, 0.06)",
-        }}
-      >
-        <code className="text-cyan-200/90">{m[2]}</code>
-      </pre>
-    );
-    last = m.index + m[0].length;
-  }
-  if (last < raw.length) {
-    parts.push(
-      <span key={`t${idx++}`} style={{ whiteSpace: "pre-wrap" }}>
-        {raw.slice(last)}
-      </span>
-    );
-  }
-  return <>{parts}</>;
-}
-
 export default function ChatPage() {
   const supabase = useMemo(() => createClient(), []);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
@@ -123,11 +87,73 @@ export default function ChatPage() {
   const [streamingText, setStreamingText] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [activeArtifactId, setActiveArtifactId] = useState<string | null>(null);
+  const [panelOpen, setPanelOpen] = useState(false);
+  const lastArtifactCountRef = useRef(0);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const selectedModelInfo = models.find((m) => m.id === selectedModel);
   const supportsVision = (selectedModelInfo?.capabilities ?? []).includes("vision");
+
+  // Parse every assistant message + the live streaming text into segments
+  // and artifacts. Re-parsed on every render — cheap (regex over text we
+  // already render) and avoids duplicating state.
+  const parsedByMsgId = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof parseMessage>>();
+    for (const m of messages) {
+      if (m.role === "assistant") {
+        map.set(m.id, parseMessage(m.id, extractText(m.content)));
+      }
+    }
+    if (streaming) {
+      map.set("__streaming__", parseMessage("__streaming__", streamingText));
+    }
+    return map;
+  }, [messages, streaming, streamingText]);
+
+  const allArtifacts = useMemo<Artifact[]>(() => {
+    const out: Artifact[] = [];
+    // Iterate in message order so the panel sidebar reads top-to-bottom.
+    for (const m of messages) {
+      const parsed = parsedByMsgId.get(m.id);
+      if (parsed) out.push(...parsed.artifacts);
+    }
+    const streamingParsed = parsedByMsgId.get("__streaming__");
+    if (streamingParsed) out.push(...streamingParsed.artifacts);
+    return out;
+  }, [messages, parsedByMsgId]);
+
+  const artifactsById = useMemo(() => {
+    const map = new Map<string, Artifact>();
+    for (const a of allArtifacts) map.set(a.id, a);
+    return map;
+  }, [allArtifacts]);
+
+  // Auto-open the panel when a new artifact appears, selecting the latest.
+  // We don't reopen if the user has already closed and no new artifacts
+  // arrived — track count via ref.
+  useEffect(() => {
+    const prev = lastArtifactCountRef.current;
+    if (allArtifacts.length > prev) {
+      const latest = allArtifacts[allArtifacts.length - 1];
+      setActiveArtifactId(latest.id);
+      setPanelOpen(true);
+    }
+    lastArtifactCountRef.current = allArtifacts.length;
+  }, [allArtifacts]);
+
+  // Reset panel + artifact selection when switching conversations.
+  useEffect(() => {
+    setActiveArtifactId(null);
+    setPanelOpen(false);
+    lastArtifactCountRef.current = 0;
+  }, [activeId]);
+
+  const openArtifact = useCallback((id: string) => {
+    setActiveArtifactId(id);
+    setPanelOpen(true);
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -450,7 +476,7 @@ export default function ChatPage() {
       </aside>
 
       {/* Chat pane */}
-      <section className="flex-1 glass-card shimmer-line flex flex-col overflow-hidden">
+      <section className={`glass-card shimmer-line flex flex-col overflow-hidden ${panelOpen && allArtifacts.length > 0 ? "flex-1 min-w-0" : "flex-1"}`}>
         {/* Header */}
         <div className="px-5 py-3 border-b border-white/[0.04] flex items-center justify-between gap-3">
           <div className="min-w-0">
@@ -462,20 +488,40 @@ export default function ChatPage() {
               {supportsVision && " · vision"}
             </p>
           </div>
-          <select
-            value={selectedModel}
-            onChange={(e) => changeModel(e.target.value)}
-            className="rounded-lg px-3 py-1.5 text-xs font-mono bg-black/30 text-white/80 border border-white/10 outline-none focus:border-violet-400/40"
-          >
-            {models.map((m) => {
-              const hasVision = (m.capabilities ?? []).includes("vision");
-              return (
-                <option key={m.id} value={m.id} className="bg-slate-900">
-                  {hasVision ? "👁 " : ""}{m.id}
-                </option>
-              );
-            })}
-          </select>
+          <div className="flex items-center gap-2">
+            {!panelOpen && allArtifacts.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setPanelOpen(true);
+                  if (!activeArtifactId) setActiveArtifactId(allArtifacts[allArtifacts.length - 1].id);
+                }}
+                className="rounded-lg px-2.5 py-1.5 text-[11px] font-medium transition-colors"
+                style={{
+                  background: "linear-gradient(135deg, rgba(139, 92, 246, 0.18), rgba(34, 211, 238, 0.1))",
+                  border: "1px solid rgba(139, 92, 246, 0.25)",
+                  color: "rgba(230, 230, 255, 0.95)",
+                }}
+                title="Show artifacts"
+              >
+                {allArtifacts.length} artifact{allArtifacts.length === 1 ? "" : "s"} →
+              </button>
+            )}
+            <select
+              value={selectedModel}
+              onChange={(e) => changeModel(e.target.value)}
+              className="rounded-lg px-3 py-1.5 text-xs font-mono bg-black/30 text-white/80 border border-white/10 outline-none focus:border-violet-400/40"
+            >
+              {models.map((m) => {
+                const hasVision = (m.capabilities ?? []).includes("vision");
+                return (
+                  <option key={m.id} value={m.id} className="bg-slate-900">
+                    {hasVision ? "👁 " : ""}{m.id}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
         </div>
 
         {/* Messages */}
@@ -504,18 +550,34 @@ export default function ChatPage() {
             </div>
           )}
 
-          {messages.map((m) => (
-            <MessageBubble
-              key={m.id}
-              role={m.role}
-              text={extractText(m.content)}
-              images={extractImages(m.content)}
-              error={m.error ?? null}
-            />
-          ))}
+          {messages.map((m) => {
+            const parsed = m.role === "assistant" ? parsedByMsgId.get(m.id) : null;
+            return (
+              <MessageBubble
+                key={m.id}
+                role={m.role}
+                text={extractText(m.content)}
+                images={extractImages(m.content)}
+                error={m.error ?? null}
+                segments={parsed?.segments ?? null}
+                artifactsById={artifactsById}
+                activeArtifactId={activeArtifactId}
+                onOpenArtifact={openArtifact}
+              />
+            );
+          })}
 
           {streaming && (
-            <MessageBubble role="assistant" text={streamingText} images={[]} pulsing />
+            <MessageBubble
+              role="assistant"
+              text={streamingText}
+              images={[]}
+              pulsing
+              segments={parsedByMsgId.get("__streaming__")?.segments ?? null}
+              artifactsById={artifactsById}
+              activeArtifactId={activeArtifactId}
+              onOpenArtifact={openArtifact}
+            />
           )}
         </div>
 
@@ -619,6 +681,16 @@ export default function ChatPage() {
           </div>
         </div>
       </section>
+
+      {/* Artifacts side panel */}
+      {panelOpen && allArtifacts.length > 0 && (
+        <ArtifactsPanel
+          artifacts={allArtifacts}
+          activeId={activeArtifactId}
+          onSelect={setActiveArtifactId}
+          onClose={() => setPanelOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -629,18 +701,27 @@ function MessageBubble({
   images,
   error,
   pulsing,
+  segments,
+  artifactsById,
+  activeArtifactId,
+  onOpenArtifact,
 }: {
   role: "user" | "assistant" | "system";
   text: string;
   images: string[];
   error?: string | null;
   pulsing?: boolean;
+  segments?: import("@/lib/chat/artifacts").Segment[] | null;
+  artifactsById?: Map<string, Artifact>;
+  activeArtifactId?: string | null;
+  onOpenArtifact?: (id: string) => void;
 }) {
   const isUser = role === "user";
+  const hasArtifact = (segments ?? []).some((s) => s.kind === "artifact-ref");
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm ${pulsing ? "animate-pulse" : ""}`}
+        className={`rounded-2xl px-4 py-3 text-sm ${pulsing ? "animate-pulse" : ""} ${hasArtifact ? "max-w-[92%]" : "max-w-[80%]"}`}
         style={{
           background: isUser
             ? "linear-gradient(135deg, rgba(139, 92, 246, 0.18), rgba(217, 70, 239, 0.1))"
@@ -665,9 +746,16 @@ function MessageBubble({
         )}
         {error ? (
           <p className="text-red-300 text-xs">⚠ {error}</p>
+        ) : segments && artifactsById && onOpenArtifact ? (
+          <MessageContent
+            segments={segments}
+            artifactsById={artifactsById}
+            activeArtifactId={activeArtifactId ?? null}
+            onOpenArtifact={onOpenArtifact}
+          />
         ) : (
-          <div className="leading-relaxed">
-            {text || pulsing ? renderContent(text || "…") : null}
+          <div className="leading-relaxed" style={{ whiteSpace: "pre-wrap" }}>
+            {text || (pulsing ? "…" : "")}
           </div>
         )}
       </div>
