@@ -27,9 +27,9 @@ INSERT INTO models (
   cost_per_m_cache_read, cost_per_m_cache_write,
   margin, is_active, premium_request_cost, capabilities
 ) VALUES
-  ('r/claude-opus-4-7',           'riftai', 'claude-opus-4-7',           'Claude Opus 4.7',            15.0000, 75.0000, 1.5000, 18.7500, 1.5500, true, 12.00, '["tool_calling", "vision", "streaming", "system_message", "pdf_input"]'::jsonb),
-  ('r/claude-opus-4-6',           'riftai', 'claude-opus-4-6',           'Claude Opus 4.6',            15.0000, 75.0000, 1.5000, 18.7500, 1.5500, true, 12.00, '["tool_calling", "vision", "streaming", "system_message", "pdf_input"]'::jsonb),
-  ('r/claude-opus-4-5',           'riftai', 'claude-opus-4-5',           'Claude Opus 4.5',            15.0000, 75.0000, 1.5000, 18.7500, 1.5500, true, 12.00, '["tool_calling", "vision", "streaming", "system_message", "pdf_input"]'::jsonb),
+  ('r/claude-opus-4-7',           'riftai', 'claude-opus-4-7',           'Claude Opus 4.7',            15.0000, 75.0000, 1.5000, 18.7500, 1.5500, true, 15.00, '["tool_calling", "vision", "streaming", "system_message", "pdf_input"]'::jsonb),
+  ('r/claude-opus-4-6',           'riftai', 'claude-opus-4-6',           'Claude Opus 4.6',            15.0000, 75.0000, 1.5000, 18.7500, 1.5500, true, 15.00, '["tool_calling", "vision", "streaming", "system_message", "pdf_input"]'::jsonb),
+  ('r/claude-opus-4-5',           'riftai', 'claude-opus-4-5',           'Claude Opus 4.5',            15.0000, 75.0000, 1.5000, 18.7500, 1.5500, true, 15.00, '["tool_calling", "vision", "streaming", "system_message", "pdf_input"]'::jsonb),
   ('r/claude-sonnet-4-6',         'riftai', 'claude-sonnet-4-6',         'Claude Sonnet 4.6',           3.0000, 15.0000, 0.3000,  3.7500, 1.5500, true,  8.00, '["tool_calling", "vision", "streaming", "system_message", "pdf_input"]'::jsonb),
   ('r/claude-sonnet-4-5',         'riftai', 'claude-sonnet-4-5',         'Claude Sonnet 4.5',           3.0000, 15.0000, 0.3000,  3.7500, 1.5500, true,  8.00, '["tool_calling", "vision", "streaming", "system_message", "pdf_input"]'::jsonb),
   ('r/gpt-5.5-pro',               'riftai', 'gpt-5.5-pro',               'GPT 5.5 Pro',                10.0000, 40.0000, 1.0000,  0.0000, 1.5500, true, 25.00, '["tool_calling", "vision", "streaming", "system_message", "json_mode"]'::jsonb),

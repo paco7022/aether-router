@@ -12,7 +12,6 @@ interface UserProfile {
   daily_credits: number;
   plan_id: string;
   gm_claimed_date: string | null;
-  dlab_approved: boolean;
   created_at: string;
 }
 
@@ -327,24 +326,6 @@ export default function AdminPage() {
     if (!selectedUser) return;
     await api("POST", undefined, { action: "reset_gm_claim", user_id: selectedUser.id });
     setSelectedUser({ ...selectedUser, gm_claimed_date: null });
-  }
-
-  async function handleToggleDlabApproval() {
-    if (!selectedUser) return;
-    const next = !selectedUser.dlab_approved;
-    const result = await api("POST", undefined, {
-      action: "set_dlab_approval",
-      user_id: selectedUser.id,
-      approved: next,
-    });
-    if (result.error) {
-      setError(result.error);
-      return;
-    }
-    setSelectedUser({ ...selectedUser, dlab_approved: next });
-    setUsers((prev) =>
-      prev.map((u) => (u.id === selectedUser.id ? { ...u, dlab_approved: next } : u))
-    );
   }
 
   async function handleToggleModel(modelId: string, active: boolean) {
@@ -669,26 +650,6 @@ export default function AdminPage() {
                       color: "#fbbf24",
                     }}>
                     Reset GM Claim
-                  </button>
-                </div>
-
-                {/* DLab (db/) per-user approval — independent of plan tier */}
-                <div className="space-y-2 mb-4">
-                  <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">
-                    DLab Access (db/ Claude Opus/Sonnet)
-                  </label>
-                  <button onClick={handleToggleDlabApproval}
-                    className="w-full text-xs font-medium rounded-lg px-3 py-1.5 transition-colors"
-                    style={selectedUser.dlab_approved ? {
-                      background: "rgba(74, 222, 128, 0.10)",
-                      border: "1px solid rgba(74, 222, 128, 0.25)",
-                      color: "#4ade80",
-                    } : {
-                      background: "rgba(248, 113, 113, 0.08)",
-                      border: "1px solid rgba(248, 113, 113, 0.18)",
-                      color: "#f87171",
-                    }}>
-                    {selectedUser.dlab_approved ? "Approved — click to revoke" : "Not approved — click to approve"}
                   </button>
                 </div>
               </div>

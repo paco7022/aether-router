@@ -10,26 +10,8 @@ export const CLAUDE_BLOCK_MESSAGE =
 export const CLAUDE_PAID_ONLY_MESSAGE =
   "Claude models are restricted to paid plans. Upgrade your plan to use them.";
 
-// DLab is gated per-user via profiles.dlab_approved (admin panel).
-// Plan tier does not matter — even free users can be opted in.
-export const DLAB_NOT_APPROVED_MESSAGE =
-  "DLab models require admin approval per account. Contact an admin on Discord to request access.";
-
 // Providers currently approved to route Claude requests.
-//
-// dlab is in the allowlist so the generic Claude paid-only check below
-// doesn't trip; the dlab-specific gate is the dlab_approved flag,
-// enforced separately in the route handler.
 const ALLOWED_CLAUDE_PROVIDERS = new Set(["trolllm", "gameron", "dlab", "riftai"]);
-
-// Providers whose Claude routing bypasses CLAUDE_PAID_ONLY_MESSAGE.
-// dlab uses a per-user admin approval gate instead of plan tier, so the
-// blanket "free plan can't use Claude" rule does not apply here.
-const CLAUDE_PAID_ONLY_BYPASS = new Set(["dlab"]);
-
-export function claudePaidOnlyApplies(provider: string | null | undefined): boolean {
-  return !!provider && !CLAUDE_PAID_ONLY_BYPASS.has(provider);
-}
 
 export function isClaudeModel(model: {
   id?: string | null;

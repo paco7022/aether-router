@@ -16,8 +16,6 @@ import {
 import {
   CLAUDE_BLOCK_MESSAGE,
   CLAUDE_PAID_ONLY_MESSAGE,
-  DLAB_NOT_APPROVED_MESSAGE,
-  claudePaidOnlyApplies,
   isAllowedClaudeProvider,
   isClaudeModel,
 } from "@/lib/claude-block";
@@ -316,22 +314,8 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // DLab (db/) gate: every user must be flipped on individually via
-  // profiles.dlab_approved before they can route here. Plan tier does
-  // NOT matter — admin approval is the only gate. Runs before the
-  // Claude policy gate so the more specific message wins.
-  if (model.provider === "dlab" && !keyInfo.dlabApproved) {
-    return NextResponse.json(
-      { error: { message: DLAB_NOT_APPROVED_MESSAGE, type: "model_blocked" } },
-      { status: 403 }
-    );
-  }
-
-  // Claude policy gate. Anthropic policy change forced this — only the
-  // upstreams listed in claude-block.ts (currently t/, gm/, db/) are
-  // approved to route Claude, and only for paid plans. db/ is exempt
-  // from the paid-plan rule because its dlab_approved gate above is
-  // already a strict per-user admin opt-in.
+  // Claude policy gate. Only upstreams listed in claude-block.ts are
+  // approved to route Claude, and only for paid plans.
   if (isClaudeModel(model)) {
     if (!isAllowedClaudeProvider(model.provider)) {
       return NextResponse.json(
@@ -339,7 +323,7 @@ export async function POST(req: NextRequest) {
         { status: 403 }
       );
     }
-    if (keyInfo.planId === "free" && claudePaidOnlyApplies(model.provider)) {
+    if (keyInfo.planId === "free") {
       return NextResponse.json(
         { error: { message: CLAUDE_PAID_ONLY_MESSAGE, type: "plan_restricted" } },
         { status: 403 }
