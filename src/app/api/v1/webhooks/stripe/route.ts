@@ -95,6 +95,14 @@ export async function POST(req: NextRequest) {
               type: "purchase",
               description: `Purchased ${packageId} (${credits.toLocaleString()} credits)`,
             });
+
+            // Paying for credits flips the API-key activation gate so
+            // the user's keys start working immediately. Once activated
+            // we never auto-revert (downgrade or refund keeps access).
+            await admin
+              .from("profiles")
+              .update({ is_activated: true })
+              .eq("id", userId);
           }
         }
 
@@ -127,10 +135,11 @@ export async function POST(req: NextRequest) {
               ).toISOString(),
             });
 
-            // Update user's plan
+            // Update user's plan and flip the API-key activation gate
+            // so a freshly subscribed user's keys work right away.
             await admin
               .from("profiles")
-              .update({ plan_id: planId })
+              .update({ plan_id: planId, is_activated: true })
               .eq("id", userId);
 
             // Don't auto-grant daily credits — user must click "Claim" button

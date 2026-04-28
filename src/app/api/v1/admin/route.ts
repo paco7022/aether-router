@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
       const search = req.nextUrl.searchParams.get("search") || "";
       let query = supabase
         .from("profiles")
-        .select("id, email, display_name, credits, daily_credits, plan_id, gm_claimed_date, created_at, updated_at")
+        .select("id, email, display_name, credits, daily_credits, plan_id, gm_claimed_date, is_activated, created_at, updated_at")
         .order("created_at", { ascending: false })
         .limit(100);
 
@@ -48,13 +48,13 @@ export async function GET(req: NextRequest) {
         const [{ data: byEmail }, { data: byName }] = await Promise.all([
           supabase
             .from("profiles")
-            .select("id, email, display_name, credits, daily_credits, plan_id, gm_claimed_date, created_at, updated_at")
+            .select("id, email, display_name, credits, daily_credits, plan_id, gm_claimed_date, is_activated, created_at, updated_at")
             .ilike("email", `%${safeSearch}%`)
             .order("created_at", { ascending: false })
             .limit(100),
           supabase
             .from("profiles")
-            .select("id, email, display_name, credits, daily_credits, plan_id, gm_claimed_date, created_at, updated_at")
+            .select("id, email, display_name, credits, daily_credits, plan_id, gm_claimed_date, is_activated, created_at, updated_at")
             .ilike("display_name", `%${safeSearch}%`)
             .order("created_at", { ascending: false })
             .limit(100),
@@ -588,6 +588,18 @@ export async function POST(req: NextRequest) {
       const { error } = await supabase.from("profiles").update({ gm_claimed_date: null }).eq("id", user_id);
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
       return NextResponse.json({ ok: true });
+    }
+
+    // ── API-key activation gate (free-tier only) ──
+    case "set_activation": {
+      const { user_id, activated } = body;
+      if (!user_id) return NextResponse.json({ error: "user_id required" }, { status: 400 });
+      const { error } = await supabase
+        .from("profiles")
+        .update({ is_activated: !!activated })
+        .eq("id", user_id);
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ ok: true, activated: !!activated });
     }
 
     default:

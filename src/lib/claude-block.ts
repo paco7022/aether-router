@@ -13,6 +13,14 @@ export const CLAUDE_PAID_ONLY_MESSAGE =
 // Providers currently approved to route Claude requests.
 const ALLOWED_CLAUDE_PROVIDERS = new Set(["trolllm", "gameron", "dlab", "riftai"]);
 
+// Providers whose Claude routing bypasses the paid-plan-only rule.
+// trolllm: keys expiring soon — open to free users while we drain them.
+const CLAUDE_PAID_ONLY_BYPASS = new Set(["trolllm"]);
+
+export function claudePaidOnlyApplies(provider: string | null | undefined): boolean {
+  return !!provider && !CLAUDE_PAID_ONLY_BYPASS.has(provider);
+}
+
 export function isClaudeModel(model: {
   id?: string | null;
   upstream_model_id?: string | null;

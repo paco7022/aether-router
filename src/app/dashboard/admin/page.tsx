@@ -12,6 +12,7 @@ interface UserProfile {
   daily_credits: number;
   plan_id: string;
   gm_claimed_date: string | null;
+  is_activated: boolean;
   created_at: string;
 }
 
@@ -328,6 +329,24 @@ export default function AdminPage() {
     setSelectedUser({ ...selectedUser, gm_claimed_date: null });
   }
 
+  async function handleToggleActivation() {
+    if (!selectedUser) return;
+    const next = !selectedUser.is_activated;
+    const result = await api("POST", undefined, {
+      action: "set_activation",
+      user_id: selectedUser.id,
+      activated: next,
+    });
+    if (result.error) {
+      setError(result.error);
+      return;
+    }
+    setSelectedUser({ ...selectedUser, is_activated: next });
+    setUsers((prev) =>
+      prev.map((u) => (u.id === selectedUser.id ? { ...u, is_activated: next } : u))
+    );
+  }
+
   async function handleToggleModel(modelId: string, active: boolean) {
     await api("POST", undefined, { action: "toggle_model", model_id: modelId, is_active: active });
     setModels((prev) => prev.map((m) => (m.id === modelId ? { ...m, is_active: active } : m)));
@@ -635,6 +654,26 @@ export default function AdminPage() {
                     </select>
                     <button onClick={handleSetPlan} className="btn-aurora text-xs font-medium px-3 py-1.5">Set</button>
                   </div>
+                </div>
+
+                {/* API-key activation gate */}
+                <div className="space-y-2 mb-4">
+                  <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">
+                    API Key Activation (free tier)
+                  </label>
+                  <button onClick={handleToggleActivation}
+                    className="w-full text-xs font-medium rounded-lg px-3 py-1.5 transition-colors"
+                    style={selectedUser.is_activated ? {
+                      background: "rgba(74, 222, 128, 0.10)",
+                      border: "1px solid rgba(74, 222, 128, 0.25)",
+                      color: "#4ade80",
+                    } : {
+                      background: "rgba(248, 113, 113, 0.08)",
+                      border: "1px solid rgba(248, 113, 113, 0.18)",
+                      color: "#f87171",
+                    }}>
+                    {selectedUser.is_activated ? "Active — click to deactivate" : "Inactive — click to activate"}
+                  </button>
                 </div>
 
                 {/* GM Claim */}

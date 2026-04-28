@@ -3,7 +3,10 @@ import { validateApiKey, validateSession } from "@/lib/auth";
 import { calculateCredits } from "@/lib/credits";
 import { estimateTokens, estimatePromptTokens } from "@/lib/token-estimator";
 import { getProvider } from "@/lib/providers";
-import { isPremiumProvider as isPremiumProviderName } from "@/lib/providers/types";
+import {
+  isPremiumProvider as isPremiumProviderName,
+  isFreeProvider as isFreeProviderName,
+} from "@/lib/providers/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { evaluateBanStatus } from "@/lib/ban";
 import { requireCsrf } from "@/lib/csrf";
@@ -16,6 +19,7 @@ import {
 import {
   CLAUDE_BLOCK_MESSAGE,
   CLAUDE_PAID_ONLY_MESSAGE,
+  claudePaidOnlyApplies,
   isAllowedClaudeProvider,
   isClaudeModel,
 } from "@/lib/claude-block";
@@ -171,6 +175,31 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Free-tier API key activation gate.
+  //
+  // Free users must be flipped to is_activated by an admin (or by paying)
+  // before their API keys can route. The chat dashboard (source="chat")
+  // is exempt — users can still browse the app, just not use Bearer
+  // tokens. Custom keys bypass this entirely; they have their own
+  // per-key controls and are only minted by an admin.
+  if (
+    keyInfo.source === "api" &&
+    !keyInfo.isCustom &&
+    keyInfo.planId === "free" &&
+    !keyInfo.isActivated
+  ) {
+    return NextResponse.json(
+      {
+        error: {
+          message:
+            "This account is not yet activated for API key usage. Message an admin on Discord to request activation.",
+          type: "account_not_activated",
+        },
+      },
+      { status: 403 }
+    );
+  }
+
   const requestFingerprint = getRequestFingerprint(req.headers);
 
   // Extra hardening: if a custom key has exhausted credits, reject before
@@ -315,7 +344,8 @@ export async function POST(req: NextRequest) {
   }
 
   // Claude policy gate. Only upstreams listed in claude-block.ts are
-  // approved to route Claude, and only for paid plans.
+  // approved to route Claude. Paid-plan-only rule applies to most of
+  // them; trolllm is exempt while we drain expiring keys.
   if (isClaudeModel(model)) {
     if (!isAllowedClaudeProvider(model.provider)) {
       return NextResponse.json(
@@ -323,7 +353,7 @@ export async function POST(req: NextRequest) {
         { status: 403 }
       );
     }
-    if (keyInfo.planId === "free") {
+    if (keyInfo.planId === "free" && claudePaidOnlyApplies(model.provider)) {
       return NextResponse.json(
         { error: { message: CLAUDE_PAID_ONLY_MESSAGE, type: "plan_restricted" } },
         { status: 403 }
@@ -678,7 +708,15 @@ export async function POST(req: NextRequest) {
   let freePoolName: string | null = null;
   const freePoolReservationTokens = estimatedPrompt + reservedCompletionTokens;
 
-  if (!activeEventId && (model.provider === "nano" || upstreamModel === "deepseek-v3.2" || isFlashPromo)) {
+  // trolllm short-circuit: keys are about to expire, draining them is
+  // intentional. No quota tracking — flat free for everyone (no credit
+  // deduction, no premium-request cost). Skip the daily-pool reservation
+  // path entirely.
+  if (!activeEventId && isFreeProviderName(model.provider)) {
+    isFreePool = true;
+  }
+
+  if (!isFreePool && !activeEventId && (model.provider === "nano" || upstreamModel === "deepseek-v3.2" || isFlashPromo)) {
     freePoolName = model.provider === "nano"
       ? "nano"
       : isFlashPromo
