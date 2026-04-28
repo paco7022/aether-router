@@ -24,9 +24,10 @@ export default function DashboardLayout({
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
-  const supabase = createClient();
 
   useEffect(() => {
+    const supabase = createClient();
+
     async function loadProfile() {
       const { data: { user: authUser } } = await supabase.auth.getUser();
       if (!authUser) {
@@ -50,8 +51,21 @@ export default function DashboardLayout({
       setIsAdmin(checkAdmin(authUser.email));
       setLoading(false);
     }
+
     loadProfile();
-  }, []);
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (event) => {
+        if (event === "SIGNED_OUT") {
+          router.push("/login");
+        }
+      }
+    );
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [router]);
 
   if (loading || !user) {
     return (

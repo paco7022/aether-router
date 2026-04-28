@@ -2,7 +2,6 @@
 
 import { useEffect, useRef } from "react";
 import { getFingerprint } from "@/lib/fingerprint";
-import { createClient } from "@/lib/supabase/client";
 
 /**
  * Sends the device fingerprint to the server after auth.
@@ -10,7 +9,6 @@ import { createClient } from "@/lib/supabase/client";
  */
 export function useFingerprintCapture() {
   const sent = useRef(false);
-  const supabase = createClient();
 
   useEffect(() => {
     if (sent.current) return;
@@ -28,22 +26,13 @@ export function useFingerprintCapture() {
         });
 
         if (!fpRes.ok) {
-          const payload = await fpRes.json().catch(() => ({}));
-          const reason =
-            (payload as { reason?: string; error?: string }).reason ||
-            (payload as { reason?: string; error?: string }).error ||
-            "This device is blocked from accessing the app.";
-
-          await supabase.auth.signOut();
-          window.location.href = `/login?error=banned&reason=${encodeURIComponent(reason)}`;
+          console.warn(`Fingerprint capture failed (${fpRes.status}), will retry next visit.`);
+          sent.current = false;
           return;
         }
 
         sent.current = true;
 
-        // Redeem pending referral (covers OAuth, where /register couldn't
-        // call redeem directly). Safe if already redeemed — the RPC
-        // rejects a second attempt with "Already referred".
         const pendingRef = sessionStorage.getItem("aether_ref");
         if (pendingRef) {
           try {

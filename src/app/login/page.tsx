@@ -47,28 +47,13 @@ export default function LoginPage() {
     } else {
       const fingerprint = fpRef.current || (await getFingerprint().catch(() => null));
       if (!fingerprint) {
-        await supabase.auth.signOut();
-        setError("We couldn't verify your device. Please try again.");
-        setLoading(false);
-        return;
-      }
-
-      const fpRes = await fetch("/api/v1/fingerprint", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Requested-With": "AetherRouter" },
-        body: JSON.stringify({ fingerprint }),
-      });
-
-      if (!fpRes.ok) {
-        const payload = await fpRes.json().catch(() => ({}));
-        const reason =
-          (payload as { reason?: string; error?: string }).reason ||
-          (payload as { reason?: string; error?: string }).error ||
-          "This device is blocked.";
-        await supabase.auth.signOut();
-        setError(reason);
-        setLoading(false);
-        return;
+        console.warn("Could not generate fingerprint, proceeding without it.");
+      } else {
+        await fetch("/api/v1/fingerprint", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Requested-With": "AetherRouter" },
+          body: JSON.stringify({ fingerprint }),
+        }).catch(() => {});
       }
 
       router.push("/dashboard");

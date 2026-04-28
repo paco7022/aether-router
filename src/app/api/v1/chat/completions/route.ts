@@ -8,12 +8,10 @@ import {
   isFreeProvider as isFreeProviderName,
 } from "@/lib/providers/types";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { evaluateBanStatus } from "@/lib/ban";
 import { requireCsrf } from "@/lib/csrf";
 import {
   getCustomKeyNoCreditsError,
   getNoPaidBalanceError,
-  getRequestFingerprint,
   isApiKeyAuthHeader,
 } from "@/lib/chat-preflight";
 import {
@@ -200,8 +198,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const requestFingerprint = getRequestFingerprint(req.headers);
-
   // Extra hardening: if a custom key has exhausted credits, reject before
   // parsing payload or touching upstream selection paths.
   const customKeyNoCreditsError = keyInfo.isCustom
@@ -209,37 +205,6 @@ export async function POST(req: NextRequest) {
     : null;
   if (customKeyNoCreditsError) {
     return NextResponse.json(customKeyNoCreditsError.payload, { status: customKeyNoCreditsError.status });
-  }
-
-  const banDecision = await evaluateBanStatus({
-    headers: req.headers,
-    userId: keyInfo.userId,
-    fingerprint: requestFingerprint,
-  });
-
-  if (banDecision?.blocked) {
-    if (banDecision.statusCode === 403) {
-      return NextResponse.json(
-        {
-          error: {
-            message: banDecision.reason,
-            type: "ban_enforced",
-            source: banDecision.source,
-          },
-        },
-        { status: 403 }
-      );
-    }
-
-    return NextResponse.json(
-      {
-        error: {
-          message: "Unable to verify account status right now. Please try again.",
-          type: "server_error",
-        },
-      },
-      { status: 503 }
-    );
   }
 
   // 3. Parse request body. Reject oversized payloads up-front: a 200-page

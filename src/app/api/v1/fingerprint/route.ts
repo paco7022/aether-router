@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireCsrf } from "@/lib/csrf";
-import { evaluateBanStatus, getClientIpFromHeaders } from "@/lib/ban";
+import { getClientIpFromHeaders } from "@/lib/ban";
 
 // POST /api/v1/fingerprint — store fingerprint + check ban
 export async function POST(req: NextRequest) {
@@ -26,27 +26,6 @@ export async function POST(req: NextRequest) {
   const cleanFingerprint = fingerprint.trim();
   if (!cleanFingerprint) {
     return NextResponse.json({ error: "fingerprint required" }, { status: 400 });
-  }
-
-  const banDecision = await evaluateBanStatus({
-    headers: req.headers,
-    userId: user.id,
-    fingerprint: cleanFingerprint,
-    adminClient: admin,
-  });
-
-  if (banDecision?.blocked) {
-    if (banDecision.statusCode === 403) {
-      return NextResponse.json(
-        { banned: true, reason: banDecision.reason, source: banDecision.source },
-        { status: 403 }
-      );
-    }
-
-    return NextResponse.json(
-      { error: "Ban check unavailable", reason: banDecision.reason },
-      { status: 503 }
-    );
   }
 
   const ip = getClientIpFromHeaders(req.headers);
