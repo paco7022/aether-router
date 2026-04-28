@@ -1,5 +1,6 @@
 import { createServerSupabase } from "@/lib/supabase/server";
 import { pricePerMTokens, creditsToUsd } from "@/lib/credits";
+import { isPremiumProvider as isPremiumProviderName } from "@/lib/providers/types";
 
 const CAPABILITY_META: Record<string, { label: string; color: string; icon: string }> = {
   tool_calling:    { label: "Tools",     color: "rgba(59, 130, 246, 0.85)",  icon: "T" },
@@ -100,12 +101,7 @@ export default async function ModelsPage() {
             </thead>
             <tbody>
               {(models || []).map((model) => {
-                const isPremium =
-                  model.provider === "trolllm" ||
-                  model.provider === "antigravity" ||
-                  model.provider === "webproxy" ||
-                  model.provider === "hapuppy" ||
-                  model.provider === "gameron";
+                const isPremium = isPremiumProviderName(model.provider);
                 const creditsInput = pricePerMTokens(model.cost_per_m_input, model.margin);
                 const creditsOutput = pricePerMTokens(model.cost_per_m_output, model.margin);
                 const priceInput = creditsToUsd(creditsInput);
