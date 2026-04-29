@@ -8,7 +8,7 @@ export const metadata: Metadata = {
 };
 
 export default function PoliciesPage() {
-  const lastUpdated = "April 10, 2026";
+  const lastUpdated = "April 28, 2026";
 
   return (
     <div className="min-h-screen relative">
@@ -158,8 +158,16 @@ export default function PoliciesPage() {
           </p>
           <ul className="list-disc pl-5 space-y-1 text-[var(--text-muted)]">
             <li>
-              Generate content that is illegal in your jurisdiction or ours,
-              including CSAM, targeted harassment, or content that incites
+              <span className="text-red-300/90 font-semibold">
+                Generate, request, solicit, or transmit child sexual abuse
+                material (CSAM) or any sexual content involving minors,
+                whether real, fictional, drawn, generated, or described.
+              </span>{" "}
+              This is a zero-tolerance policy.
+            </li>
+            <li>
+              Generate other content that is illegal in your jurisdiction or
+              ours, including targeted harassment or content that incites
               violence.
             </li>
             <li>
@@ -172,12 +180,21 @@ export default function PoliciesPage() {
             </li>
             <li>
               Bypass, disable, or interfere with billing, rate limiting,
-              abuse detection, or account verification.
+              abuse detection, content moderation, or account verification.
             </li>
           </ul>
           <p>
-            Violations may result in immediate account termination without
-            refund. We also reserve the right to cooperate with law
+            All prompts sent to Aether Router are screened by an automated
+            CSAM classifier. A confirmed match results in{" "}
+            <span className="text-white/85 font-semibold">
+              immediate and permanent account termination, forfeiture of
+              all credits and subscription time without refund, and may be
+              reported to the National Center for Missing &amp; Exploited
+              Children (NCMEC) and other law enforcement agencies as
+              required by law
+            </span>
+            . Other violations may result in immediate account termination
+            without refund. We reserve the right to cooperate with law
             enforcement when required.
           </p>
         </Section>

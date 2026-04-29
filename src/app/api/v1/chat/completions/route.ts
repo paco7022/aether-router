@@ -6,6 +6,7 @@ import { getProvider } from "@/lib/providers";
 import {
   isPremiumProvider as isPremiumProviderName,
   isFreeProvider as isFreeProviderName,
+  isFlatRateProvider as isFlatRateProviderName,
 } from "@/lib/providers/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireCsrf } from "@/lib/csrf";
@@ -21,6 +22,11 @@ import {
   isAllowedClaudeProvider,
   isClaudeModel,
 } from "@/lib/claude-block";
+import {
+  CSAM_BLOCK_MESSAGE,
+  moderateMessages,
+  recordCsamIncidentAndBan,
+} from "@/lib/content-moderation";
 
 export const runtime = "nodejs";
 // NOTE: If a Vercel function timeout kills a streaming request mid-flight,
@@ -283,6 +289,27 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // 3.5. CSAM moderation gate — runs before any DB writes, credit
+  // reservations, or upstream selection. Only the `sexual/minors` category
+  // is enforced; everything else passes through. Fails OPEN on transient
+  // OpenAI errors so a moderator outage doesn't take the router down.
+  //
+  // On a confirmed hit: log to csam_incidents, permanently ban the auth
+  // user, disable every API key they own, and return a generic 403 — we
+  // do NOT echo the category back to the client.
+  const moderation = await moderateMessages(messages as { role: string; content: unknown }[]);
+  if (moderation.flagged) {
+    await recordCsamIncidentAndBan({
+      userId: keyInfo.userId,
+      source: keyInfo.source,
+      flaggedItems: moderation.flaggedItems,
+    });
+    return NextResponse.json(
+      { error: { message: CSAM_BLOCK_MESSAGE, type: "policy_violation" } },
+      { status: 403 }
+    );
+  }
+
   // 4. Look up model
   const supabase = createAdminClient();
   const { data: model } = await supabase
@@ -327,6 +354,7 @@ export async function POST(req: NextRequest) {
   }
 
   const isPremiumProvider = isPremiumProviderName(model.provider);
+  const isFlatRateProvider = isFlatRateProviderName(model.provider);
 
   // 5.4. Active free event lookup (admin-created pools that make a model
   // prefix free for a set of plans, with their own per-user limits).
@@ -767,7 +795,7 @@ export async function POST(req: NextRequest) {
         margin: model.margin,
       }
     );
-    const reservedCredits = isPremiumProvider ? 1 : Math.max(reservedCreditsRaw, 1);
+    const reservedCredits = isPremiumProvider ? 1 : isFlatRateProvider ? Number(model.premium_request_cost ?? 0.1) : Math.max(reservedCreditsRaw, 1);
 
     if (keyInfo.isCustom && keyInfo.customCredits !== null) {
       const { data: keyBalance, error: reserveErr } = await supabase.rpc("deduct_custom_key_credits", {
@@ -1030,7 +1058,8 @@ export async function POST(req: NextRequest) {
     );
 
     // Premium-request models (t/, an/, w/) are flat-rate: 1 credit + N premium-request budget.
-    const finalCredits = isFreePool ? 0 : isPremiumProvider ? 1 : Math.max(credits, 1);
+    // Flat-rate models (op/) charge a fixed per-request fee stored in premium_request_cost.
+    const finalCredits = isFreePool ? 0 : isPremiumProvider ? 1 : isFlatRateProvider ? Number(model.premium_request_cost ?? 0.1) : Math.max(credits, 1);
 
     // 9. Settle credits — adjust reservation to match actual usage
     let chargedCredits = 0;
@@ -1208,7 +1237,8 @@ async function handleStreamingResponse(
     );
 
     const isPremiumModel = isPremiumProviderName(model.provider);
-    const finalCredits = isFreePool ? 0 : isPremiumModel ? 1 : Math.max(credits, 1);
+    const isFlatRateModel = isFlatRateProviderName(model.provider);
+    const finalCredits = isFreePool ? 0 : isPremiumModel ? 1 : isFlatRateModel ? Number(model.premium_request_cost ?? 0.1) : Math.max(credits, 1);
 
     let wasCharged = isFreePool;
     let balanceAfter = reservation?.balanceAfterReserve ?? 0;
