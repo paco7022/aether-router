@@ -1,9 +1,10 @@
 // Artifact detection for the in-app chat.
 //
-// Walks an assistant message and decides which fenced code blocks deserve
-// to live in the side panel ("artifacts") vs stay inline. The decision is
-// purely heuristic — model output isn't required to follow any convention,
-// so this works for minimax/deepseek/glm/etc. that don't respect XML tags.
+// Walks an assistant message and decides which fenced code blocks and XML
+// artifact tags deserve to live in the side panel ("artifacts") vs stay
+// inline. The decision is purely heuristic — model output isn't required
+// to follow any convention, so this works for models that use markdown
+// fences as well as Claude-style XML artifacts.
 //
 // Source of truth is always the raw message text. We don't persist
 // artifacts; they're re-derived on every render. IDs are stable as long
@@ -12,15 +13,15 @@
 export type ArtifactKind = "html" | "svg" | "code";
 
 export type Artifact = {
-  id: string;          // stable: `${messageId}#${index}`
+  id: string;
   messageId: string;
-  index: number;       // 0-based ordinal within the message
-  language: string;    // lowercased; "text" if none was specified
-  title: string;       // derived from code (function name, html title, etc.)
-  filename: string;    // `${title || language}-${index+1}.${ext}`
+  index: number;
+  language: string;
+  title: string;
+  filename: string;
   code: string;
-  kind: ArtifactKind;  // determines whether the panel offers a preview tab
-  closed: boolean;     // false while the fence is still streaming
+  kind: ArtifactKind;
+  closed: boolean;
 };
 
 export type Segment =
@@ -33,8 +34,6 @@ export type ParsedMessage = {
   artifacts: Artifact[];
 };
 
-// Languages that *always* become artifacts regardless of length — these
-// have a meaningful preview or are typically substantial UI work.
 const ALWAYS_ARTIFACT = new Set([
   "html", "svg", "jsx", "tsx", "vue", "svelte", "react",
 ]);
@@ -92,24 +91,20 @@ function deriveTitle(lang: string, code: string, index: number): { title: string
   const ext = langExt(lang);
   const fallback = `${normalize(lang) || "snippet"}-${index + 1}`;
 
-  // <title>...</title> for HTML
   const htmlTitle = trimmed.match(/<title>\s*([^<\n]+?)\s*<\/title>/i);
   if (htmlTitle) {
     const t = htmlTitle[1].slice(0, 60);
     return { title: t, filename: slugify(t) + "." + ext };
   }
 
-  // Top-level JS/TS function or class or exported const
   const jsName = trimmed.match(
     /(?:export\s+(?:default\s+)?)?(?:async\s+)?(?:function|class|const|let|var)\s+([A-Za-z_$][\w$]*)/
   );
   if (jsName) return { title: jsName[1], filename: jsName[1] + "." + ext };
 
-  // Python def/class
   const pyName = trimmed.match(/(?:def|class)\s+([A-Za-z_][\w]*)/);
   if (pyName) return { title: pyName[1], filename: pyName[1] + "." + ext };
 
-  // First non-empty comment line as title
   const firstComment = trimmed.match(/^(?:\/\/|#|--)\s*(.{4,60})/m);
   if (firstComment) {
     const t = firstComment[1].trim().slice(0, 60);
@@ -123,15 +118,208 @@ function slugify(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "artifact";
 }
 
-// ```lang\n...code...\n``` — captures the opening fence's language.
-const FENCE_OPEN = /```([\w+#.-]*)\n/g;
+// ---------------------------------------------------------------------------
+// XML artifact tag extraction
+// ---------------------------------------------------------------------------
+// Claude and other models emit artifacts using XML-style tags rather than
+// markdown fences. We support two formats:
+//
+//   <antml:artifact identifier="id" type="application/vnd.ant.code" title="file.py">
+//     <antml:parameter name="language">python</antml:parameter>
+//     code here
+//   </antml:artifact>
+//
+//   <artifact name="file.py" language="python" type="code">
+//     code here
+//   </artifact>
+//
+// We also handle the generic <artifact>...</artifact> form with no attributes,
+// treating the entire content as a text artifact.
+//
+// These are extracted BEFORE fallback fence scanning so that XML tags are
+// stripped from the displayed text and replaced with artifact-ref segments.
+
+type XmlArtifact = {
+  start: number;
+  end: number;
+  language: string;
+  title: string;
+  code: string;
+};
+
+function extractXmlArtifacts(raw: string): XmlArtifact[] {
+  const results: XmlArtifact[] = [];
+
+  // Pattern 1: <antml:artifact ...>...</antml:artifact>
+  const antmlRe = /<antml:artifact\b[^>]*>[\s\S]*?<\/antml:artifact>/g;
+  let m: RegExpExecArray | null;
+  while ((m = antmlRe.exec(raw)) !== null) {
+    const full = m[0];
+    const start = m.index;
+    const end = start + full.length;
+
+    const titleAttr = full.match(/\btitle\s*=\s*"([^"]*)"/);
+    const title = titleAttr?.[1] ?? "";
+
+    const langParam = full.match(/<antml:parameter\s+name\s*=\s*"language"[^>]*>([^<]*)<\/antml:parameter>/);
+    const language = langParam?.[1]?.trim()?.toLowerCase() ?? "";
+
+    // Extract the code content: everything after the last </antml:parameter>
+    // and before </antml:artifact>, trimmed.
+    const lastParamEnd = full.lastIndexOf("</antml:parameter>");
+    const codeStart = lastParamEnd === -1
+      ? full.indexOf(">") + 1
+      : lastParamEnd + "</antml:parameter>".length;
+    const codeEnd = full.lastIndexOf("</antml:artifact>");
+    const code = full.slice(codeStart, codeEnd).trim();
+
+    results.push({ start, end, language, title, code });
+  }
+
+  // Pattern 2: <artifact ...>...</artifact> (simple attributes)
+  const artRe = /<artifact\b[^>]*>[\s\S]*?<\/artifact>/g;
+  while ((m = artRe.exec(raw)) !== null) {
+    // Skip if this position overlaps with an already-extracted antml:artifact
+    const overlap = results.some(
+      (r) => m!.index >= r.start && m!.index < r.end
+    );
+    if (overlap) continue;
+
+    const full = m[0];
+    const start = m.index;
+    const end = start + full.length;
+
+    const nameAttr = full.match(/\bname\s*=\s*"([^"]*)"/);
+    const langAttr = full.match(/\blanguage\s*=\s*"([^"]*)"/);
+    const typeAttr = full.match(/\btype\s*=\s*"([^"]*)"/);
+
+    const title = nameAttr?.[1] ?? "";
+    let language = langAttr?.[1]?.toLowerCase() ?? "";
+
+    // Infer language from type if not explicit (e.g. type="application/vnd.ant.code")
+    if (!language && typeAttr) {
+      const typeLang = typeAttr[1].match(/\/(?:x-)?(\w+)$/);
+      if (typeLang) language = typeLang[1].toLowerCase();
+    }
+
+    const openEnd = full.indexOf(">");
+    const closeStart = full.lastIndexOf("</artifact>");
+    const code = full.slice(openEnd + 1, closeStart).trim();
+
+    results.push({ start, end, language, title, code });
+  }
+
+  return results;
+}
+
+// ---------------------------------------------------------------------------
+// Combining XML extraction + markdown fence scanning
+// ---------------------------------------------------------------------------
 
 export function parseMessage(messageId: string, raw: string): ParsedMessage {
   const segments: Segment[] = [];
   const artifacts: Artifact[] = [];
-
-  let cursor = 0;
   let artifactIndex = 0;
+
+  // Phase 1: extract XML artifacts and build a mask of their spans so we
+  // can skip those regions during fence scanning.
+  const xmlArts = extractXmlArtifacts(raw);
+  const xmlSpans: Array<{ start: number; end: number }> = xmlArts.map((a) => ({
+    start: a.start,
+    end: a.end,
+  }));
+
+  // If we found XML artifacts, split the text into regions: text that falls
+  // outside XML tags (scanned for markdown fences) and artifact-ref
+  // segments replacing the XML tags.
+  if (xmlArts.length > 0) {
+    // Sort by start position
+    xmlArts.sort((a, b) => a.start - b.start);
+
+    let cursor = 0;
+    for (const xa of xmlArts) {
+      // Text before this XML artifact — scan for markdown fences
+      if (xa.start > cursor) {
+        const textBefore = raw.slice(cursor, xa.start);
+        const { segments: fenceSegs, artifacts: fenceArts, nextIndex } = scanFences(
+          messageId,
+          textBefore,
+          artifactIndex,
+        );
+        segments.push(...fenceSegs);
+        artifacts.push(...fenceArts);
+        artifactIndex = nextIndex;
+      }
+
+      // The XML artifact itself becomes an artifact-ref
+      const id = `${messageId}#${artifactIndex}`;
+      const lang = xa.language || "text";
+      const effectiveLang = normalize(lang) || "text";
+
+      // If the XML artifact provided a title, use it; otherwise derive
+      let title: string;
+      let filename: string;
+      if (xa.title) {
+        title = xa.title;
+        filename = xa.title.includes(".")
+          ? xa.title
+          : xa.title + "." + langExt(effectiveLang);
+      } else {
+        ({ title, filename } = deriveTitle(effectiveLang, xa.code, artifactIndex));
+      }
+
+      artifacts.push({
+        id,
+        messageId,
+        index: artifactIndex,
+        language: effectiveLang,
+        title,
+        filename,
+        code: xa.code,
+        kind: getArtifactKind(effectiveLang),
+        closed: true,
+      });
+      segments.push({ kind: "artifact-ref", artifactId: id });
+      artifactIndex++;
+
+      cursor = xa.end;
+    }
+
+    // Remaining text after the last XML artifact
+    if (cursor < raw.length) {
+      const textAfter = raw.slice(cursor);
+      const { segments: fenceSegs, artifacts: fenceArts, nextIndex } = scanFences(
+        messageId,
+        textAfter,
+        artifactIndex,
+      );
+      segments.push(...fenceSegs);
+      artifacts.push(...fenceArts);
+      artifactIndex = nextIndex;
+    }
+
+    return { segments, artifacts };
+  }
+
+  // Phase 2: no XML artifacts found — pure markdown fence scanning
+  const { segments: fenceSegs, artifacts: fenceArts } = scanFences(messageId, raw, 0);
+  return { segments: fenceSegs, artifacts: fenceArts };
+}
+
+// Markdown fence scanner (```lang\n...code...\n```)
+// Extracted into a reusable function so the XML path can call it on
+// sub-regions of the text.
+function scanFences(
+  messageId: string,
+  raw: string,
+  startIndex: number,
+): { segments: Segment[]; artifacts: Artifact[]; nextIndex: number } {
+  const segments: Segment[] = [];
+  const artifacts: Artifact[] = [];
+  let artifactIndex = startIndex;
+
+  const FENCE_OPEN = /```([\w+#.-]*)\n/g;
+  let cursor = 0;
 
   while (cursor < raw.length) {
     FENCE_OPEN.lastIndex = cursor;
@@ -150,13 +338,9 @@ export function parseMessage(messageId: string, raw: string): ParsedMessage {
     const lang = open[1] || "";
     const codeStart = open.index + open[0].length;
 
-    // Closing fence: a line that is exactly ``` (preceded by newline or at
-    // start of buffer, followed by newline or EOS).
     const closeIdx = findFenceClose(raw, codeStart);
 
     if (closeIdx === -1) {
-      // Unclosed — still streaming. Render inline as code so the user sees
-      // it grow; we'll re-parse on the next delta and possibly extract.
       const code = raw.slice(codeStart);
       segments.push({ kind: "code-inline", language: lang, code, closed: false });
       cursor = raw.length;
@@ -164,12 +348,8 @@ export function parseMessage(messageId: string, raw: string): ParsedMessage {
     }
 
     const code = raw.slice(codeStart, closeIdx);
-    // Skip the "```" itself plus any trailing newline.
-    const afterClose = (() => {
-      let i = closeIdx + 3;
-      if (raw[i] === "\n") i++;
-      return i;
-    })();
+    let afterClose = closeIdx + 3;
+    if (raw[afterClose] === "\n") afterClose++;
 
     if (shouldBeArtifact(lang, code)) {
       const id = `${messageId}#${artifactIndex}`;
@@ -194,11 +374,9 @@ export function parseMessage(messageId: string, raw: string): ParsedMessage {
     cursor = afterClose;
   }
 
-  return { segments, artifacts };
+  return { segments, artifacts, nextIndex: artifactIndex };
 }
 
-// Look for a closing ``` that sits on its own line. Permissive about the
-// trailing newline so we still match if it's the last thing in the buffer.
 function findFenceClose(raw: string, from: number): number {
   let i = from;
   while (i < raw.length) {
@@ -214,9 +392,6 @@ function findFenceClose(raw: string, from: number): number {
   return -1;
 }
 
-// Convenience for the panel: collect all artifacts across an array of
-// (messageId, content) pairs. Stable ordering: oldest message first,
-// preserving in-message index.
 export function collectArtifacts(items: Array<{ id: string; text: string }>): Artifact[] {
   const out: Artifact[] = [];
   for (const item of items) {
