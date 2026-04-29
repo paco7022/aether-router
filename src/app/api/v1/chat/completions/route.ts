@@ -363,6 +363,12 @@ export async function POST(req: NextRequest) {
     isPremiumProvider &&
     Number(model.cost_per_m_input) === 0 &&
     Number(model.premium_request_cost) === 0;
+  // Same for flat-rate (openrouter): premium_request_cost=0 means free promo.
+  // Without this short-circuit we'd call deduct_credits(0), which the RPC
+  // rejects with -1 → 402 "Insufficient credits, credits_required: 0".
+  const isZeroCostFlatRate =
+    isFlatRateProvider &&
+    Number(model.premium_request_cost) === 0;
 
   // 5.4. Active free event lookup (admin-created pools that make a model
   // prefix free for a set of plans, with their own per-user limits).
@@ -709,8 +715,9 @@ export async function POST(req: NextRequest) {
     isFreePool = true;
   }
 
-  // Zero-cost premium models route as free (no credits, no premium pool).
-  if (!activeEventId && isZeroCostPremium) {
+  // Zero-cost premium / flat-rate models route as free (no credits, no
+  // premium pool, no flat-rate fee).
+  if (!activeEventId && (isZeroCostPremium || isZeroCostFlatRate)) {
     isFreePool = true;
   }
 
