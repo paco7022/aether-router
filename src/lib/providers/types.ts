@@ -32,7 +32,6 @@ export interface Provider {
 // trolllm is NOT in this list right now: the upstream keys are about
 // to expire, so t/ runs as a free provider until they're rotated out.
 const PREMIUM_PROVIDERS = new Set<string>([
-  "antigravity",
   "webproxy",
   "hapuppy",
   "gameron",

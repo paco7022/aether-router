@@ -356,6 +356,13 @@ export async function POST(req: NextRequest) {
 
   const isPremiumProvider = isPremiumProviderName(model.provider);
   const isFlatRateProvider = isFlatRateProviderName(model.provider);
+  // Zero-cost premium models (cost_per_m_input=0 + premium_request_cost=0) route
+  // as free — no credits or premium-request budget consumed. Revert by restoring
+  // cost/margin values in the models table.
+  const isZeroCostPremium =
+    isPremiumProvider &&
+    Number(model.cost_per_m_input) === 0 &&
+    Number(model.premium_request_cost) === 0;
 
   // 5.4. Active free event lookup (admin-created pools that make a model
   // prefix free for a set of plans, with their own per-user limits).
@@ -554,9 +561,10 @@ export async function POST(req: NextRequest) {
       customKeyRequestReserved = true;
     }
   } else if (!activeEvent) {
-    // 5.5b-normal. Premium plan limits (requests/day + context cap) — applies to trolllm, antigravity, webproxy, hapuppy, gameron.
+    // 5.5b-normal. Premium plan limits (requests/day + context cap) — applies to trolllm, webproxy, hapuppy, gameron, dlab, riftai.
     // Skipped entirely when an active event covers this model for the user's plan.
-    if (isPremiumProvider) {
+    // Zero-cost premium models (free promos) also skip this entire block.
+    if (isPremiumProvider && !isZeroCostPremium) {
       // Antigravity: require daily claim
       if (model.provider === "antigravity") {
         const today = new Date().toISOString().split("T")[0];
@@ -698,6 +706,11 @@ export async function POST(req: NextRequest) {
   // deduction, no premium-request cost). Skip the daily-pool reservation
   // path entirely.
   if (!activeEventId && isFreeProviderName(model.provider)) {
+    isFreePool = true;
+  }
+
+  // Zero-cost premium models route as free (no credits, no premium pool).
+  if (!activeEventId && isZeroCostPremium) {
     isFreePool = true;
   }
 
@@ -1085,7 +1098,7 @@ export async function POST(req: NextRequest) {
     // plan cap. Free tier only — paid plans are exempt because the estimator
     // under-counts often enough that paid users were getting hit with debt
     // they didn't deserve.
-    if (isPremiumProvider && !activeEventId && !keyInfo.isCustom && keyInfo.planId === "free") {
+    if (isPremiumProvider && !isZeroCostPremium && !activeEventId && !keyInfo.isCustom && keyInfo.planId === "free") {
       const { error: debtErr } = await supabase.rpc("accrue_prompt_cap_debt", {
         p_user_id: keyInfo.userId,
         p_plan_id: keyInfo.planId,
