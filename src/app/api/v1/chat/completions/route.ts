@@ -35,7 +35,8 @@ export const runtime = "nodejs";
 // Consider a periodic reconciliation job to detect orphaned reservations.
 export const maxDuration = 300;
 
-// Free-pool limits shared by nano (na/) and airforce deepseek-v3.2.
+// Free-pool limits for airforce deepseek-v3.2 (the only remaining
+// soft/hard-capped daily pool — nano and op/deepseek-v4-flash promos ended).
 const PER_USER_DAILY_TOKEN_LIMIT = 200_000;
 const GLOBAL_DAILY_TOKEN_POOL = 10_000_000;
 const DEFAULT_STREAM_RESERVATION_COMPLETION_TOKENS = 4096;
@@ -682,22 +683,13 @@ export async function POST(req: NextRequest) {
 
   // Free pool gating.
   //
-  // nano (na/):           first 200k tokens/day per user are free (under a
-  //                       10M/day global free pool). Once either cap is hit,
-  //                       the request falls through to pay-as-you-go at the
-  //                       model's normal rate.
   // airforce deepseek-v3.2: fully free forever. Hard-capped at 200k/day per
-  //                       user and 10M/day globally — crossing either returns
-  //                       429. Never charges credits.
-  // op/deepseek-v4-flash: 3-day launch promo (ends 2026-04-28 00:00 UTC).
-  //                       Same soft-cap shape as nano; after the window
-  //                       ends the model becomes pay-as-you-go.
+  //                         user and 10M/day globally — crossing either
+  //                         returns 429. Never charges credits.
+  // trolllm (t/):           flat-free short-circuit; keys draining. Handled
+  //                         just below via isFreeProviderName.
   //
-  // All pools reset at UTC midnight.
-  const FLASH_PROMO_END = Date.parse("2026-04-28T00:00:00Z");
-  const isFlashPromo =
-    upstreamModel === "deepseek/deepseek-v4-flash" && Date.now() < FLASH_PROMO_END;
-
+  // Pools reset at UTC midnight.
   let freePoolName: string | null = null;
   const freePoolReservationTokens = estimatedPrompt + reservedCompletionTokens;
 
@@ -709,12 +701,8 @@ export async function POST(req: NextRequest) {
     isFreePool = true;
   }
 
-  if (!isFreePool && !activeEventId && (model.provider === "nano" || upstreamModel === "deepseek-v3.2" || isFlashPromo)) {
-    freePoolName = model.provider === "nano"
-      ? "nano"
-      : isFlashPromo
-        ? "deepseek-v4-flash"
-        : "deepseek-v3.2";
+  if (!isFreePool && !activeEventId && upstreamModel === "deepseek-v3.2") {
+    freePoolName = "deepseek-v3.2";
     const freePoolReservation = await reserveDailyFreePoolAllowance(
       supabase,
       freePoolName,
@@ -726,36 +714,12 @@ export async function POST(req: NextRequest) {
       const globalExhausted = freePoolReservation.poolUsed >= freePoolReservation.poolLimit;
       const userExhausted = freePoolReservation.userUsed >= freePoolReservation.userLimit;
 
-      if (freePoolName === "deepseek-v3.2") {
-        // Hard caps — 429 when exceeded.
-        if (globalExhausted) {
-          return NextResponse.json(
-            {
-              error: {
-                message: `Daily global pool exhausted for deepseek-v3.2 (${(freePoolReservation.poolLimit / 1_000_000).toFixed(0)}M tokens/day). Resets at midnight UTC.`,
-                type: "rate_limit",
-              },
-            },
-            { status: 429 }
-          );
-        }
-
-        if (userExhausted) {
-          return NextResponse.json(
-            {
-              error: {
-                message: `Daily deepseek-v3.2 token limit reached (${(freePoolReservation.userLimit / 1000).toFixed(0)}k tokens/day per user). Resets at midnight UTC.`,
-                type: "rate_limit",
-              },
-            },
-            { status: 429 }
-          );
-        }
-
+      // Hard caps — 429 when exceeded.
+      if (globalExhausted) {
         return NextResponse.json(
           {
             error: {
-              message: "Daily deepseek-v3.2 free pool is currently unavailable. Try again later.",
+              message: `Daily global pool exhausted for deepseek-v3.2 (${(freePoolReservation.poolLimit / 1_000_000).toFixed(0)}M tokens/day). Resets at midnight UTC.`,
               type: "rate_limit",
             },
           },
@@ -763,12 +727,30 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // nano — soft caps. If reservation fails, request falls through to paid mode.
-      freePoolName = null;
-      isFreePool = false;
-    } else {
-      isFreePool = true;
+      if (userExhausted) {
+        return NextResponse.json(
+          {
+            error: {
+              message: `Daily deepseek-v3.2 token limit reached (${(freePoolReservation.userLimit / 1000).toFixed(0)}k tokens/day per user). Resets at midnight UTC.`,
+              type: "rate_limit",
+            },
+          },
+          { status: 429 }
+        );
+      }
+
+      return NextResponse.json(
+        {
+          error: {
+            message: "Daily deepseek-v3.2 free pool is currently unavailable. Try again later.",
+            type: "rate_limit",
+          },
+        },
+        { status: 429 }
+      );
     }
+
+    isFreePool = true;
   }
 
   // 5.6. Atomic credit reservation before forwarding to upstream.
