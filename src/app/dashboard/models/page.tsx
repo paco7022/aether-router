@@ -1,6 +1,6 @@
 import { createServerSupabase } from "@/lib/supabase/server";
 import { pricePerMTokens, creditsToUsd } from "@/lib/credits";
-import { isPremiumProvider as isPremiumProviderName } from "@/lib/providers/types";
+import { isPremiumProvider as isPremiumProviderName, isFlatRateProvider as isFlatRateProviderName } from "@/lib/providers/types";
 
 const CAPABILITY_META: Record<string, { label: string; color: string; icon: string }> = {
   tool_calling:    { label: "Tools",     color: "rgba(59, 130, 246, 0.85)",  icon: "T" },
@@ -79,9 +79,17 @@ export default async function ModelsPage() {
             <code className="font-mono text-[11px] px-1 py-0.5 rounded bg-white/[0.04]">an/</code>,{" "}
             <code className="font-mono text-[11px] px-1 py-0.5 rounded bg-white/[0.04]">w/</code>,{" "}
             <code className="font-mono text-[11px] px-1 py-0.5 rounded bg-white/[0.04]">h/</code>,{" "}
-            <code className="font-mono text-[11px] px-1 py-0.5 rounded bg-white/[0.04]">gm/</code>)
+            <code className="font-mono text-[11px] px-1 py-0.5 rounded bg-white/[0.04]">gm/</code>
+            ,{" "}
+            <code className="font-mono text-[11px] px-1 py-0.5 rounded bg-white/[0.04]">r/</code>)
             are flat-rate: <span className="font-semibold">1 credit per request</span>, plus they consume the
             number of premium requests shown in the &quot;Premium Cost&quot; column from your daily premium pool.
+          </p>
+          <p>
+            <span className="font-semibold text-emerald-200/95">Flat-rate models</span>{" "}
+            (<code className="font-mono text-[11px] px-1 py-0.5 rounded bg-white/[0.04]">op/</code>)
+            charge a small fixed fee per request with <span className="font-semibold">no context limit</span> —{" "}
+            shown in the &quot;Premium Cost&quot; column. No premium-request pool consumption.
           </p>
         </div>
       </div>
@@ -102,6 +110,7 @@ export default async function ModelsPage() {
             <tbody>
               {(models || []).map((model) => {
                 const isPremium = isPremiumProviderName(model.provider);
+                const isFlatRate = isFlatRateProviderName(model.provider);
                 const creditsInput = pricePerMTokens(model.cost_per_m_input, model.margin);
                 const creditsOutput = pricePerMTokens(model.cost_per_m_output, model.margin);
                 const priceInput = creditsToUsd(creditsInput);
@@ -145,13 +154,17 @@ export default async function ModelsPage() {
                       </div>
                     </td>
                     <td className="px-5 py-3.5 text-right text-white/70">
-                      {isPremium ? <span className="text-[var(--text-dim)]">--</span> : `$${priceInput.toFixed(4)}`}
+                      {isPremium || isFlatRate ? <span className="text-[var(--text-dim)]">--</span> : `$${priceInput.toFixed(4)}`}
                     </td>
                     <td className="px-5 py-3.5 text-right text-white/70">
-                      {isPremium ? <span className="text-[var(--text-dim)]">--</span> : `$${priceOutput.toFixed(4)}`}
+                      {isPremium || isFlatRate ? <span className="text-[var(--text-dim)]">--</span> : `$${priceOutput.toFixed(4)}`}
                     </td>
                     <td className="px-5 py-3.5 text-right text-white/70">
-                      {Number(model.premium_request_cost) > 0 ? (
+                      {isFlatRate ? (
+                        <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full badge-success">
+                          {Number(model.premium_request_cost).toFixed(1)} cr
+                        </span>
+                      ) : Number(model.premium_request_cost) > 0 ? (
                         <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${
                           Number(model.premium_request_cost) >= 2
                             ? "badge-error"
@@ -166,7 +179,7 @@ export default async function ModelsPage() {
                       )}
                     </td>
                     <td className="px-5 py-3.5 text-right font-semibold aurora-text">
-                      {isPremium ? "1 credit" : creditsInput.toLocaleString()}
+                      {isPremium ? "1 credit" : isFlatRate ? `${Number(model.premium_request_cost).toFixed(1)} cr` : creditsInput.toLocaleString()}
                     </td>
                   </tr>
                 );

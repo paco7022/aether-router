@@ -51,3 +51,12 @@ const FREE_PROVIDERS = new Set<string>(["trolllm"]);
 export function isFreeProvider(provider: string | null | undefined): boolean {
   return !!provider && FREE_PROVIDERS.has(provider);
 }
+
+// Flat-rate providers: charge a fixed per-request fee (stored in the model's
+// premium_request_cost column, reinterpreted as "credits per request")
+// instead of per-token billing. No context limits, no premium pool.
+const FLAT_RATE_PROVIDERS = new Set<string>(["openrouter"]);
+
+export function isFlatRateProvider(provider: string | null | undefined): boolean {
+  return !!provider && FLAT_RATE_PROVIDERS.has(provider);
+}
