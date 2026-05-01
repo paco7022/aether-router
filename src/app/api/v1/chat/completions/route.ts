@@ -1056,15 +1056,37 @@ export async function POST(req: NextRequest) {
     let cacheTokens = extractCacheTokens(usage, Number(usage.prompt_tokens) || 0);
 
     // Some providers omit usage on non-stream responses; estimate to avoid zero-charge responses.
+    // Also sanity-check: if upstream reports tokens but they're suspiciously
+    // lower than what we can measure locally, use the local estimate instead.
+    // This prevents abusive upstreams from under-reporting to drain credits.
+    const localCompletionEstimate = estimateTokens(extractCompletionText(data));
+    const localPromptEstimate = estimatePromptTokens(body);
+
     if (!usage.total_tokens || usage.total_tokens <= 0) {
-      const fallbackPrompt = estimatePromptTokens(body);
-      const fallbackCompletion = estimateTokens(extractCompletionText(data));
       usage = {
-        prompt_tokens: fallbackPrompt,
-        completion_tokens: fallbackCompletion,
-        total_tokens: fallbackPrompt + fallbackCompletion,
+        prompt_tokens: localPromptEstimate,
+        completion_tokens: localCompletionEstimate,
+        total_tokens: localPromptEstimate + localCompletionEstimate,
       };
       cacheTokens = { read: 0, write: 0 };
+    } else {
+      // Upstream reported usage — trust it, but enforce a floor so a
+      // malicious/buggy upstream can't claim 0 completion tokens when we
+      // saw real text in the response.
+      if (localCompletionEstimate > 0 && (usage.completion_tokens ?? 0) < localCompletionEstimate) {
+        usage = {
+          ...usage,
+          completion_tokens: localCompletionEstimate,
+          total_tokens: (usage.prompt_tokens ?? 0) + localCompletionEstimate,
+        };
+      }
+      if ((usage.prompt_tokens ?? 0) <= 0 && localPromptEstimate > 0) {
+        usage = {
+          ...usage,
+          prompt_tokens: localPromptEstimate,
+          total_tokens: localPromptEstimate + (usage.completion_tokens ?? 0),
+        };
+      }
     }
 
     const promptTokens = usage.prompt_tokens ?? 0;
@@ -1243,10 +1265,26 @@ async function handleStreamingResponse(
       return;
     }
 
-    // If provider didn't send usage data, estimate tokens
+    // If provider didn't send usage data, estimate tokens.
+    // Also sanity-check provider-reported values: if the upstream claims
+    // fewer completion tokens than what we actually streamed (measured via
+    // the real o200k tokenizer on the accumulated text), use the higher of
+    // the two. This closes the loophole where an upstream reports
+    // completion_tokens: 0 (or absurdly low) while streaming real content.
     if (!hasUsageData) {
       totalPromptTokens = estimatedPromptTokens;
       totalCompletionTokens = estimateTokens(completionText);
+    } else {
+      // Sanity floor: completion tokens can never be less than what we
+      // actually observed being streamed to the client.
+      const observedCompletion = completionText ? estimateTokens(completionText) : 0;
+      if (observedCompletion > 0 && totalCompletionTokens < observedCompletion) {
+        totalCompletionTokens = observedCompletion;
+      }
+      // Prompt tokens: upstream said 0 but we know the prompt wasn't empty.
+      if (totalPromptTokens <= 0 && estimatedPromptTokens > 0) {
+        totalPromptTokens = estimatedPromptTokens;
+      }
     }
 
     const totalTokens = totalPromptTokens + totalCompletionTokens;
@@ -1459,8 +1497,13 @@ async function handleStreamingResponse(
           const parsed = JSON.parse(jsonStr);
           if (parsed.usage) {
             hasUsageData = true;
-            totalPromptTokens = parsed.usage.prompt_tokens ?? totalPromptTokens;
-            totalCompletionTokens = parsed.usage.completion_tokens ?? totalCompletionTokens;
+            // Use upstream values only when they are positive; a 0 or
+            // negative report is treated as "not provided" so the
+            // finalize() sanity check can substitute our local estimate.
+            const upPrompt = Number(parsed.usage.prompt_tokens);
+            const upCompletion = Number(parsed.usage.completion_tokens);
+            if (upPrompt > 0) totalPromptTokens = upPrompt;
+            if (upCompletion > 0) totalCompletionTokens = upCompletion;
             const streamCache = extractCacheTokens(parsed.usage, Number(parsed.usage.prompt_tokens) || 0);
             if (streamCache.read > 0) cacheReadTokens = streamCache.read;
             if (streamCache.write > 0) cacheWriteTokens = streamCache.write;
