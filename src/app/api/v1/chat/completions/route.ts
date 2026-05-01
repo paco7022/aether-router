@@ -141,6 +141,13 @@ function getRequestedCompletionTokens(body: Record<string, unknown>): number | n
   return null;
 }
 
+// OpenAI's reasoning families (gpt-5+, o1/o3/o4) reject `max_tokens` and
+// require `max_completion_tokens`. RiftAI's gpt-5.5 hits this directly;
+// TrollLLM accepts both, so normalizing here is safe across resellers.
+function isReasoningModel(modelId: string): boolean {
+  return /^(gpt-[5-9]|o[134])(\b|[-._])/i.test(modelId);
+}
+
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
 
@@ -691,9 +698,15 @@ export async function POST(req: NextRequest) {
   }
 
   // Ensure upstream and reservation math share the same completion ceiling.
-  if (requestedCompletionTokens === null) {
-    body.max_tokens = reservedCompletionTokens;
-  }
+  // Reasoning models reject `max_tokens` and require `max_completion_tokens`,
+  // so normalize to whichever the upstream accepts and strip the other to
+  // avoid sending both.
+  const completionTokensParam = isReasoningModel(upstreamModel)
+    ? "max_completion_tokens"
+    : "max_tokens";
+  delete body.max_tokens;
+  delete body.max_completion_tokens;
+  body[completionTokensParam] = requestedCompletionTokens ?? reservedCompletionTokens;
 
   // Free pool gating.
   //
