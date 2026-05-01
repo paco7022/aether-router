@@ -737,12 +737,52 @@ export async function POST(req: NextRequest) {
   // deduction, no premium-request cost). Skip the daily-pool reservation
   // path entirely.
   if (!activeEventId && isFreeProviderName(model.provider)) {
+    // Free providers (e.g. trolllm) still need a context cap so users
+    // can't send unbounded prompts. Enforce the plan's gm_max_context.
+    if (!keyInfo.isCustom) {
+      const { data: freePlan } = await supabase
+        .from("plans")
+        .select("gm_max_context")
+        .eq("id", keyInfo.planId)
+        .single();
+
+      const freeMaxContext = freePlan?.gm_max_context ?? 32768;
+      if (freeMaxContext > 0) {
+        const estimatedContext = estimatePromptTokens(body);
+        if (estimatedContext > freeMaxContext) {
+          return NextResponse.json(
+            { error: { message: `Context too long (~${estimatedContext} tokens). Your plan allows ${freeMaxContext} tokens max. Upgrade for more.`, type: "context_limit" } },
+            { status: 413 }
+          );
+        }
+      }
+    }
     isFreePool = true;
   }
 
   // Zero-cost premium / flat-rate models route as free (no credits, no
-  // premium pool, no flat-rate fee).
+  // premium pool, no flat-rate fee). However, they still need a context
+  // cap so free-tier users can't send unbounded prompts through these
+  // models. Look up the plan's gm_max_context and enforce it.
   if (!activeEventId && (isZeroCostPremium || isZeroCostFlatRate)) {
+    if (!keyInfo.isCustom) {
+      const { data: zeroCostPlan } = await supabase
+        .from("plans")
+        .select("gm_max_context")
+        .eq("id", keyInfo.planId)
+        .single();
+
+      const zeroCostMaxContext = zeroCostPlan?.gm_max_context ?? 32768;
+      if (zeroCostMaxContext > 0) {
+        const estimatedContext = estimatePromptTokens(body);
+        if (estimatedContext > zeroCostMaxContext) {
+          return NextResponse.json(
+            { error: { message: `Context too long (~${estimatedContext} tokens). Your plan allows ${zeroCostMaxContext} tokens max. Upgrade for more.`, type: "context_limit" } },
+            { status: 413 }
+          );
+        }
+      }
+    }
     isFreePool = true;
   }
 
