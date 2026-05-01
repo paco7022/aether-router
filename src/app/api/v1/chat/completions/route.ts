@@ -708,6 +708,18 @@ export async function POST(req: NextRequest) {
   delete body.max_completion_tokens;
   body[completionTokensParam] = requestedCompletionTokens ?? reservedCompletionTokens;
 
+  // Reasoning models reject `tools` + `reasoning_effort` together on
+  // /chat/completions ("use /v1/responses instead"). We don't speak the
+  // responses API, and OpenCode (or any agent) needs tools — drop
+  // reasoning_effort so the call goes through.
+  if (
+    isReasoningModel(upstreamModel) &&
+    Array.isArray(body.tools) &&
+    body.tools.length > 0
+  ) {
+    delete body.reasoning_effort;
+  }
+
   // Free pool gating.
   //
   // airforce deepseek-v3.2: fully free forever. Hard-capped at 200k/day per
