@@ -30,6 +30,9 @@ export interface ApiKeyInfo {
   // Traffic source for usage_logs. "chat" means session-authed (dashboard),
   // "api" means Bearer-authed (public API).
   source: "api" | "chat";
+  // System prompt injection — prepended to every request when enabled.
+  systemInjection: string | null;
+  systemInjectionEnabled: boolean;
 }
 
 export async function validateApiKey(key: string): Promise<ApiKeyInfo | null> {
@@ -45,7 +48,7 @@ export async function validateApiKey(key: string): Promise<ApiKeyInfo | null> {
   // Look up key and join with profile for credits
   const { data: result, error } = await supabase
     .from("api_keys")
-    .select("id, user_id, is_active, is_custom, custom_credits, max_context, allowed_providers, daily_request_limit, rate_limit_seconds, expires_at, last_used, profiles(credits, daily_credits, plan_id, gm_claimed_date, gm_daily_override, gm_override_expires, referral_bonus_requests, referral_bonus_expires, is_activated)")
+    .select("id, user_id, is_active, is_custom, custom_credits, max_context, allowed_providers, daily_request_limit, rate_limit_seconds, expires_at, last_used, profiles(credits, daily_credits, plan_id, gm_claimed_date, gm_daily_override, gm_override_expires, referral_bonus_requests, referral_bonus_expires, is_activated, system_injection, system_injection_enabled)")
     .eq("key_hash", keyHash)
     .single();
 
@@ -72,7 +75,7 @@ export async function validateApiKey(key: string): Promise<ApiKeyInfo | null> {
       });
   }
 
-  const profile = result.profiles as unknown as { credits: number; daily_credits: number; plan_id: string; gm_claimed_date: string | null; gm_daily_override: number | null; gm_override_expires: string | null; referral_bonus_requests: number | null; referral_bonus_expires: string | null; is_activated: boolean | null };
+  const profile = result.profiles as unknown as { credits: number; daily_credits: number; plan_id: string; gm_claimed_date: string | null; gm_daily_override: number | null; gm_override_expires: string | null; referral_bonus_requests: number | null; referral_bonus_expires: string | null; is_activated: boolean | null; system_injection: string | null; system_injection_enabled: boolean | null };
 
   return {
     keyId: result.id,
@@ -94,6 +97,8 @@ export async function validateApiKey(key: string): Promise<ApiKeyInfo | null> {
     rateLimitSeconds: result.rate_limit_seconds ?? null,
     expiresAt: result.expires_at ?? null,
     source: "api",
+    systemInjection: profile?.system_injection ?? null,
+    systemInjectionEnabled: profile?.system_injection_enabled ?? false,
   };
 }
 
@@ -111,7 +116,7 @@ export async function validateSession(): Promise<ApiKeyInfo | null> {
   const admin = createAdminClient();
   const { data: profile } = await admin
     .from("profiles")
-    .select("credits, daily_credits, plan_id, gm_claimed_date, gm_daily_override, gm_override_expires, referral_bonus_requests, referral_bonus_expires, is_activated")
+    .select("credits, daily_credits, plan_id, gm_claimed_date, gm_daily_override, gm_override_expires, referral_bonus_requests, referral_bonus_expires, is_activated, system_injection, system_injection_enabled")
     .eq("id", user.id)
     .single();
 
@@ -137,6 +142,8 @@ export async function validateSession(): Promise<ApiKeyInfo | null> {
     rateLimitSeconds: null,
     expiresAt: null,
     source: "chat",
+    systemInjection: (profile as unknown as { system_injection?: string | null }).system_injection ?? null,
+    systemInjectionEnabled: (profile as unknown as { system_injection_enabled?: boolean | null }).system_injection_enabled ?? false,
   };
 }
 

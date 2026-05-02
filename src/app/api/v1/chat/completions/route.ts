@@ -578,17 +578,6 @@ export async function POST(req: NextRequest) {
     // Skipped entirely when an active event covers this model for the user's plan.
     // Zero-cost premium models (free promos) also skip this entire block.
     if (isPremiumProvider && !isZeroCostPremium) {
-      // Antigravity: require daily claim
-      if (model.provider === "antigravity") {
-        const today = new Date().toISOString().split("T")[0];
-        if (keyInfo.gmClaimedDate !== today) {
-          return NextResponse.json(
-            { error: { message: "Claim your daily premium requests first at the billing page.", type: "claim_required" } },
-            { status: 403 }
-          );
-        }
-      }
-
       const { data: plan } = await supabase
         .from("plans")
         .select("gm_daily_requests, gm_max_context")
@@ -1017,6 +1006,19 @@ export async function POST(req: NextRequest) {
     const forwardBody = { ...body, model: upstreamModel, stream };
     if (stream) {
       (forwardBody as Record<string, unknown>).stream_options = { include_usage: true };
+    }
+
+    // System prompt injection — prepend the user's configured injection before
+    // any messages from the client. The injection always goes first so tools
+    // like Janitor AI that send their own system prompt still receive ours on top.
+    if (keyInfo.systemInjectionEnabled && keyInfo.systemInjection) {
+      const msgs = forwardBody.messages as Array<{ role: string; content: string }>;
+      const sysIdx = msgs.findIndex((m) => m.role === "system");
+      if (sysIdx >= 0) {
+        msgs[sysIdx] = { ...msgs[sysIdx], content: keyInfo.systemInjection + "\n\n" + msgs[sysIdx].content };
+      } else {
+        msgs.unshift({ role: "system", content: keyInfo.systemInjection });
+      }
     }
 
     const providerResponse = await provider.forward(forwardBody as any);

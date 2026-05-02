@@ -43,9 +43,7 @@ export function isPremiumProvider(provider: string | null | undefined): boolean 
   return !!provider && PREMIUM_PROVIDERS.has(provider);
 }
 
-// Providers that route fully free, ignoring credit and premium-request
-// reservations entirely. Used by trolllm while we drain expiring keys.
-const FREE_PROVIDERS = new Set<string>(["trolllm"]);
+const FREE_PROVIDERS = new Set<string>();
 
 export function isFreeProvider(provider: string | null | undefined): boolean {
   return !!provider && FREE_PROVIDERS.has(provider);

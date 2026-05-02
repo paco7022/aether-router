@@ -1,5 +1,6 @@
 import { createServerSupabase } from "@/lib/supabase/server";
 import { DeleteAccountButton } from "@/components/DeleteAccountButton";
+import { SystemInjectionCard } from "@/components/SystemInjectionCard";
 
 export default async function SettingsPage() {
   const supabase = await createServerSupabase();
@@ -64,6 +65,11 @@ export default async function SettingsPage() {
           </div>
         </div>
       </div>
+
+      <SystemInjectionCard
+        initialEnabled={profile?.system_injection_enabled ?? false}
+        initialInjection={profile?.system_injection ?? null}
+      />
 
       {/* Danger Zone */}
       <div className="glass-card shimmer-line p-6 mt-6" style={{ borderColor: "rgba(239, 68, 68, 0.1)" }}>
