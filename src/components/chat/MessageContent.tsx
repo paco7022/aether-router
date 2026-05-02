@@ -1,6 +1,105 @@
 "use client";
 
 import type { Artifact, Segment } from "@/lib/chat/artifacts";
+import { type ReactNode } from "react";
+
+// Lightweight inline markdown renderer. Handles bold, italic, inline code,
+// links, headers, and list items without pulling in a full markdown library.
+function renderMarkdown(text: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  const lines = text.split("\n");
+
+  for (let li = 0; li < lines.length; li++) {
+    if (li > 0) nodes.push("\n");
+    let line = lines[li];
+
+    // Headers: # ... ######
+    const headerMatch = line.match(/^(#{1,6})\s+(.+)$/);
+    if (headerMatch) {
+      const level = headerMatch[1].length;
+      const sizes = ["text-xl font-bold", "text-lg font-bold", "text-base font-semibold", "text-sm font-semibold", "text-sm font-medium", "text-xs font-medium"];
+      nodes.push(
+        <span key={`h${li}`} className={`${sizes[level - 1] ?? sizes[5]} block mt-2 mb-1`}>
+          {renderInline(headerMatch[2], `h${li}`)}
+        </span>
+      );
+      continue;
+    }
+
+    // Unordered list items: - or *
+    const ulMatch = line.match(/^(\s*)[-*]\s+(.+)$/);
+    if (ulMatch) {
+      const indent = Math.floor((ulMatch[1].length) / 2);
+      nodes.push(
+        <span key={`ul${li}`} className="block" style={{ paddingLeft: `${1 + indent * 1.25}rem` }}>
+          {"- "}{renderInline(ulMatch[2], `ul${li}`)}
+        </span>
+      );
+      continue;
+    }
+
+    // Ordered list items: 1. 2. etc
+    const olMatch = line.match(/^(\s*)(\d+)\.\s+(.+)$/);
+    if (olMatch) {
+      const indent = Math.floor((olMatch[1].length) / 2);
+      nodes.push(
+        <span key={`ol${li}`} className="block" style={{ paddingLeft: `${1 + indent * 1.25}rem` }}>
+          {olMatch[2] + ". "}{renderInline(olMatch[3], `ol${li}`)}
+        </span>
+      );
+      continue;
+    }
+
+    // Normal text line
+    nodes.push(...renderInline(line, `l${li}`));
+  }
+
+  return nodes;
+}
+
+function renderInline(text: string, keyPrefix: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  // Regex matches: **bold**, *italic*, `code`, [text](url)
+  const re = /(\*\*(.+?)\*\*|\*(.+?)\*|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\))/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let idx = 0;
+
+  while ((match = re.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      nodes.push(text.slice(lastIndex, match.index));
+    }
+    if (match[2]) {
+      // **bold**
+      nodes.push(<strong key={`${keyPrefix}b${idx}`} className="font-semibold">{match[2]}</strong>);
+    } else if (match[3]) {
+      // *italic*
+      nodes.push(<em key={`${keyPrefix}i${idx}`} className="italic">{match[3]}</em>);
+    } else if (match[4]) {
+      // `code`
+      nodes.push(
+        <code key={`${keyPrefix}c${idx}`} className="px-1 py-0.5 rounded text-[0.85em] font-mono" style={{ background: "rgba(0,0,0,0.3)", color: "rgb(165, 243, 252)" }}>
+          {match[4]}
+        </code>
+      );
+    } else if (match[5] && match[6]) {
+      // [text](url)
+      nodes.push(
+        <a key={`${keyPrefix}a${idx}`} href={match[6]} target="_blank" rel="noopener noreferrer" className="underline text-cyan-300 hover:text-cyan-200">
+          {match[5]}
+        </a>
+      );
+    }
+    lastIndex = re.lastIndex;
+    idx++;
+  }
+
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex));
+  }
+
+  return nodes;
+}
 
 export function MessageContent({
   segments,
@@ -19,7 +118,7 @@ export function MessageContent({
         if (seg.kind === "text") {
           return (
             <span key={`t${i}`} style={{ whiteSpace: "pre-wrap" }}>
-              {seg.text}
+              {renderMarkdown(seg.text)}
             </span>
           );
         }

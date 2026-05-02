@@ -150,8 +150,8 @@ type XmlArtifact = {
 function extractXmlArtifacts(raw: string): XmlArtifact[] {
   const results: XmlArtifact[] = [];
 
-  // Pattern 1: <antml:artifact ...>...</antml:artifact>
-  const antmlRe = /<antml:artifact\b[^>]*>[\s\S]*?<\/antml:artifact>/g;
+  // Pattern 1: Claude-style artifact tags (all namespace variants)
+  const antmlRe = /<(?:antml:)?a(?:ntml:)?artifact\b[^>]*>[\s\S]*?<\/(?:antml:)?a(?:ntml:)?artifact>/g;
   let m: RegExpExecArray | null;
   while ((m = antmlRe.exec(raw)) !== null) {
     const full = m[0];
@@ -161,18 +161,23 @@ function extractXmlArtifacts(raw: string): XmlArtifact[] {
     const titleAttr = full.match(/\btitle\s*=\s*"([^"]*)"/);
     const title = titleAttr?.[1] ?? "";
 
-    const langParam = full.match(/<antml:parameter\s+name\s*=\s*"language"[^>]*>([^<]*)<\/antml:parameter>/);
-    const language = langParam?.[1]?.trim()?.toLowerCase() ?? "";
+    const langParam = full.match(/<(?:antml:)?parameter\s+name\s*=\s*"language"[^>]*>([^<]*)<\/(?:antml:)?parameter>/);
+    const langAttrDirect = full.match(/\blanguage\s*=\s*"([^"]*)"/);
+    const language = langParam?.[1]?.trim()?.toLowerCase() ?? langAttrDirect?.[1]?.toLowerCase() ?? "";
 
     // Extract the code content: everything after the last </antml:parameter>
     // and before </antml:artifact>, trimmed.
-    const lastParamEnd = full.lastIndexOf("</antml:parameter>");
+    const paramCloseRe = /<\/(?:antml:)?parameter>/g;
+    let lastParamEnd = -1;
+    let pm: RegExpExecArray | null;
+    while ((pm = paramCloseRe.exec(full)) !== null) { lastParamEnd = pm.index + pm[0].length; }
     const codeStart = lastParamEnd === -1
       ? full.indexOf(">") + 1
-      : lastParamEnd + "</antml:parameter>".length;
-    const codeEnd = full.lastIndexOf("</antml:artifact>");
+      : lastParamEnd;
+    const closeRe = /<\/(?:antml:)?a(?:ntml:)?artifact>/;
+    const closeMatch = closeRe.exec(full.slice(codeStart));
+    const codeEnd = closeMatch ? codeStart + closeMatch.index : full.length;
     const code = full.slice(codeStart, codeEnd).trim();
-
     results.push({ start, end, language, title, code });
   }
 

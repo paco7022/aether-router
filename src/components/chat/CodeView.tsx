@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import dynamic from "next/dynamic";
 
 // Map our normalized language names to prism language names.
@@ -74,7 +75,11 @@ const HighlightedCode = dynamic(
 );
 
 export function CodeView({ language, code }: { language: string; code: string }) {
-  return <HighlightedCode language={language} code={code} />;
+  return (
+    <Suspense fallback={<FallbackPre code={code} />}>
+      <HighlightedCode language={language} code={code} />
+    </Suspense>
+  );
 }
 
 function FallbackPre({ code }: { code: string }) {
