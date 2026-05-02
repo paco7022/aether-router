@@ -1012,7 +1012,7 @@ export async function POST(req: NextRequest) {
     // any messages from the client. The injection always goes first so tools
     // like Janitor AI that send their own system prompt still receive ours on top.
     if (keyInfo.systemInjectionEnabled && keyInfo.systemInjection) {
-      const msgs = forwardBody.messages as Array<{ role: string; content: string }>;
+      const msgs = (forwardBody as Record<string, unknown>).messages as Array<{ role: string; content: string }>;
       const sysIdx = msgs.findIndex((m) => m.role === "system");
       if (sysIdx >= 0) {
         msgs[sysIdx] = { ...msgs[sysIdx], content: keyInfo.systemInjection + "\n\n" + msgs[sysIdx].content };
