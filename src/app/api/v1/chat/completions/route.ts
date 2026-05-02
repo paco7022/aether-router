@@ -363,13 +363,20 @@ export async function POST(req: NextRequest) {
 
   const isPremiumProvider = isPremiumProviderName(model.provider);
   const isFlatRateProvider = isFlatRateProviderName(model.provider);
+  // TEMP (2026-05-02): Gemini models from r/ are free while we evaluate capacity.
+  // Remove this block once the promo period ends.
+  const isRiftaiGeminiFree =
+    model.provider === "riftai" &&
+    (model.upstream_model_id || modelId).toLowerCase().includes("gemini");
+
   // Zero-cost premium models (cost_per_m_input=0 + premium_request_cost=0) route
   // as free — no credits or premium-request budget consumed. Revert by restoring
   // cost/margin values in the models table.
   const isZeroCostPremium =
-    isPremiumProvider &&
-    Number(model.cost_per_m_input) === 0 &&
-    Number(model.premium_request_cost) === 0;
+    isPremiumProvider && (
+      (Number(model.cost_per_m_input) === 0 && Number(model.premium_request_cost) === 0) ||
+      isRiftaiGeminiFree
+    );
   // Same for flat-rate (openrouter): premium_request_cost=0 means free promo.
   // Without this short-circuit we'd call deduct_credits(0), which the RPC
   // rejects with -1 → 402 "Insufficient credits, credits_required: 0".
