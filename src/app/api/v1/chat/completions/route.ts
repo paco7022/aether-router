@@ -41,6 +41,8 @@ const PER_USER_DAILY_TOKEN_LIMIT = 200_000;
 const GLOBAL_DAILY_TOKEN_POOL = 10_000_000;
 const DEFAULT_STREAM_RESERVATION_COMPLETION_TOKENS = 4096;
 const MAX_STREAM_RESERVATION_COMPLETION_TOKENS = 32_768;
+// Cost in credits to purchase one extra premium request when the daily limit is hit.
+const PREMIUM_OVERAGE_COST = 100;
 
 type StreamChargeReservation = {
   reservedCredits: number;
@@ -510,6 +512,7 @@ export async function POST(req: NextRequest) {
   let premiumRequestReserved = false;
   let premiumReservedCost = 0;
   let customKeyRequestReserved = false;
+  let premiumOveragePurchased = false;
 
   // 5.5b. Custom key checks — custom keys bypass plan restrictions and use their own limits
   if (keyInfo.isCustom) {
@@ -659,13 +662,34 @@ export async function POST(req: NextRequest) {
       }
       if (res.status === "daily_limit") {
         const debt = Number(res.debt ?? 0);
-        const message = debt > 0
-          ? `Premium access locked: you owe ${debt} premium requests for past oversized prompts (>100k tokens beyond your plan's context cap). Contact support to clear the debt.`
-          : `Daily premium limit reached (${gmDailyRequests} requests/day for your plan). Upgrade for more.`;
-        return NextResponse.json(
-          { error: { message, type: "rate_limit" } },
-          { status: 429 }
-        );
+        if (debt > 0) {
+          return NextResponse.json(
+            { error: { message: `Premium access locked: you owe ${debt} premium requests for past oversized prompts (>100k tokens beyond your plan's context cap). Contact support to clear the debt.`, type: "rate_limit" } },
+            { status: 429 }
+          );
+        }
+        // Offer overage: spend PREMIUM_OVERAGE_COST credits for one extra request.
+        const availableCredits = keyInfo.credits + keyInfo.dailyCredits;
+        if (availableCredits >= PREMIUM_OVERAGE_COST) {
+          const { data: overageBalance, error: overageErr } = await supabase.rpc("deduct_credits", {
+            p_user_id: keyInfo.userId,
+            p_amount: PREMIUM_OVERAGE_COST,
+          });
+          if (!overageErr && overageBalance !== -1) {
+            premiumOveragePurchased = true;
+            isFreePool = true; // overage flat fee covers the request; skip per-token billing
+          } else {
+            return NextResponse.json(
+              { error: { message: `Daily premium limit reached (${gmDailyRequests}/day). You have ${availableCredits} credits but the deduction failed — try again.`, type: "rate_limit" } },
+              { status: 429 }
+            );
+          }
+        } else {
+          return NextResponse.json(
+            { error: { message: `Daily premium limit reached (${gmDailyRequests}/day). You can purchase extra requests for ${PREMIUM_OVERAGE_COST} credits each (you have ${availableCredits}).`, type: "rate_limit" } },
+            { status: 429 }
+          );
+        }
       }
       premiumRequestReserved = true;
       premiumReservedCost = premiumCost;
@@ -934,6 +958,15 @@ export async function POST(req: NextRequest) {
           console.error("Failed to refund reserved credits:", refundErr.message);
         }
       }
+    }
+
+    if (premiumOveragePurchased) {
+      const { error: refundErr } = await supabase.rpc("add_credits", {
+        p_user_id: key.userId,
+        p_amount: PREMIUM_OVERAGE_COST,
+      });
+      if (refundErr) console.error("Failed to refund premium overage credits:", refundErr.message);
+      premiumOveragePurchased = false;
     }
 
     if (premiumRequestReserved && premiumReservedCost > 0) {
