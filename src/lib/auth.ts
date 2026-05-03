@@ -15,6 +15,8 @@ export interface ApiKeyInfo {
   gmOverrideExpires: string | null;
   referralBonusRequests: number;
   referralBonusExpires: string | null;
+  // Context boost: when set (including "infinity"), gm_max_context is doubled.
+  contextBoostExpires: string | null;
   // Free-account activation gate. When false on a free user, Bearer-auth
   // requests are rejected (the chat dashboard still works). Paid users
   // and previously-paid users are auto-flipped TRUE.
@@ -48,7 +50,7 @@ export async function validateApiKey(key: string): Promise<ApiKeyInfo | null> {
   // Look up key and join with profile for credits
   const { data: result, error } = await supabase
     .from("api_keys")
-    .select("id, user_id, is_active, is_custom, custom_credits, max_context, allowed_providers, daily_request_limit, rate_limit_seconds, expires_at, last_used, profiles(credits, daily_credits, plan_id, gm_claimed_date, gm_daily_override, gm_override_expires, referral_bonus_requests, referral_bonus_expires, is_activated, system_injection, system_injection_enabled)")
+    .select("id, user_id, is_active, is_custom, custom_credits, max_context, allowed_providers, daily_request_limit, rate_limit_seconds, expires_at, last_used, profiles(credits, daily_credits, plan_id, gm_claimed_date, gm_daily_override, gm_override_expires, referral_bonus_requests, referral_bonus_expires, is_activated, system_injection, system_injection_enabled, context_boost_expires_at)")
     .eq("key_hash", keyHash)
     .single();
 
@@ -75,7 +77,7 @@ export async function validateApiKey(key: string): Promise<ApiKeyInfo | null> {
       });
   }
 
-  const profile = result.profiles as unknown as { credits: number; daily_credits: number; plan_id: string; gm_claimed_date: string | null; gm_daily_override: number | null; gm_override_expires: string | null; referral_bonus_requests: number | null; referral_bonus_expires: string | null; is_activated: boolean | null; system_injection: string | null; system_injection_enabled: boolean | null };
+  const profile = result.profiles as unknown as { credits: number; daily_credits: number; plan_id: string; gm_claimed_date: string | null; gm_daily_override: number | null; gm_override_expires: string | null; referral_bonus_requests: number | null; referral_bonus_expires: string | null; is_activated: boolean | null; system_injection: string | null; system_injection_enabled: boolean | null; context_boost_expires_at: string | null };
 
   return {
     keyId: result.id,
@@ -88,6 +90,7 @@ export async function validateApiKey(key: string): Promise<ApiKeyInfo | null> {
     gmOverrideExpires: profile?.gm_override_expires ?? null,
     referralBonusRequests: profile?.referral_bonus_requests ?? 0,
     referralBonusExpires: profile?.referral_bonus_expires ?? null,
+    contextBoostExpires: profile?.context_boost_expires_at ?? null,
     isActivated: profile?.is_activated ?? false,
     isCustom: result.is_custom ?? false,
     customCredits: result.custom_credits ?? null,
@@ -116,7 +119,7 @@ export async function validateSession(): Promise<ApiKeyInfo | null> {
   const admin = createAdminClient();
   const { data: profile } = await admin
     .from("profiles")
-    .select("credits, daily_credits, plan_id, gm_claimed_date, gm_daily_override, gm_override_expires, referral_bonus_requests, referral_bonus_expires, is_activated, system_injection, system_injection_enabled")
+    .select("credits, daily_credits, plan_id, gm_claimed_date, gm_daily_override, gm_override_expires, referral_bonus_requests, referral_bonus_expires, is_activated, system_injection, system_injection_enabled, context_boost_expires_at")
     .eq("id", user.id)
     .single();
 
@@ -133,6 +136,7 @@ export async function validateSession(): Promise<ApiKeyInfo | null> {
     gmOverrideExpires: profile.gm_override_expires ?? null,
     referralBonusRequests: profile.referral_bonus_requests ?? 0,
     referralBonusExpires: profile.referral_bonus_expires ?? null,
+    contextBoostExpires: (profile as unknown as { context_boost_expires_at?: string | null }).context_boost_expires_at ?? null,
     isActivated: profile.is_activated ?? false,
     isCustom: false,
     customCredits: null,

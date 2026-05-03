@@ -365,6 +365,11 @@ export async function POST(req: NextRequest) {
 
   const isPremiumProvider = isPremiumProviderName(model.provider);
   const isFlatRateProvider = isFlatRateProviderName(model.provider);
+  // Context boost: user purchased 2× context multiplier (temporary or permanent).
+  const isContextBoosted =
+    !!keyInfo.contextBoostExpires &&
+    (keyInfo.contextBoostExpires === "infinity" || new Date(keyInfo.contextBoostExpires) > new Date());
+
   // TEMP (2026-05-02): Gemini models from r/ are free while we evaluate capacity.
   // Remove this block once the promo period ends.
   const isRiftaiGeminiFree =
@@ -610,7 +615,7 @@ export async function POST(req: NextRequest) {
       const referralBonus = referralBonusActive ? keyInfo.referralBonusRequests : 0;
 
       const gmDailyRequests = baseGmDaily + referralBonus;
-      const gmMaxContext = plan?.gm_max_context ?? 32768;
+      const gmMaxContext = (plan?.gm_max_context ?? 32768) * (isContextBoosted ? 2 : 1);
 
       // Context cap checked BEFORE the atomic reservation so oversize
       // requests don't inflate the daily counter. Applies to all premium
@@ -766,7 +771,7 @@ export async function POST(req: NextRequest) {
         .eq("id", keyInfo.planId)
         .single();
 
-      const freeMaxContext = freePlan?.gm_max_context ?? 32768;
+      const freeMaxContext = (freePlan?.gm_max_context ?? 32768) * (isContextBoosted ? 2 : 1);
       if (freeMaxContext > 0) {
         const estimatedContext = estimatePromptTokens(body);
         if (estimatedContext > freeMaxContext) {
@@ -792,7 +797,7 @@ export async function POST(req: NextRequest) {
         .eq("id", keyInfo.planId)
         .single();
 
-      const zeroCostMaxContext = zeroCostPlan?.gm_max_context ?? 32768;
+      const zeroCostMaxContext = (zeroCostPlan?.gm_max_context ?? 32768) * (isContextBoosted ? 2 : 1);
       if (zeroCostMaxContext > 0) {
         const estimatedContext = estimatePromptTokens(body);
         if (estimatedContext > zeroCostMaxContext) {
