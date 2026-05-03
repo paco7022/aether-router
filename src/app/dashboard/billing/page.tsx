@@ -5,6 +5,7 @@ import { PlanCard } from "@/components/PlanCard";
 import { BuyCreditsCard } from "@/components/BuyCreditsCard";
 import { ClaimDailyButton } from "@/components/ClaimDailyButton";
 import { GmRequestsCard } from "@/components/GmRequestsCard";
+import { ContextBoostCard } from "@/components/ContextBoostCard";
 import { CheckoutFeedback } from "@/components/CheckoutFeedback";
 
 export default async function BillingPage() {
@@ -20,7 +21,7 @@ export default async function BillingPage() {
     { data: packages },
     { data: transactions },
   ] = await Promise.all([
-    supabase.from("profiles").select("credits, daily_credits, plan_id, gm_claimed_date").eq("id", user!.id).single(),
+    supabase.from("profiles").select("credits, daily_credits, plan_id, gm_claimed_date, context_boost_expires_at").eq("id", user!.id).single(),
     supabase
       .from("subscriptions")
       .select("*, plans(*)")
@@ -133,6 +134,25 @@ export default async function BillingPage() {
           limit={currentPlan?.gm_daily_requests ?? 15}
           debt={premiumDebt}
           claimed={gmClaimedToday}
+        />
+      </div>
+
+      {/* Context Boost */}
+      <div className="mb-8">
+        <div className="flex items-center gap-2 mb-1">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--aurora-teal)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="opacity-60">
+            <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
+            <polyline points="17 6 23 6 23 12" />
+          </svg>
+          <h3 className="text-xl font-bold text-white/90">Context Boost</h3>
+        </div>
+        <p className="text-sm text-[var(--text-muted)] mb-5">
+          Temporarily or permanently double your context window for premium models.
+        </p>
+        <ContextBoostCard
+          baseMaxContext={currentPlan?.gm_max_context ?? 32768}
+          boostExpiresAt={(profile as unknown as { context_boost_expires_at?: string | null })?.context_boost_expires_at ?? null}
+          totalCredits={totalCredits}
         />
       </div>
 
