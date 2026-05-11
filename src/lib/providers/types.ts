@@ -37,6 +37,7 @@ const PREMIUM_PROVIDERS = new Set<string>([
   "gameron",
   "dlab",
   "riftai",
+  "opencode",
 ]);
 
 export function isPremiumProvider(provider: string | null | undefined): boolean {
