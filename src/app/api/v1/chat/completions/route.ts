@@ -27,6 +27,7 @@ import {
   moderateMessages,
   recordCsamIncidentAndBan,
 } from "@/lib/content-moderation";
+import { applyPreset } from "@/lib/preset";
 
 export const runtime = "nodejs";
 // NOTE: If a Vercel function timeout kills a streaming request mid-flight,
@@ -1053,17 +1054,8 @@ export async function POST(req: NextRequest) {
       (forwardBody as Record<string, unknown>).stream_options = { include_usage: true };
     }
 
-    // System prompt injection — prepend the user's configured injection before
-    // any messages from the client. The injection always goes first so tools
-    // like Janitor AI that send their own system prompt still receive ours on top.
-    if (keyInfo.systemInjectionEnabled && keyInfo.systemInjection) {
-      const msgs = (forwardBody as Record<string, unknown>).messages as Array<{ role: string; content: string }>;
-      const sysIdx = msgs.findIndex((m) => m.role === "system");
-      if (sysIdx >= 0) {
-        msgs[sysIdx] = { ...msgs[sysIdx], content: keyInfo.systemInjection + "\n\n" + msgs[sysIdx].content };
-      } else {
-        msgs.unshift({ role: "system", content: keyInfo.systemInjection });
-      }
+    if (keyInfo.presetEnabled && keyInfo.preset) {
+      applyPreset(forwardBody as Record<string, unknown>, keyInfo.preset);
     }
 
     const providerResponse = await provider.forward(forwardBody as any);

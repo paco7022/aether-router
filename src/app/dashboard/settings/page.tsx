@@ -1,6 +1,6 @@
 import { createServerSupabase } from "@/lib/supabase/server";
 import { DeleteAccountButton } from "@/components/DeleteAccountButton";
-import { SystemInjectionCard } from "@/components/SystemInjectionCard";
+import { PresetCard } from "@/components/PresetCard";
 
 export default async function SettingsPage() {
   const supabase = await createServerSupabase();
@@ -10,7 +10,7 @@ export default async function SettingsPage() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("*")
+    .select("display_name, created_at, preset, preset_enabled")
     .eq("id", user!.id)
     .single();
 
@@ -66,9 +66,9 @@ export default async function SettingsPage() {
         </div>
       </div>
 
-      <SystemInjectionCard
-        initialEnabled={profile?.system_injection_enabled ?? false}
-        initialInjection={profile?.system_injection ?? null}
+      <PresetCard
+        initialPreset={profile?.preset ?? null}
+        initialEnabled={profile?.preset_enabled ?? false}
       />
 
       {/* Danger Zone */}

@@ -7,3 +7,4 @@ out/
 .vercel
 tsconfig.tsbuildinfo
 supabase/.temp/
+preset examples/
