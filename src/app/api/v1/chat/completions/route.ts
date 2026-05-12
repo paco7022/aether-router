@@ -28,6 +28,7 @@ import {
   recordCsamIncidentAndBan,
 } from "@/lib/content-moderation";
 import { applyPreset } from "@/lib/preset";
+import { getBuiltinPreset } from "@/lib/builtinPresets";
 
 export const runtime = "nodejs";
 // NOTE: If a Vercel function timeout kills a streaming request mid-flight,
@@ -1054,8 +1055,15 @@ export async function POST(req: NextRequest) {
       (forwardBody as Record<string, unknown>).stream_options = { include_usage: true };
     }
 
-    if (keyInfo.presetEnabled && keyInfo.preset) {
-      applyPreset(forwardBody as Record<string, unknown>, keyInfo.preset);
+    if (keyInfo.presetEnabled) {
+      // Built-in preset takes precedence over the user's custom JSONB preset.
+      // Its prompt content is server-only and never exposed to the client.
+      const activePreset = keyInfo.builtinPresetId
+        ? getBuiltinPreset(keyInfo.builtinPresetId)
+        : keyInfo.preset;
+      if (activePreset) {
+        applyPreset(forwardBody as Record<string, unknown>, activePreset);
+      }
     }
 
     const providerResponse = await provider.forward(forwardBody as any);

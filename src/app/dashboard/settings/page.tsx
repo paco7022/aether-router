@@ -1,6 +1,7 @@
 import { createServerSupabase } from "@/lib/supabase/server";
 import { DeleteAccountButton } from "@/components/DeleteAccountButton";
 import { PresetCard } from "@/components/PresetCard";
+import { listPublicBuiltinPresets } from "@/lib/builtinPresets";
 
 export default async function SettingsPage() {
   const supabase = await createServerSupabase();
@@ -10,9 +11,11 @@ export default async function SettingsPage() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("display_name, created_at, preset, preset_enabled")
+    .select("display_name, created_at, preset, preset_enabled, builtin_preset_id")
     .eq("id", user!.id)
     .single();
+
+  const builtinPresets = listPublicBuiltinPresets();
 
   return (
     <div>
@@ -69,6 +72,8 @@ export default async function SettingsPage() {
       <PresetCard
         initialPreset={profile?.preset ?? null}
         initialEnabled={profile?.preset_enabled ?? false}
+        builtinPresets={builtinPresets}
+        initialBuiltinId={profile?.builtin_preset_id ?? null}
       />
 
       {/* Danger Zone */}

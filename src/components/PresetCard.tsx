@@ -5,9 +5,17 @@ import { parseSillyTavernPreset, type UserPreset } from "@/lib/preset";
 
 const MAX_PRESET_BYTES = 256 * 1024;
 
+interface BuiltinPresetMeta {
+  id: string;
+  name: string;
+  description: string;
+}
+
 interface Props {
   initialPreset: UserPreset | null;
   initialEnabled: boolean;
+  builtinPresets: BuiltinPresetMeta[];
+  initialBuiltinId: string | null;
 }
 
 function Toggle({
@@ -307,9 +315,17 @@ const SAMPLING_FIELDS: Array<{
   { key: "max_tokens", label: "Max Tokens", min: 1, max: 128000, step: 1 },
 ];
 
-export function PresetCard({ initialPreset, initialEnabled }: Props) {
+export function PresetCard({
+  initialPreset,
+  initialEnabled,
+  builtinPresets,
+  initialBuiltinId,
+}: Props) {
   const [enabled, setEnabled] = useState(initialEnabled);
   const [preset, setPreset] = useState<UserPreset>(initialPreset ?? emptyPreset());
+  const [activeBuiltinId, setActiveBuiltinId] = useState<string | null>(initialBuiltinId);
+  const [builtinStatus, setBuiltinStatus] = useState<"idle" | "saving" | "error">("idle");
+  const [builtinError, setBuiltinError] = useState("");
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState("");
   const [importMsg, setImportMsg] = useState("");
@@ -317,6 +333,32 @@ export function PresetCard({ initialPreset, initialEnabled }: Props) {
   const [promptsOpen, setPromptsOpen] = useState(true);
   const [prefillOpen, setPrefillOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const builtinActive = activeBuiltinId !== null;
+
+  async function setBuiltin(id: string | null) {
+    setBuiltinStatus("saving");
+    setBuiltinError("");
+    const res = await fetch("/api/v1/account/builtin-preset", {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Requested-With": "AetherRouter",
+      },
+      body: JSON.stringify({ builtin_preset_id: id }),
+    });
+    if (res.ok) {
+      setActiveBuiltinId(id);
+      // Server flips preset_enabled=true when activating a built-in;
+      // mirror that locally so the toggle UI stays in sync.
+      if (id !== null) setEnabled(true);
+      setBuiltinStatus("idle");
+    } else {
+      const d = await res.json().catch(() => ({}));
+      setBuiltinError((d as { error?: string }).error ?? "Failed to update built-in preset.");
+      setBuiltinStatus("error");
+    }
+  }
 
   const serializedSize = JSON.stringify({ preset, preset_enabled: enabled }).length;
   const nearLimit = serializedSize > MAX_PRESET_BYTES * 0.85;
@@ -439,6 +481,105 @@ export function PresetCard({ initialPreset, initialEnabled }: Props) {
         values, prompts are prepended in order, and optional prefill is appended. Import a
         SillyTavern preset JSON to populate it automatically.
       </p>
+
+      {/* Aether built-in presets */}
+      {builtinPresets.length > 0 && (
+        <div className="mb-5 rounded-xl p-4"
+          style={{
+            background: "linear-gradient(135deg, rgba(139,92,246,0.06), rgba(34,211,238,0.04))",
+            border: "1px solid rgba(139,92,246,0.18)",
+          }}
+        >
+          <div className="flex items-center gap-2 mb-2">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(139,92,246,0.8)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+            </svg>
+            <h4 className="text-xs font-semibold uppercase tracking-wider text-violet-300/80">
+              Aether Built-in Presets
+            </h4>
+          </div>
+          <p className="text-[11px] text-[var(--text-dim)] mb-3 leading-relaxed">
+            Curated by Aether. When active, the built-in preset overrides your custom one below.
+            Prompt contents are private and only injected on the server.
+          </p>
+          <div className="space-y-2">
+            {builtinPresets.map((bp) => {
+              const isActive = activeBuiltinId === bp.id;
+              return (
+                <div
+                  key={bp.id}
+                  className="flex items-start gap-3 rounded-lg p-3 transition-colors"
+                  style={{
+                    background: isActive ? "rgba(139,92,246,0.10)" : "rgba(255,255,255,0.02)",
+                    border: isActive
+                      ? "1px solid rgba(139,92,246,0.35)"
+                      : "1px solid rgba(255,255,255,0.06)",
+                  }}
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-white/85">{bp.name}</span>
+                      {isActive && (
+                        <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded"
+                          style={{
+                            background: "rgba(34,211,238,0.15)",
+                            color: "rgba(34,211,238,0.9)",
+                            border: "1px solid rgba(34,211,238,0.25)",
+                          }}
+                        >
+                          Active
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-[var(--text-dim)] mt-1 leading-relaxed">
+                      {bp.description}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setBuiltin(isActive ? null : bp.id)}
+                    disabled={builtinStatus === "saving"}
+                    className="shrink-0 px-3 py-1.5 rounded-lg text-xs transition-all cursor-pointer disabled:opacity-50"
+                    style={
+                      isActive
+                        ? {
+                            background: "rgba(255,255,255,0.05)",
+                            border: "1px solid rgba(255,255,255,0.1)",
+                            color: "rgba(255,255,255,0.7)",
+                          }
+                        : {
+                            background:
+                              "linear-gradient(135deg, rgba(139,92,246,0.3), rgba(34,211,238,0.2))",
+                            border: "1px solid rgba(139,92,246,0.3)",
+                            color: "white",
+                          }
+                    }
+                  >
+                    {isActive ? "Deactivate" : `Activate ${bp.name}`}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          {builtinError && (
+            <p className="mt-2 text-xs text-red-400/80">{builtinError}</p>
+          )}
+        </div>
+      )}
+
+      {/* Notice when a built-in is overriding custom */}
+      {builtinActive && (
+        <div className="mb-4 rounded-lg px-3 py-2 text-xs leading-relaxed"
+          style={{
+            background: "rgba(251,191,36,0.06)",
+            border: "1px solid rgba(251,191,36,0.18)",
+            color: "rgba(251,191,36,0.85)",
+          }}
+        >
+          A built-in preset is currently active — your custom preset below is not being applied.
+          Deactivate the built-in to use your own.
+        </div>
+      )}
 
       {/* Preset name */}
       <div className="mb-5">
