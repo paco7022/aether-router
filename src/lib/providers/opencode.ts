@@ -9,9 +9,9 @@ const RETRY_DELAY_MS = 1000;
 // per request + per-model premium_request_cost against the daily premium
 // pool. Same shape as r/, db/, h/, gm/, w/.
 //
-// Upstream model IDs include the "opencode-go/" prefix
-// (e.g. "opencode-go/deepseek-v4-flash"); we store that fully-qualified
-// id in models.upstream_model_id and forward it verbatim.
+// Upstream model IDs are bare (e.g. "deepseek-v4-flash", "kimi-k2.6") —
+// the "opencode-go/" prefix was dropped upstream around 2026-05-12. We
+// store the bare id in models.upstream_model_id and forward verbatim.
 export const opencodeProvider: Provider = {
   name: "opencode",
   baseUrl: process.env.OPENCODE_BASE_URL || "https://opencode.ai/zen/go/v1",
