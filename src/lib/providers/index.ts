@@ -7,6 +7,7 @@ import { openrouterProvider } from "./openrouter";
 import { dlabProvider } from "./dlab";
 import { riftaiProvider } from "./riftai";
 import { opencodeProvider } from "./opencode";
+import { trolllmProvider } from "./trolllm";
 
 const providers: Record<string, Provider> = {
   nano: nanoProvider,
@@ -17,6 +18,7 @@ const providers: Record<string, Provider> = {
   dlab: dlabProvider,
   riftai: riftaiProvider,
   opencode: opencodeProvider,
+  trolllm: trolllmProvider,
 };
 
 export function getProvider(name: string): Provider | undefined {

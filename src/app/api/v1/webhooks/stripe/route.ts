@@ -97,11 +97,12 @@ export async function POST(req: NextRequest) {
             });
 
             // Paying for credits flips the API-key activation gate so
-            // the user's keys start working immediately. Once activated
-            // we never auto-revert (downgrade or refund keeps access).
+            // the user's keys start working immediately. Same for the
+            // Claude gate — pay-as-you-go credit purchases auto-approve
+            // Claude routes. Once activated we never auto-revert.
             await admin
               .from("profiles")
-              .update({ is_activated: true })
+              .update({ is_activated: true, claude_activated: true })
               .eq("id", userId);
           }
         }
@@ -135,11 +136,12 @@ export async function POST(req: NextRequest) {
               ).toISOString(),
             });
 
-            // Update user's plan and flip the API-key activation gate
-            // so a freshly subscribed user's keys work right away.
+            // Update user's plan and flip both activation gates so a
+            // freshly subscribed user's keys work right away and they
+            // can hit Claude routes immediately.
             await admin
               .from("profiles")
-              .update({ plan_id: planId, is_activated: true })
+              .update({ plan_id: planId, is_activated: true, claude_activated: true })
               .eq("id", userId);
 
             // Don't auto-grant daily credits — user must click "Claim" button

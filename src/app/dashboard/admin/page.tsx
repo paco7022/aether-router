@@ -13,6 +13,7 @@ interface UserProfile {
   plan_id: string;
   gm_claimed_date: string | null;
   is_activated: boolean;
+  claude_activated: boolean;
   created_at: string;
 }
 
@@ -347,6 +348,24 @@ export default function AdminPage() {
     );
   }
 
+  async function handleToggleClaudeActivation() {
+    if (!selectedUser) return;
+    const next = !selectedUser.claude_activated;
+    const result = await api("POST", undefined, {
+      action: "set_claude_activation",
+      user_id: selectedUser.id,
+      activated: next,
+    });
+    if (result.error) {
+      setError(result.error);
+      return;
+    }
+    setSelectedUser({ ...selectedUser, claude_activated: next });
+    setUsers((prev) =>
+      prev.map((u) => (u.id === selectedUser.id ? { ...u, claude_activated: next } : u))
+    );
+  }
+
   async function handleToggleModel(modelId: string, active: boolean) {
     await api("POST", undefined, { action: "toggle_model", model_id: modelId, is_active: active });
     setModels((prev) => prev.map((m) => (m.id === modelId ? { ...m, is_active: active } : m)));
@@ -673,6 +692,26 @@ export default function AdminPage() {
                       color: "#f87171",
                     }}>
                     {selectedUser.is_activated ? "Active — click to deactivate" : "Inactive — click to activate"}
+                  </button>
+                </div>
+
+                {/* Claude-route activation gate */}
+                <div className="space-y-2 mb-4">
+                  <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">
+                    Claude Activation (free tier)
+                  </label>
+                  <button onClick={handleToggleClaudeActivation}
+                    className="w-full text-xs font-medium rounded-lg px-3 py-1.5 transition-colors"
+                    style={selectedUser.claude_activated ? {
+                      background: "rgba(74, 222, 128, 0.10)",
+                      border: "1px solid rgba(74, 222, 128, 0.25)",
+                      color: "#4ade80",
+                    } : {
+                      background: "rgba(248, 113, 113, 0.08)",
+                      border: "1px solid rgba(248, 113, 113, 0.18)",
+                      color: "#f87171",
+                    }}>
+                    {selectedUser.claude_activated ? "Active Claude — click to deactivate" : "Inactive Claude — click to activate"}
                   </button>
                 </div>
 

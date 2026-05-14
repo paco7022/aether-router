@@ -17,6 +17,7 @@ import {
 } from "@/lib/chat-preflight";
 import {
   CLAUDE_BLOCK_MESSAGE,
+  CLAUDE_NOT_ACTIVATED_MESSAGE,
   CLAUDE_PAID_ONLY_MESSAGE,
   claudePaidOnlyApplies,
   isAllowedClaudeProvider,
@@ -360,6 +361,17 @@ export async function POST(req: NextRequest) {
     if (keyInfo.planId === "free" && claudePaidOnlyApplies(model.provider)) {
       return NextResponse.json(
         { error: { message: CLAUDE_PAID_ONLY_MESSAGE, type: "plan_restricted" } },
+        { status: 403 }
+      );
+    }
+    // Per-user Claude activation gate. Mirrors the API-key
+    // `is_activated` flow: free users start FALSE and an admin must
+    // flip them; paid users + anyone with a prior purchase are
+    // grandfathered/auto-flipped TRUE on Stripe checkout. Custom
+    // keys bypass — they're admin-minted with their own controls.
+    if (!keyInfo.isCustom && !keyInfo.claudeActivated) {
+      return NextResponse.json(
+        { error: { message: CLAUDE_NOT_ACTIVATED_MESSAGE, type: "claude_not_activated" } },
         { status: 403 }
       );
     }

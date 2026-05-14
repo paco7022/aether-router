@@ -28,9 +28,6 @@ export interface Provider {
 // 1 credit per request and consume premium-request budget. Keep this
 // list in sync when adding/removing premium providers; everything else
 // in the app derives from `isPremiumProvider()`.
-//
-// trolllm is NOT in this list right now: the upstream keys are about
-// to expire, so t/ runs as a free provider until they're rotated out.
 const PREMIUM_PROVIDERS = new Set<string>([
   "webproxy",
   "hapuppy",
@@ -38,6 +35,7 @@ const PREMIUM_PROVIDERS = new Set<string>([
   "dlab",
   "riftai",
   "opencode",
+  "trolllm",
 ]);
 
 export function isPremiumProvider(provider: string | null | undefined): boolean {

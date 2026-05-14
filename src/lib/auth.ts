@@ -22,6 +22,10 @@ export interface ApiKeyInfo {
   // requests are rejected (the chat dashboard still works). Paid users
   // and previously-paid users are auto-flipped TRUE.
   isActivated: boolean;
+  // Claude-route gate. When false on a free user, any Claude model
+  // request is rejected regardless of provider. Paid users and
+  // previously-paid users are auto-flipped TRUE on Stripe checkout.
+  claudeActivated: boolean;
   // Per-key overrides (custom/event keys)
   isCustom: boolean;
   customCredits: number | null;
@@ -51,7 +55,7 @@ export async function validateApiKey(key: string): Promise<ApiKeyInfo | null> {
   // Look up key and join with profile for credits
   const { data: result, error } = await supabase
     .from("api_keys")
-    .select("id, user_id, is_active, is_custom, custom_credits, max_context, allowed_providers, daily_request_limit, rate_limit_seconds, expires_at, last_used, profiles(credits, daily_credits, plan_id, gm_claimed_date, gm_daily_override, gm_override_expires, referral_bonus_requests, referral_bonus_expires, is_activated, preset, preset_enabled, builtin_preset_id, context_boost_expires_at)")
+    .select("id, user_id, is_active, is_custom, custom_credits, max_context, allowed_providers, daily_request_limit, rate_limit_seconds, expires_at, last_used, profiles(credits, daily_credits, plan_id, gm_claimed_date, gm_daily_override, gm_override_expires, referral_bonus_requests, referral_bonus_expires, is_activated, claude_activated, preset, preset_enabled, builtin_preset_id, context_boost_expires_at)")
     .eq("key_hash", keyHash)
     .single();
 
@@ -78,7 +82,7 @@ export async function validateApiKey(key: string): Promise<ApiKeyInfo | null> {
       });
   }
 
-  const profile = result.profiles as unknown as { credits: number; daily_credits: number; plan_id: string; gm_claimed_date: string | null; gm_daily_override: number | null; gm_override_expires: string | null; referral_bonus_requests: number | null; referral_bonus_expires: string | null; is_activated: boolean | null; preset: UserPreset | null; preset_enabled: boolean | null; builtin_preset_id: string | null; context_boost_expires_at: string | null };
+  const profile = result.profiles as unknown as { credits: number; daily_credits: number; plan_id: string; gm_claimed_date: string | null; gm_daily_override: number | null; gm_override_expires: string | null; referral_bonus_requests: number | null; referral_bonus_expires: string | null; is_activated: boolean | null; claude_activated: boolean | null; preset: UserPreset | null; preset_enabled: boolean | null; builtin_preset_id: string | null; context_boost_expires_at: string | null };
 
   return {
     keyId: result.id,
@@ -93,6 +97,7 @@ export async function validateApiKey(key: string): Promise<ApiKeyInfo | null> {
     referralBonusExpires: profile?.referral_bonus_expires ?? null,
     contextBoostExpires: profile?.context_boost_expires_at ?? null,
     isActivated: profile?.is_activated ?? false,
+    claudeActivated: profile?.claude_activated ?? false,
     isCustom: result.is_custom ?? false,
     customCredits: result.custom_credits ?? null,
     maxContext: result.max_context ?? null,
@@ -121,7 +126,7 @@ export async function validateSession(): Promise<ApiKeyInfo | null> {
   const admin = createAdminClient();
   const { data: profile } = await admin
     .from("profiles")
-    .select("credits, daily_credits, plan_id, gm_claimed_date, gm_daily_override, gm_override_expires, referral_bonus_requests, referral_bonus_expires, is_activated, preset, preset_enabled, builtin_preset_id, context_boost_expires_at")
+    .select("credits, daily_credits, plan_id, gm_claimed_date, gm_daily_override, gm_override_expires, referral_bonus_requests, referral_bonus_expires, is_activated, claude_activated, preset, preset_enabled, builtin_preset_id, context_boost_expires_at")
     .eq("id", user.id)
     .single();
 
@@ -140,6 +145,7 @@ export async function validateSession(): Promise<ApiKeyInfo | null> {
     referralBonusExpires: profile.referral_bonus_expires ?? null,
     contextBoostExpires: (profile as unknown as { context_boost_expires_at?: string | null }).context_boost_expires_at ?? null,
     isActivated: profile.is_activated ?? false,
+    claudeActivated: profile.claude_activated ?? false,
     isCustom: false,
     customCredits: null,
     maxContext: null,

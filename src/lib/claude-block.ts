@@ -10,11 +10,16 @@ export const CLAUDE_BLOCK_MESSAGE =
 export const CLAUDE_PAID_ONLY_MESSAGE =
   "Claude models are restricted to paid plans. Upgrade your plan to use them.";
 
+export const CLAUDE_NOT_ACTIVATED_MESSAGE =
+  "Your account is not yet activated for Claude. Message an admin on Discord to request activation.";
+
 // Providers currently approved to route Claude requests.
 const ALLOWED_CLAUDE_PROVIDERS = new Set(["trolllm", "gameron", "dlab", "riftai"]);
 
 // Providers whose Claude routing bypasses the paid-plan-only rule.
-// trolllm: keys expiring soon — open to free users while we drain them.
+// trolllm: free users can use Claude on t/ once admin flips
+// profiles.claude_activated; the per-user gate replaces the
+// paid-plan-only rule for this provider.
 const CLAUDE_PAID_ONLY_BYPASS = new Set(["trolllm"]);
 
 export function claudePaidOnlyApplies(provider: string | null | undefined): boolean {
