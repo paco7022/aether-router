@@ -29,11 +29,16 @@ export async function tryPcFailover(
   req: NextRequest,
   rawBody: Uint8Array,
 ): Promise<Response | null> {
-  const pcOrigin = process.env.PC_ORIGIN_URL;
+  // Trim defensively: env values can pick up a trailing CR/LF depending on
+  // how they were set (e.g. piped through a shell), and a stray \r makes
+  // both `new URL()` and `fetch()` throw "Invalid URL".
+  const pcOrigin = (process.env.PC_ORIGIN_URL || "").trim().replace(/\/+$/, "");
   if (!pcOrigin) return null; // disabled, or this deployment IS the PC
   if (req.headers.get(PROXY_HEADER) === "1") return null; // loop breaker
 
-  const target = new URL(req.nextUrl.pathname + req.nextUrl.search, pcOrigin);
+  // String concat (not `new URL`) so a malformed origin can't throw here —
+  // a bad URL just makes the fetch below fail and we fall back to local.
+  const target = pcOrigin + req.nextUrl.pathname + req.nextUrl.search;
 
   const headers = new Headers(req.headers);
   headers.set(PROXY_HEADER, "1");
