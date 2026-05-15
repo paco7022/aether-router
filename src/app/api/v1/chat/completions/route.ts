@@ -157,14 +157,70 @@ function isReasoningModel(modelId: string): boolean {
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
 
-  // 0. PC failover. When PC_ORIGIN_URL is set (Vercel only), forward the
-  // whole request to the home-PC origin first. If the PC serves it, we
+  // 0. Read + size-cap the request body once. `req.body` is a one-shot
+  // stream — it cannot be read twice — and we need the bytes both to
+  // forward to the PC (failover, step 0b) and for local handling. See the
+  // size-cap rationale below.
+  //
+  // IMPORTANT: The `Content-Length` header is attacker-controlled (can be
+  // omitted entirely or lied about with chunked transfer), so we cannot
+  // trust it as a guard. We read the body as a byte stream and enforce the
+  // cap while accumulating, aborting the moment we exceed it. A 200-page
+  // PDF in base64 is ~2-3MB; anything past ~10MB is almost certainly an
+  // attempt to push past the context cap with binary the estimator can't
+  // measure.
+  const MAX_BODY_BYTES = 10 * 1024 * 1024;
+  let rawBody: Uint8Array;
+  try {
+    const reader = req.body?.getReader();
+    if (!reader) {
+      return NextResponse.json(
+        { error: { message: "Empty request body", type: "invalid_request" } },
+        { status: 400 }
+      );
+    }
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (value) {
+        total += value.byteLength;
+        if (total > MAX_BODY_BYTES) {
+          try { await reader.cancel(); } catch { /* ignore */ }
+          return NextResponse.json(
+            {
+              error: {
+                message: `Request body too large. Max ${MAX_BODY_BYTES / 1024 / 1024} MB.`,
+                type: "invalid_request",
+              },
+            },
+            { status: 413 }
+          );
+        }
+        chunks.push(value);
+      }
+    }
+    rawBody = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      rawBody.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+  } catch {
+    return NextResponse.json(
+      { error: { message: "Failed to read request body", type: "invalid_request" } },
+      { status: 400 }
+    );
+  }
+
+  // 0b. PC failover. When PC_ORIGIN_URL is set (Vercel only), forward the
+  // buffered request to the home-PC origin first. If the PC serves it, we
   // return that response untouched and skip all the work below — no DB
-  // queries, no upstream call, no streaming held on a Vercel function.
-  // If the PC is unreachable/unhealthy, tryPcFailover() returns null and
-  // we fall through to the normal local path. The body is cloned inside,
-  // so `req` below is unaffected.
-  const pcResponse = await tryPcFailover(req);
+  // queries, no upstream call, no streaming held on a Vercel function. If
+  // the PC is unreachable/unhealthy, tryPcFailover() returns null and we
+  // fall through to the normal local path with `rawBody` already in hand.
+  const pcResponse = await tryPcFailover(req, rawBody);
   if (pcResponse) return pcResponse;
 
   // 1. Authenticate — Bearer API key OR Supabase session (in-dashboard chat).
@@ -237,61 +293,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(customKeyNoCreditsError.payload, { status: customKeyNoCreditsError.status });
   }
 
-  // 3. Parse request body. Reject oversized payloads up-front: a 200-page
-  // PDF in base64 is ~2-3MB, anything beyond ~10MB is almost certainly an
-  // attempt to push past the context cap with binary content the estimator
-  // can't accurately measure.
-  //
-  // IMPORTANT: The `Content-Length` header is attacker-controlled (can be
-  // omitted entirely or lied about with chunked transfer), so we cannot
-  // trust it as a guard. We read the body as a byte stream and enforce the
-  // cap while accumulating, aborting the moment we exceed it. `req.json()`
-  // alone does NOT enforce a size limit in Next.js App Router.
-  const MAX_BODY_BYTES = 10 * 1024 * 1024;
-  let rawBody: Uint8Array;
-  try {
-    const reader = req.body?.getReader();
-    if (!reader) {
-      return NextResponse.json(
-        { error: { message: "Empty request body", type: "invalid_request" } },
-        { status: 400 }
-      );
-    }
-    const chunks: Uint8Array[] = [];
-    let total = 0;
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      if (value) {
-        total += value.byteLength;
-        if (total > MAX_BODY_BYTES) {
-          try { await reader.cancel(); } catch { /* ignore */ }
-          return NextResponse.json(
-            {
-              error: {
-                message: `Request body too large. Max ${MAX_BODY_BYTES / 1024 / 1024} MB.`,
-                type: "invalid_request",
-              },
-            },
-            { status: 413 }
-          );
-        }
-        chunks.push(value);
-      }
-    }
-    rawBody = new Uint8Array(total);
-    let offset = 0;
-    for (const chunk of chunks) {
-      rawBody.set(chunk, offset);
-      offset += chunk.byteLength;
-    }
-  } catch (err) {
-    return NextResponse.json(
-      { error: { message: "Failed to read request body", type: "invalid_request" } },
-      { status: 400 }
-    );
-  }
-
+  // 3. Parse request body. `rawBody` was read + size-capped at step 0.
   let body: Record<string, unknown>;
   try {
     body = JSON.parse(new TextDecoder().decode(rawBody));
