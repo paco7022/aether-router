@@ -69,6 +69,14 @@ export async function tryPcFailover(
 
     const outHeaders = new Headers(res.headers);
     outHeaders.set("x-aether-origin", "pc");
+    // Strip body-framing / hop-by-hop headers. They describe the PC's wire
+    // response; once we re-wrap the (already-decoded) body stream they are
+    // stale, and a stale content-length truncates the body to empty on the
+    // Vercel runtime. Let the runtime re-derive framing from the stream.
+    outHeaders.delete("content-length");
+    outHeaders.delete("content-encoding");
+    outHeaders.delete("transfer-encoding");
+    outHeaders.delete("connection");
     return new Response(res.body, {
       status: res.status,
       statusText: res.statusText,
