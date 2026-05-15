@@ -8,3 +8,7 @@ out/
 tsconfig.tsbuildinfo
 supabase/.temp/
 preset examples/
+
+# PC deployment runtime artifacts
+logs/
+.sync.lock

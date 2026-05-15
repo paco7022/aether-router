@@ -1,0 +1,10 @@
+name = "aether-router-edge"
+main = "src/worker.js"
+compatibility_date = "2026-05-01"
+workers_dev = false
+
+# Bind the worker to api.aether-ai.dev (entire hostname).
+# The zone must exist in Cloudflare with the matching account.
+[[routes]]
+pattern = "api.aether-ai.dev/*"
+zone_name = "aether-ai.dev"

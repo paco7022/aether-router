@@ -30,6 +30,7 @@ import {
 } from "@/lib/content-moderation";
 import { applyPreset } from "@/lib/preset";
 import { getBuiltinPreset } from "@/lib/builtinPresets";
+import { tryPcFailover } from "@/lib/pc-failover";
 
 export const runtime = "nodejs";
 // NOTE: If a Vercel function timeout kills a streaming request mid-flight,
@@ -155,6 +156,16 @@ function isReasoningModel(modelId: string): boolean {
 
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
+
+  // 0. PC failover. When PC_ORIGIN_URL is set (Vercel only), forward the
+  // whole request to the home-PC origin first. If the PC serves it, we
+  // return that response untouched and skip all the work below — no DB
+  // queries, no upstream call, no streaming held on a Vercel function.
+  // If the PC is unreachable/unhealthy, tryPcFailover() returns null and
+  // we fall through to the normal local path. The body is cloned inside,
+  // so `req` below is unaffected.
+  const pcResponse = await tryPcFailover(req);
+  if (pcResponse) return pcResponse;
 
   // 1. Authenticate — Bearer API key OR Supabase session (in-dashboard chat).
   // Session auth lets the internal chat UI reuse this endpoint without
