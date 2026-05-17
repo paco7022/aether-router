@@ -1298,6 +1298,11 @@ export async function POST(req: NextRequest) {
     const durationMs = Date.now() - startTime;
     // Requests served under a free event don't cost premium-request budget.
     const premiumCost = isPremiumProvider && !activeEventId ? Number(model.premium_request_cost ?? 1) : 0;
+    // finish_reason of the upstream response — logged to diagnose cut-offs
+    // (length = hit max_tokens, content_filter = blocked, stop = natural end).
+    const finishReason =
+      (data as { choices?: Array<{ finish_reason?: string | null }> })
+        .choices?.[0]?.finish_reason ?? null;
     const { error: usageLogError } = await supabase.from("usage_logs").insert({
       user_id: keyInfo.userId,
       api_key_id: keyInfo.keyId,
@@ -1314,6 +1319,7 @@ export async function POST(req: NextRequest) {
       premium_cost: premiumCost,
       source: keyInfo.source,
       estimated_prompt_tokens: estimatedPrompt,
+      finish_reason: finishReason,
     });
     if (usageLogError) {
       console.error("Failed to write usage log:", usageLogError.message);
@@ -1406,6 +1412,9 @@ async function handleStreamingResponse(
   let cacheWriteTokens = 0;
   let completionText = "";
   let hasUsageData = false;
+  // finish_reason from the last chunk that carries one (length / stop /
+  // content_filter) — logged so truncated responses can be diagnosed.
+  let finishReason: string | null = null;
   let settled = false; // ensures finalize() runs at most once
 
   const decoder = new TextDecoder();
@@ -1618,6 +1627,9 @@ async function handleStreamingResponse(
       premium_cost: streamPremiumCost,
       source: keyInfo.source,
       estimated_prompt_tokens: estimatedPromptTokens,
+      // "aborted" overrides finish_reason — the client cut the stream, so
+      // any upstream finish_reason seen so far is incomplete/misleading.
+      finish_reason: reason === "aborted" ? "aborted" : finishReason,
     });
     if (usageLogError) {
       console.error("Failed to write streaming usage log:", usageLogError.message);
@@ -1687,6 +1699,10 @@ async function handleStreamingResponse(
           const delta = parsed.choices?.[0]?.delta?.content;
           if (typeof delta === "string") {
             completionText += delta;
+          }
+          const chunkFinish = parsed.choices?.[0]?.finish_reason;
+          if (typeof chunkFinish === "string" && chunkFinish) {
+            finishReason = chunkFinish;
           }
         } catch {
           // Not valid JSON, skip
