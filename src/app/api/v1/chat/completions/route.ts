@@ -545,6 +545,25 @@ export async function POST(req: NextRequest) {
   let premiumReservedCost = 0;
   let customKeyRequestReserved = false;
   let premiumOveragePurchased = false;
+  // Combined balance (daily + permanent) right after the overage deduct,
+  // captured so the overage charge can be written to the transaction ledger.
+  let premiumOverageBalance = 0;
+
+  // Validate max_tokens up front — BEFORE any premium / custom-key
+  // reservation. Returning a 400 after a reservation would leak that
+  // reservation (the early-return skips refundReservation). This was bug B.
+  const requestedCompletionTokens = getRequestedCompletionTokens(body);
+  if (requestedCompletionTokens !== null && requestedCompletionTokens > MAX_STREAM_RESERVATION_COMPLETION_TOKENS) {
+    return NextResponse.json(
+      {
+        error: {
+          message: `max_tokens too large. Maximum allowed is ${MAX_STREAM_RESERVATION_COMPLETION_TOKENS}.`,
+          type: "invalid_request",
+        },
+      },
+      { status: 400 }
+    );
+  }
 
   // 5.5b. Custom key checks — custom keys bypass plan restrictions and use their own limits
   if (keyInfo.isCustom) {
@@ -709,7 +728,22 @@ export async function POST(req: NextRequest) {
           });
           if (!overageErr && overageBalance !== -1) {
             premiumOveragePurchased = true;
+            premiumOverageBalance = overageBalance as number;
             isFreePool = true; // overage flat fee covers the request; skip per-token billing
+            // deduct_credits writes no ledger row, and the isFreePool path
+            // below skips the usage transaction — so record the overage
+            // charge here. Otherwise the user's credits drop with no
+            // matching entry in their history (this was bug A).
+            const { error: overageTxErr } = await supabase.from("transactions").insert({
+              user_id: keyInfo.userId,
+              amount: -PREMIUM_OVERAGE_COST,
+              balance: premiumOverageBalance,
+              type: "premium_overage",
+              description: `${model.id} - extra premium request (daily cap reached)`,
+            });
+            if (overageTxErr) {
+              console.error("Failed to log premium overage charge:", overageTxErr.message);
+            }
           } else {
             return NextResponse.json(
               { error: { message: `Daily premium limit reached (${gmDailyRequests}/day). You have ${availableCredits} credits but the deduction failed — try again.`, type: "rate_limit" } },
@@ -723,31 +757,31 @@ export async function POST(req: NextRequest) {
           );
         }
       }
-      premiumRequestReserved = true;
-      premiumReservedCost = premiumCost;
+      if (!premiumOveragePurchased) {
+        // Pool reservation succeeded (status "ok"): the premium counter was
+        // incremented by `premiumCost`, so it must be refunded on error.
+        // (In the overage path the counter was NOT incremented — the 100-credit
+        // fee tracked by premiumOveragePurchased covers that request instead.)
+        premiumRequestReserved = true;
+        premiumReservedCost = premiumCost;
+      }
+      // Premium requests are paid for entirely by the premium-request pool
+      // (or, past the daily cap, by the overage flat fee). There is no
+      // per-request credit charge — credits are spent ONLY as overage.
+      // Marking the request free-pool here skips the 1-credit reservation
+      // below so a user with 0 credits can still spend their premium pool.
+      isFreePool = true;
     }
   }
 
   // 6. Forward to provider (use upstream_model_id for the real provider name)
+  // max_tokens was already validated up front (before any reservation).
   const upstreamModel = model.upstream_model_id || modelId;
-  const requestedCompletionTokens = getRequestedCompletionTokens(body);
   const reservedCompletionTokens = Math.min(
     requestedCompletionTokens ?? DEFAULT_STREAM_RESERVATION_COMPLETION_TOKENS,
     MAX_STREAM_RESERVATION_COMPLETION_TOKENS
   );
   const estimatedPrompt = estimatePromptTokens(body);
-
-  if (requestedCompletionTokens !== null && requestedCompletionTokens > MAX_STREAM_RESERVATION_COMPLETION_TOKENS) {
-    return NextResponse.json(
-      {
-        error: {
-          message: `max_tokens too large. Maximum allowed is ${MAX_STREAM_RESERVATION_COMPLETION_TOKENS}.`,
-          type: "invalid_request",
-        },
-      },
-      { status: 400 }
-    );
-  }
 
   // Ensure upstream and reservation math share the same completion ceiling.
   // Reasoning models reject `max_tokens` and require `max_completion_tokens`,
@@ -997,7 +1031,32 @@ export async function POST(req: NextRequest) {
         p_user_id: key.userId,
         p_amount: PREMIUM_OVERAGE_COST,
       });
-      if (refundErr) console.error("Failed to refund premium overage credits:", refundErr.message);
+      if (refundErr) {
+        console.error("Failed to refund premium overage credits:", refundErr.message);
+      } else {
+        // Mirror the refund in the ledger so the `premium_overage` charge row
+        // written at reservation time is offset and the running balance stays
+        // consistent. add_credits returns only the permanent balance, so read
+        // the combined total for the row's `balance`.
+        const { data: prof } = await supabase
+          .from("profiles")
+          .select("credits, daily_credits")
+          .eq("id", key.userId)
+          .single();
+        const revBalance = prof
+          ? Number(prof.credits ?? 0) + Number(prof.daily_credits ?? 0)
+          : 0;
+        const { error: revTxErr } = await supabase.from("transactions").insert({
+          user_id: key.userId,
+          amount: PREMIUM_OVERAGE_COST,
+          balance: revBalance,
+          type: "premium_overage_refund",
+          description: `${model.id} - premium overage refunded (request failed)`,
+        });
+        if (revTxErr) {
+          console.error("Failed to log premium overage refund:", revTxErr.message);
+        }
+      }
       premiumOveragePurchased = false;
     }
 
@@ -1137,7 +1196,8 @@ export async function POST(req: NextRequest) {
         activeEventId,
         reservation,
         refundReservation,
-        req.signal
+        req.signal,
+        premiumOveragePurchased ? PREMIUM_OVERAGE_COST : 0
       );
     }
 
@@ -1247,7 +1307,7 @@ export async function POST(req: NextRequest) {
       total_tokens: totalTokens,
       cache_read_tokens: cacheTokens.read,
       cache_write_tokens: cacheTokens.write,
-      credits_charged: isFreePool ? 0 : chargedCredits,
+      credits_charged: premiumOveragePurchased ? PREMIUM_OVERAGE_COST : (isFreePool ? 0 : chargedCredits),
       cost_usd: costUsd,
       status: isFreePool ? "success" : billingStatus,
       duration_ms: durationMs,
@@ -1334,6 +1394,10 @@ async function handleStreamingResponse(
   reservation: StreamChargeReservation | null = null,
   refundReservation: () => Promise<void> = async () => {},
   clientSignal?: AbortSignal,
+  // >0 when this request was paid for with a premium-overage flat fee. The
+  // fee is charged (and ledger-logged) up front in the main handler; passed
+  // here only so the usage_log row reflects what was actually charged.
+  premiumOverageCharged: number = 0,
 ) {
   const supabase = createAdminClient();
   let totalPromptTokens = 0;
@@ -1547,7 +1611,7 @@ async function handleStreamingResponse(
       total_tokens: totalTokens,
       cache_read_tokens: cacheReadTokens,
       cache_write_tokens: cacheWriteTokens,
-      credits_charged: chargedCredits,
+      credits_charged: premiumOverageCharged > 0 ? premiumOverageCharged : chargedCredits,
       cost_usd: costUsd,
       status: isFreePool ? "success" : (reason === "aborted" ? "aborted" : billingStatus),
       duration_ms: durationMs,
