@@ -14,7 +14,7 @@ export const CLAUDE_NOT_ACTIVATED_MESSAGE =
   "Your account is not yet activated for Claude. Message an admin on Discord to request activation.";
 
 // Providers currently approved to route Claude requests.
-const ALLOWED_CLAUDE_PROVIDERS = new Set(["trolllm", "gameron", "dlab", "riftai"]);
+const ALLOWED_CLAUDE_PROVIDERS = new Set(["trolllm", "gameron", "dlab", "riftai", "hapuppy"]);
 
 // Providers whose Claude routing bypasses the paid-plan-only rule.
 // trolllm: free users can use Claude on t/ once admin flips
