@@ -63,15 +63,18 @@ export default async function BillingPage() {
     : 0;
   const premiumDebt = Number(premiumCounters?.premium_request_debt ?? 0);
 
-  const permanentCredits = profile?.credits || 0;
-  const dailyCredits = profile?.daily_credits || 0;
-  const totalCredits = permanentCredits + dailyCredits;
   const currentPlanId = profile?.plan_id || "free";
+  const permanentCredits = profile?.credits || 0;
+  const dailyCredits = currentPlanId === "free" ? 0 : (profile?.daily_credits || 0);
+  const totalCredits = permanentCredits + dailyCredits;
   const gmClaimedToday = profile?.gm_claimed_date === new Date().toISOString().split("T")[0];
   const today = new Date().toISOString().split("T")[0];
   const alreadyClaimed = subscription?.last_grant_date === today;
   const planObj = subscription?.plans as { credits_per_day: number } | null;
-  const creditsPerDay = planObj?.credits_per_day || 0;
+  const creditsPerDay = currentPlanId === "free" ? 0 : (planObj?.credits_per_day || 0);
+  const premiumRequestLimit = currentPlanId === "free"
+    ? 15
+    : (currentPlan?.gm_daily_requests ?? 15);
 
   return (
     <div>
@@ -131,7 +134,7 @@ export default async function BillingPage() {
       <div className="mb-8">
         <GmRequestsCard
           used={premiumUsedToday}
-          limit={currentPlan?.gm_daily_requests ?? 15}
+          limit={premiumRequestLimit}
           debt={premiumDebt}
           claimed={gmClaimedToday}
         />

@@ -203,6 +203,7 @@ export async function POST(req: NextRequest, { params }: Ctx) {
   }
   const origin = siteUrl || req.nextUrl.origin;
   const cookieHeader = req.headers.get("cookie") ?? "";
+  const completionRequestStartedAt = new Date().toISOString();
 
   let upstream: Response;
   try {
@@ -314,6 +315,8 @@ export async function POST(req: NextRequest, { params }: Ctx) {
             .select("credits_charged, prompt_tokens, completion_tokens")
             .eq("user_id", user!.id)
             .eq("source", "chat")
+            .eq("model_id", conv.model_id)
+            .gte("created_at", completionRequestStartedAt)
             .order("created_at", { ascending: false })
             .limit(1)
             .maybeSingle();

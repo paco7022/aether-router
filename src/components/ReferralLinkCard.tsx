@@ -1,13 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import { publicUrl } from "@/lib/public-endpoints";
 
 export function ReferralLinkCard({ code }: { code: string }) {
   const [copied, setCopied] = useState<"code" | "link" | null>(null);
 
-  const link = typeof window !== "undefined"
-    ? `${window.location.origin}/register?ref=${code}`
-    : `/register?ref=${code}`;
+  const link = publicUrl(`/register?ref=${code}`);
 
   async function copy(value: string, what: "code" | "link") {
     try {

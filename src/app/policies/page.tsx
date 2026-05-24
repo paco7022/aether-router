@@ -87,7 +87,7 @@ export default function PoliciesPage() {
         <Section number="2" title="Multi-accounting is prohibited">
           <p>
             Each person may hold only one Aether Router account. Creating
-            additional accounts to claim daily free credits, bypass plan
+            additional accounts to claim free premium requests, bypass plan
             limits, stack free trials, or otherwise abuse the service is not
             allowed.
           </p>
@@ -203,7 +203,7 @@ export default function PoliciesPage() {
         <Section number="5" title="Service changes">
           <p>
             Aether Router is evolving software. Models, prices, plan limits,
-            daily credits, and provider availability may change at any time.
+            free allowances, and provider availability may change at any time.
             We will try to communicate significant changes in advance, but
             we are not obligated to do so when the change is forced on us by
             an upstream provider.

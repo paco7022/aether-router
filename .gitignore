@@ -1,10 +1,12 @@
 node_modules/
 .next/
+.open-next/
 .env.local
 .env*.local
 out/
 
 .vercel
+.wrangler/
 tsconfig.tsbuildinfo
 supabase/.temp/
 preset examples/

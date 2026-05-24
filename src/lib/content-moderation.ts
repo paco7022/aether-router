@@ -24,7 +24,7 @@ const FLAG_CATEGORIES = new Set(["sexual/minors"]);
 
 type CacheEntry = { flagged: boolean; expiresAt: number };
 
-// Process-local. Survives across requests within a warm Vercel function
+// Process-local. Survives across requests within a warm server isolate
 // container; resets on cold start. Repeated identical prompts within a
 // container short-circuit the moderation call.
 const cache = new Map<string, CacheEntry>();

@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 
 // Marker header. A request that already carries it must NOT be proxied again
-// (prevents Vercel <-> PC <-> Worker loops).
+// (prevents cloud <-> PC <-> Worker loops).
 const PROXY_HEADER = "x-aether-proxied";
 
 // Time budget for the PC to return *response headers*. Claude upstreams can
@@ -14,16 +14,17 @@ const PC_HEADERS_TIMEOUT_MS = 25_000;
  * Attempt to serve the request from the home-PC origin.
  *
  * Returns the PC's `Response` on success, or `null` to tell the caller to
- * handle the request locally (the normal Vercel path).
+ * handle the request locally (the normal cloud app path).
  *
- * Enabled only when `PC_ORIGIN_URL` is set — Vercel sets it, the PC itself
- * leaves it unset so it never proxies to itself. The `x-aether-proxied`
- * header is the second line of defense against loops.
+ * Enabled only when `PC_ORIGIN_URL` is set. The Cloudflare edge worker is the
+ * preferred traffic director now, so production Cloudflare deployments should
+ * leave this unset. The `x-aether-proxied` header is the second line of defense
+ * against loops.
  *
  * `rawBody` is the already-buffered request body (the caller reads `req.body`
  * exactly once and shares it both here and with local handling). We forward
  * it as a plain byte body — no request-body streaming, no `req.clone()`,
- * which keeps this robust across the Vercel Node runtime.
+ * which keeps this robust across server runtimes.
  */
 export async function tryPcFailover(
   req: NextRequest,
@@ -72,7 +73,7 @@ export async function tryPcFailover(
     // Strip body-framing / hop-by-hop headers. They describe the PC's wire
     // response; once we re-wrap the (already-decoded) body stream they are
     // stale, and a stale content-length truncates the body to empty on the
-    // Vercel runtime. Let the runtime re-derive framing from the stream.
+    // target runtime. Let the runtime re-derive framing from the stream.
     outHeaders.delete("content-length");
     outHeaders.delete("content-encoding");
     outHeaders.delete("transfer-encoding");

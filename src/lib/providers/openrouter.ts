@@ -2,6 +2,17 @@ import type { Provider, ProviderRequest } from "./types";
 
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 1000;
+const DEFAULT_OPENROUTER_REFERER = "https://router-cloud.aether-ai.dev";
+
+function getOpenRouterReferer(): string {
+  return (
+    process.env.OPENROUTER_REFERER ||
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    DEFAULT_OPENROUTER_REFERER
+  )
+    .trim()
+    .replace(/\/+$/, "");
+}
 
 export const openrouterProvider: Provider = {
   name: "openrouter",
@@ -25,7 +36,7 @@ export const openrouterProvider: Provider = {
         headers: {
           "Authorization": `Bearer ${apiKey}`,
           "Content-Type": "application/json",
-          "HTTP-Referer": "https://aether-router.vercel.app",
+          "HTTP-Referer": getOpenRouterReferer(),
           "X-Title": "Aether Router",
         },
         body: JSON.stringify(request),

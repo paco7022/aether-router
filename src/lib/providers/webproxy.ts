@@ -4,7 +4,7 @@ const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 1000;
 
 // Web-subscription proxy (personal experiment). Forwards to a FastAPI instance
-// that drives Gemini web subscriptions via Playwright. Not runnable on Vercel —
+// that drives Gemini web subscriptions via Playwright. Not runnable serverless —
 // the target URL must point to a long-lived server (tunneled RTX box, etc.).
 export const webproxyProvider: Provider = {
   name: "webproxy",

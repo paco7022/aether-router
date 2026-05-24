@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { PUBLIC_API_BASE_URL } from "@/lib/public-endpoints";
 
 interface ApiKey {
   id: string;
@@ -233,7 +234,7 @@ export default function ApiKeysPage() {
           Use your API key with any OpenAI-compatible client:
         </p>
         <pre className="bg-[var(--bg-input)] rounded-xl p-4 text-xs font-mono overflow-x-auto text-white/70 border border-white/[0.04] leading-relaxed">
-{`curl -X POST https://aether-router.vercel.app/api/v1/chat/completions \\
+{`curl -X POST ${PUBLIC_API_BASE_URL}/chat/completions \\
   -H "Authorization: Bearer ak_your_key_here" \\
   -H "Content-Type: application/json" \\
   -d '{

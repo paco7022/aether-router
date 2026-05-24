@@ -1,0 +1,41 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "aether-router-app",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-05-01",
+  "workers_dev": false,
+  "compatibility_flags": [
+    "nodejs_compat",
+    "global_fetch_strictly_public"
+  ],
+  "routes": [
+    {
+      "pattern": "router-cloud.aether-ai.dev",
+      "custom_domain": true
+    }
+  ],
+  "vars": {
+    "NEXT_PUBLIC_SITE_URL": "https://router-cloud.aether-ai.dev",
+    "NEXT_PUBLIC_AETHER_API_BASE_URL": "https://api.aether-ai.dev/v1",
+    "ALLOWED_ORIGINS": "https://router-cloud.aether-ai.dev,https://router.aether-ai.dev",
+    "TRUST_PROXY": "true",
+    "AETHER_FREE_INCLUDED_USAGE_ENABLED": "true",
+    "AETHER_FREE_PROMOS_ENABLED": "false"
+  },
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "services": [
+    {
+      "binding": "WORKER_SELF_REFERENCE",
+      "service": "aether-router-app"
+    }
+  ],
+  "limits": {
+    "cpu_ms": 30000
+  },
+  "observability": {
+    "enabled": true
+  }
+}

@@ -3,6 +3,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { stripe } from "@/lib/stripe";
 import { requireCsrf } from "@/lib/csrf";
+import { publicUrl } from "@/lib/public-endpoints";
 
 export async function POST(req: NextRequest) {
   const csrfError = requireCsrf(req);
@@ -17,7 +18,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { plan_id } = await req.json();
+  let body: { plan_id?: unknown };
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const { plan_id } = body;
   if (!plan_id || typeof plan_id !== "string" || plan_id.length > 64 || plan_id === "free") {
     return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
   }
@@ -70,7 +78,7 @@ export async function POST(req: NextRequest) {
   if (existingSub?.stripe_subscription_id) {
     const portalSession = await stripe.billingPortal.sessions.create({
       customer: customerId,
-      return_url: `${req.nextUrl.origin}/dashboard/billing`,
+      return_url: publicUrl("/dashboard/billing"),
     });
     return NextResponse.json({ url: portalSession.url });
   }
@@ -103,8 +111,8 @@ export async function POST(req: NextRequest) {
         plan_id: plan.id,
       },
     },
-    success_url: `${req.nextUrl.origin}/dashboard/billing?checkout=success`,
-    cancel_url: `${req.nextUrl.origin}/dashboard/billing?checkout=cancel`,
+    success_url: publicUrl("/dashboard/billing?checkout=success"),
+    cancel_url: publicUrl("/dashboard/billing?checkout=cancel"),
   });
 
   return NextResponse.json({ url: session.url });

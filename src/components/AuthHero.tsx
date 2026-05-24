@@ -20,7 +20,7 @@ const features = [
   },
   {
     title: "Credits that never expire",
-    desc: "Buy once, use whenever. Every plan also ships with free daily credits.",
+    desc: "Buy once, use whenever. Free accounts include 15 premium requests per day.",
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <line x1="12" y1="1" x2="12" y2="23" />

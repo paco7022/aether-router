@@ -71,7 +71,7 @@ export function GmRequestsCard({
       {needsClaim ? (
         <div className="text-center py-4">
           <p className="text-sm text-[var(--text-muted)] mb-3">
-            Claim your daily premium requests to use an/ models (t/, w/, h/, gm/ work without claim).
+            Claim your daily premium request allowance for today.
           </p>
           <button
             onClick={handleClaim}

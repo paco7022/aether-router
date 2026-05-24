@@ -18,6 +18,23 @@ export async function POST(req: NextRequest) {
 
   const admin = createAdminClient();
 
+  const { data: profile, error: profileError } = await admin
+    .from("profiles")
+    .select("plan_id")
+    .eq("id", user.id)
+    .single();
+
+  if (profileError) {
+    return NextResponse.json({ error: "Failed to load profile" }, { status: 500 });
+  }
+
+  if (profile?.plan_id === "free") {
+    return NextResponse.json(
+      { error: "Free accounts include premium requests only, not daily credits", claimed: false },
+      { status: 400 }
+    );
+  }
+
   // Atomic claim: locks subscription row to prevent double-claim race conditions
   const { data, error } = await admin.rpc("claim_daily_credits", {
     p_user_id: user.id,

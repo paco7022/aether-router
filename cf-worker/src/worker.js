@@ -1,114 +1,283 @@
-// aether-router edge router
+// Aether Router edge traffic director.
 //
-// Routing rules:
-//   1. Stripe webhook -> ALWAYS Vercel (single source of truth for secret/handlers).
-//   2. Everything else: try PC tunnel first; on timeout / network err / 5xx,
-//      fall back to Vercel.
+// Day mode: route dynamic traffic to the home PC first, then fall back to the
+// cloud origin. Night mode: route straight to the cloud origin.
 //
-// Streaming: chat completions use SSE. We forward Response objects without
-// reading the body, so streaming works end-to-end.
+// Required/optional env vars:
+//   PC_ORIGIN=https://router.aether-ai.dev
+//   CLOUD_ORIGIN=https://router-cloud.aether-ai.dev
+//   PC_ACTIVE_START_HOUR=7
+//   PC_ACTIVE_END_HOUR=22
+//   ROUTING_TIMEZONE_OFFSET_MINUTES=-360
 
-const PC_ORIGIN = "https://router.aether-ai.dev";
-const VERCEL_ORIGIN = "https://aether-router.vercel.app";
+const DEFAULT_PC_ORIGIN = "https://router.aether-ai.dev";
+const DEFAULT_CLOUD_ORIGIN = "https://router-cloud.aether-ai.dev";
+const DEFAULT_PC_ACTIVE_START_HOUR = 7;
+const DEFAULT_PC_ACTIVE_END_HOUR = 22;
+const DEFAULT_TIMEZONE_OFFSET_MINUTES = -360;
 
-// PC is healthy but upstream (Claude providers) can take 5-15s to first byte
-// for non-streaming requests. Generous timeout so we only fall back when PC
-// is actually unreachable or upstream is really stuck. A dead tunnel returns
-// a 5xx immediately from Cloudflare, which also triggers fallback.
 const PC_TIMEOUT_MS = 25000;
+const ALWAYS_CLOUD_PATHS = ["/api/v1/webhooks/stripe"];
+const RATE_LIMITED_PATHS = new Set([
+  "/api/v1/fingerprint/check",
+  "/api/v1/models",
+]);
+const RATE_WINDOW_MS = 60_000;
+const RATE_MAX_HITS = 30;
+const ipHits = new Map();
 
-const ALWAYS_VERCEL_PATHS = [
-  "/api/v1/webhooks/stripe",
-];
+function cleanOrigin(value, fallback) {
+  return String(value || fallback || "").trim().replace(/\/+$/, "");
+}
+
+function readNumber(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function getConfig(env) {
+  return {
+    pcOrigin: cleanOrigin(env.PC_ORIGIN, DEFAULT_PC_ORIGIN),
+    cloudOrigin: cleanOrigin(env.CLOUD_ORIGIN, DEFAULT_CLOUD_ORIGIN),
+    allowedOrigins: String(
+      env.ALLOWED_ORIGINS ||
+        "https://router-cloud.aether-ai.dev,https://router.aether-ai.dev",
+    )
+      .split(",")
+      .map((origin) => origin.trim())
+      .filter(Boolean),
+    pcStartHour: readNumber(env.PC_ACTIVE_START_HOUR, DEFAULT_PC_ACTIVE_START_HOUR),
+    pcEndHour: readNumber(env.PC_ACTIVE_END_HOUR, DEFAULT_PC_ACTIVE_END_HOUR),
+    timezoneOffsetMinutes: readNumber(
+      env.ROUTING_TIMEZONE_OFFSET_MINUTES,
+      DEFAULT_TIMEZONE_OFFSET_MINUTES,
+    ),
+  };
+}
+
+function normalizeAppPath(pathname) {
+  if (pathname === "/v1") return "/api/v1";
+  if (pathname.startsWith("/v1/")) return `/api${pathname}`;
+  return pathname;
+}
 
 function rewriteUrl(originalUrl, origin) {
   const u = new URL(originalUrl);
   const target = new URL(origin);
-  target.pathname = u.pathname;
+  target.pathname = normalizeAppPath(u.pathname);
   target.search = u.search;
   return target.toString();
 }
 
-// markProxied: when true, stamp `x-aether-proxied: 1` so the destination
-// (Vercel) does not itself re-proxy to the PC. Used on the Vercel fallback
-// path — the Worker already decided the PC is unavailable.
+function localHour(date, offsetMinutes) {
+  const localMs = date.getTime() + offsetMinutes * 60 * 1000;
+  return new Date(localMs).getUTCHours();
+}
+
+function isPcWindow(date, config) {
+  const start = Math.max(0, Math.min(23, Math.floor(config.pcStartHour)));
+  const end = Math.max(0, Math.min(23, Math.floor(config.pcEndHour)));
+  const hour = localHour(date, config.timezoneOffsetMinutes);
+
+  if (start === end) return true;
+  if (start < end) return hour >= start && hour < end;
+  return hour >= start || hour < end;
+}
+
+function shouldGoStraightToCloud(pathname) {
+  const normalizedPathname = normalizeAppPath(pathname);
+  return ALWAYS_CLOUD_PATHS.some((p) => normalizedPathname === p || normalizedPathname.startsWith(p + "/"));
+}
+
+function getClientIp(request) {
+  return (
+    request.headers.get("cf-connecting-ip") ||
+    request.headers.get("true-client-ip") ||
+    request.headers.get("x-real-ip") ||
+    "unknown"
+  );
+}
+
+function isRateLimited(ip) {
+  const now = Date.now();
+  const entry = ipHits.get(ip);
+  if (!entry || now > entry.resetAt) {
+    ipHits.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS });
+    return false;
+  }
+  entry.count += 1;
+  return entry.count > RATE_MAX_HITS;
+}
+
+function pruneIpHits() {
+  if (ipHits.size < 50_000) return;
+  const now = Date.now();
+  for (const [key, value] of ipHits) {
+    if (value.resetAt < now) ipHits.delete(key);
+  }
+}
+
+function getCorsHeaders(request, config) {
+  const origin = request.headers.get("origin") || "";
+  const pathname = normalizeAppPath(new URL(request.url).pathname);
+  const auth = request.headers.get("authorization") || "";
+  const hasBearer = auth.toLowerCase().startsWith("bearer ");
+  const preflightAuthRequested = (
+    request.headers.get("access-control-request-headers") || ""
+  )
+    .toLowerCase()
+    .includes("authorization");
+
+  const isModelsRoute = pathname === "/api/v1/models";
+  const isBearerRoute =
+    pathname === "/api/v1/chat/completions" &&
+    (hasBearer || preflightAuthRequested);
+
+  if (origin && config.allowedOrigins.includes(origin)) {
+    return {
+      "Access-Control-Allow-Origin": origin,
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS, DELETE, PATCH",
+      "Access-Control-Allow-Headers":
+        "Content-Type, Authorization, x-api-key, X-Requested-With, X-Device-Fingerprint",
+      "Access-Control-Allow-Credentials": "true",
+      "Access-Control-Max-Age": "86400",
+      Vary: "Origin",
+    };
+  }
+
+  if (isBearerRoute || isModelsRoute) {
+    return {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Headers":
+        "Content-Type, Authorization, x-api-key, X-Device-Fingerprint",
+      "Access-Control-Max-Age": "86400",
+      Vary: "Origin",
+    };
+  }
+
+  return { Vary: "Origin" };
+}
+
 async function forward(request, origin, signal, markProxied) {
   const url = rewriteUrl(request.url, origin);
-  let headers = request.headers;
+  const headers = new Headers(request.headers);
+  headers.delete("host");
+
   if (markProxied) {
-    headers = new Headers(request.headers);
     headers.set("x-aether-proxied", "1");
   }
-  const init = {
+
+  return fetch(url, {
     method: request.method,
     headers,
     body: request.method === "GET" || request.method === "HEAD" ? undefined : request.body,
     redirect: "manual",
     signal,
-  };
-  return fetch(url, init);
+  });
 }
 
-function shouldGoStraightToVercel(pathname) {
-  return ALWAYS_VERCEL_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"));
-}
-
-async function tryPc(request) {
+async function tryPc(request, config) {
   const ctrl = new AbortController();
-  const headersStarted = new Promise((_, reject) =>
+  const timeout = new Promise((_, reject) =>
     setTimeout(() => reject(new Error("pc-timeout-headers")), PC_TIMEOUT_MS),
   );
-  const fetchPc = forward(request, PC_ORIGIN, ctrl.signal);
+
   try {
-    const res = await Promise.race([fetchPc, headersStarted]);
+    const res = await Promise.race([
+      forward(request, config.pcOrigin, ctrl.signal, false),
+      timeout,
+    ]);
+
     if (res.status >= 500 && res.status !== 503) {
-      // Treat upstream 5xx as failure -> fallback
-      // (but a 503 from upstream provider is a real signal; let PC return it)
-      return { ok: false, reason: `pc-${res.status}`, ctrl };
+      return { ok: false, reason: `pc-${res.status}` };
     }
+
     return { ok: true, res };
   } catch (e) {
-    try { ctrl.abort(); } catch {}
+    try {
+      ctrl.abort();
+    } catch {}
     return { ok: false, reason: e.message || "pc-error" };
   }
 }
 
+function tagResponse(res, tags) {
+  const headers = new Headers(res.headers);
+  for (const [key, value] of Object.entries(tags)) {
+    if (value !== undefined && value !== null) headers.set(key, String(value));
+  }
+  return new Response(res.body, {
+    status: res.status,
+    statusText: res.statusText,
+    headers,
+  });
+}
+
 export default {
-  async fetch(request, env, ctx) {
+  async fetch(request, env) {
     const url = new URL(request.url);
+    const config = getConfig(env);
+    const normalizedPathname = normalizeAppPath(url.pathname);
 
-    // Static rule: webhook always Vercel
-    if (shouldGoStraightToVercel(url.pathname)) {
-      const res = await forward(request, VERCEL_ORIGIN);
-      const headers = new Headers(res.headers);
-      headers.set("x-aether-origin", "vercel");
-      headers.set("x-aether-routing-rule", "webhook-pinned");
-      return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+    if (RATE_LIMITED_PATHS.has(normalizedPathname)) {
+      pruneIpHits();
+      if (isRateLimited(getClientIp(request))) {
+        return new Response(
+          JSON.stringify({ error: { message: "Too many requests", type: "rate_limit" } }),
+          {
+            status: 429,
+            headers: {
+              "Content-Type": "application/json",
+              "Retry-After": "60",
+              ...getCorsHeaders(request, config),
+            },
+          },
+        );
+      }
     }
 
-    // Only forward API + auth + assets matter for proxying.
-    // (Worker handles entire hostname, so dashboard pages also pass through.)
-
-    // Try PC first
-    const pcAttempt = await tryPc(request.clone());
-    if (pcAttempt.ok) {
-      // Tag the response so we know who served it (debug)
-      const res = pcAttempt.res;
-      const headers = new Headers(res.headers);
-      headers.set("x-aether-origin", "pc");
-      return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+    if (normalizedPathname.startsWith("/api/v1/") && request.method === "OPTIONS") {
+      return new Response(null, {
+        status: 204,
+        headers: getCorsHeaders(request, config),
+      });
     }
 
-    // Fallback to Vercel. Mark the request as already-proxied so Vercel's
-    // own PC-failover does not re-attempt the PC we just found unavailable.
-    const vercelRes = await forward(request, VERCEL_ORIGIN, undefined, true);
-    const headers = new Headers(vercelRes.headers);
-    headers.set("x-aether-origin", "vercel");
-    headers.set("x-aether-fallback-reason", pcAttempt.reason || "unknown");
-    return new Response(vercelRes.body, {
-      status: vercelRes.status,
-      statusText: vercelRes.statusText,
-      headers,
+    if (shouldGoStraightToCloud(url.pathname)) {
+      const res = await forward(request, config.cloudOrigin, undefined, true);
+      return tagResponse(res, {
+        "x-aether-origin": "cloud",
+        "x-aether-routing-mode": "cloud-pinned",
+        "x-aether-routing-rule": "webhook-pinned",
+        ...getCorsHeaders(request, config),
+      });
+    }
+
+    if (isPcWindow(new Date(), config)) {
+      const pcAttempt = await tryPc(request.clone(), config);
+      if (pcAttempt.ok) {
+        return tagResponse(pcAttempt.res, {
+          "x-aether-origin": "pc",
+          "x-aether-routing-mode": "day-pc-first",
+          ...getCorsHeaders(request, config),
+        });
+      }
+
+      const cloudRes = await forward(request, config.cloudOrigin, undefined, true);
+      return tagResponse(cloudRes, {
+        "x-aether-origin": "cloud",
+        "x-aether-routing-mode": "day-pc-fallback",
+        "x-aether-fallback-reason": pcAttempt.reason || "unknown",
+        ...getCorsHeaders(request, config),
+      });
+    }
+
+    const cloudRes = await forward(request, config.cloudOrigin, undefined, true);
+    return tagResponse(cloudRes, {
+      "x-aether-origin": "cloud",
+      "x-aether-routing-mode": "night-cloud",
+      ...getCorsHeaders(request, config),
     });
   },
 };

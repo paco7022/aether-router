@@ -245,7 +245,12 @@ export async function POST(req: NextRequest) {
   }
 
   const supabase = createAdminClient();
-  const body = await req.json();
+  let body: Record<string, any>;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
   const { action } = body;
 
   switch (action) {
@@ -434,6 +439,9 @@ export async function POST(req: NextRequest) {
       // user_id defaults to the admin creating the key — admin-managed custom
       // keys don't need a target user, the admin owns them.
       const ownerId = user_id || user.id;
+      const allowedProviderList = Array.isArray(allowed_providers) && allowed_providers.length > 0
+        ? allowed_providers
+        : null;
 
       // Generate a random API key
       const randomBytes = new Uint8Array(32);
@@ -451,7 +459,7 @@ export async function POST(req: NextRequest) {
         is_custom: true,
         custom_credits: custom_credits ?? null,
         max_context: max_context ?? null,
-        allowed_providers: allowed_providers?.length ? allowed_providers : null,
+        allowed_providers: allowedProviderList,
         daily_request_limit: daily_request_limit ?? null,
         rate_limit_seconds: rate_limit_seconds ?? null,
         expires_at: expires_at || null,

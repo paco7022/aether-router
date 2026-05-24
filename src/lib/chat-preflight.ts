@@ -44,3 +44,24 @@ export function getNoPaidBalanceError(isFreePool: boolean, credits: number, dail
     },
   };
 }
+
+const TROLLLM_CONTEXT_BASE_TOKENS = 32_000;
+const TROLLLM_CONTEXT_SURCHARGE_TOKENS = 10_000;
+const TROLLLM_CONTEXT_SURCHARGE_COST = 2;
+
+export function getContextAdjustedPremiumRequestCost(
+  modelId: string,
+  provider: string | null | undefined,
+  baseCost: number,
+  contextTokens: number
+): number {
+  if (provider !== "trolllm" && !modelId.startsWith("t/")) return baseCost;
+  if (!Number.isFinite(contextTokens) || contextTokens <= TROLLLM_CONTEXT_BASE_TOKENS) {
+    return baseCost;
+  }
+
+  const surchargeBands = Math.ceil(
+    (contextTokens - TROLLLM_CONTEXT_BASE_TOKENS) / TROLLLM_CONTEXT_SURCHARGE_TOKENS
+  );
+  return baseCost + (surchargeBands * TROLLLM_CONTEXT_SURCHARGE_COST);
+}

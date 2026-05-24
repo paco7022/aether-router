@@ -33,7 +33,7 @@ export default async function ModelsPage() {
         </p>
       </div>
 
-      {/* Free daily allowance notice */}
+      {/* Free plan allowance notice */}
       <div
         className="mb-5 rounded-xl px-4 py-3 text-xs flex items-start gap-3"
         style={{
@@ -47,15 +47,13 @@ export default async function ModelsPage() {
         </svg>
         <div className="leading-relaxed space-y-1">
           <p>
-            <span className="font-semibold text-emerald-200/95">Free daily allowance:</span> the first{" "}
-            <span className="font-semibold">200,000 tokens per day</span> on{" "}
-            <code className="font-mono text-[11px] px-1 py-0.5 rounded bg-white/[0.04]">na/</code>{" "}
-            models are free for every user (backed by a shared 10M tokens/day global pool). Once
-            you cross that daily threshold, further requests are billed at the normal credit rates shown below.
+            <span className="font-semibold text-emerald-200/95">Free plan allowance:</span>{" "}
+            free accounts include <span className="font-semibold">15 premium-request units per day</span>.
+            There are no free daily credits or promotional token pools enabled.
           </p>
           <p>
-            <code className="font-mono text-[11px] px-1 py-0.5 rounded bg-white/[0.04]">a/deepseek-v3.2</code>{" "}
-            is fully free with a hard cap of 200k tokens/day per user and 10M tokens/day globally.
+            Premium-model calls consume the amount shown in the &quot;Premium Cost&quot; column.
+            Paid credits are only used for regular credit-priced models or overage.
           </p>
           <p className="text-emerald-200/70">All daily counters reset at 00:00 UTC.</p>
         </div>

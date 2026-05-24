@@ -1,21 +1,17 @@
 /**
  * Safe client IP extraction.
  *
- * Problem: `x-forwarded-for` is a comma-separated list. On Vercel (and any
- * trusted reverse proxy) the **rightmost** entry is the IP the edge actually
- * saw; any entries to the left were injected by an upstream hop or — in the
- * worst case — directly by the client. Blindly trusting `.split(",")[0]` lets
- * a client spoof their IP by prepending `X-Forwarded-For: 1.2.3.4`.
+ * `x-forwarded-for` is a comma-separated list. On a trusted reverse proxy the
+ * rightmost entry is the IP the edge actually saw; entries to the left may have
+ * been injected upstream or by the client. Blindly trusting the first entry lets
+ * a client spoof their IP with `X-Forwarded-For: 1.2.3.4`.
  *
- * We prefer, in order:
- *   1. `x-vercel-forwarded-for` (Vercel's own, always trustworthy on Vercel)
- *   2. Rightmost non-empty entry of `x-forwarded-for`
- *   3. `x-real-ip`
- *   4. "unknown"
- *
- * On self-hosted deployments this assumes the request is proxied through a
- * hop that only appends. If you run without a proxy, set TRUST_PROXY=false
- * to ignore forwarded headers entirely.
+ * Preferred order:
+ *   1. Cloudflare edge headers: `cf-connecting-ip`, then `true-client-ip`.
+ *   2. Legacy Vercel header while old traffic drains.
+ *   3. Rightmost non-empty `x-forwarded-for` entry.
+ *   4. `x-real-ip`.
+ *   5. "unknown".
  */
 
 const UNKNOWN_IP = "unknown";
@@ -26,8 +22,12 @@ export function getClientIp(headers: Headers): string {
     return UNKNOWN_IP;
   }
 
-  // Vercel sets this to the real client IP it observed at the edge. It is
-  // NOT forwardable — clients cannot inject this header on Vercel.
+  const cloudflare = headers.get("cf-connecting-ip")?.trim();
+  if (cloudflare) return cloudflare;
+
+  const trueClient = headers.get("true-client-ip")?.trim();
+  if (trueClient) return trueClient;
+
   const vercel = headers.get("x-vercel-forwarded-for");
   if (vercel) {
     const v = vercel.split(",").map((s) => s.trim()).filter(Boolean).pop();
@@ -36,7 +36,6 @@ export function getClientIp(headers: Headers): string {
 
   const xff = headers.get("x-forwarded-for");
   if (xff) {
-    // Rightmost = closest to our server = the IP our trusted proxy saw.
     const entries = xff.split(",").map((s) => s.trim()).filter(Boolean);
     const last = entries[entries.length - 1];
     if (last) return last;

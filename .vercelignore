@@ -1,6 +1,0 @@
-# Never ship local secrets — Vercel injects its own env vars.
-.env*.local
-
-# PC deployment runtime artifacts
-logs
-.sync.lock

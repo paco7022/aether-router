@@ -24,6 +24,8 @@ export function PlanCard({
 }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const dailyCreditLimit = plan.id === "free" ? 0 : plan.credits_per_day;
+  const premiumRequestLimit = plan.id === "free" ? 15 : plan.gm_daily_requests;
 
 
   async function handleSubscribe() {
@@ -96,29 +98,18 @@ export function PlanCard({
           </svg>
           <p>
             <span className="font-semibold text-white/85">
-              {plan.credits_per_day > 0
-                ? `${plan.credits_per_day.toLocaleString()}`
-                : "Unlimited"}
+              {dailyCreditLimit > 0
+                ? `${dailyCreditLimit.toLocaleString()}`
+                : "No"}
             </span>{" "}
-            <span className="text-[var(--text-muted)]">credits/day</span>
+            <span className="text-[var(--text-muted)]">
+              {dailyCreditLimit > 0 ? "credits/day" : "daily credits"}
+            </span>
           </p>
         </div>
         <p className="text-xs text-[var(--text-muted)] ml-6">
-          1 credit = 1 request
+          Permanent credits never expire
         </p>
-      </div>
-
-      {/* Deepseek free pool */}
-      <div className="mb-4 pt-3 border-t border-white/[0.04]">
-        <p className="text-xs font-semibold text-emerald-400/80 mb-1.5 flex items-center gap-1.5">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="20 6 9 17 4 12" />
-          </svg>
-          Deepseek v3.2 (free)
-        </p>
-        <div className="space-y-0.5 text-xs text-[var(--text-muted)] ml-5">
-          <p>200k tokens/day</p>
-        </div>
       </div>
 
       {/* Premium model limits */}
@@ -129,12 +120,12 @@ export function PlanCard({
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="20 6 9 17 4 12" />
               </svg>
-              Premium Models (t/, w/)
+              Free Premium Pool
             </p>
             <div className="space-y-0.5 text-xs text-[var(--text-muted)] ml-5">
               <p>
-                {plan.gm_daily_requests > 0
-                  ? `${plan.gm_daily_requests} requests/day`
+                {premiumRequestLimit > 0
+                  ? `${premiumRequestLimit} requests/day`
                   : "Unlimited requests"}
               </p>
               <p>
@@ -154,8 +145,8 @@ export function PlanCard({
             </p>
             <div className="space-y-0.5 text-xs text-[var(--text-muted)] ml-5">
               <p>
-                {plan.gm_daily_requests > 0
-                  ? `${plan.gm_daily_requests} requests/day`
+                {premiumRequestLimit > 0
+                  ? `${premiumRequestLimit} requests/day`
                   : "Unlimited requests"}
               </p>
               <p>

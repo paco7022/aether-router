@@ -5,8 +5,8 @@ import { createClient } from "@/lib/supabase/client";
 import { getFingerprint } from "@/lib/fingerprint";
 import { checkFingerprintBan } from "@/lib/hooks/useFingerprint";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { AuthHero } from "@/components/AuthHero";
+import { publicUrl } from "@/lib/public-endpoints";
 
 export default function RegisterPage() {
   const [email, setEmail] = useState("");
@@ -16,7 +16,6 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [refCode, setRefCode] = useState<string | null>(null);
-  const router = useRouter();
   const supabase = createClient();
   const fpRef = useRef<string | null>(null);
   const refCodeRef = useRef<string | null>(null);
@@ -41,7 +40,7 @@ export default function RegisterPage() {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: publicUrl("/auth/callback"),
       },
     });
     if (error) setError(error.message);
@@ -96,7 +95,7 @@ export default function RegisterPage() {
         }).catch(() => {});
         sessionStorage.removeItem("aether_ref");
       }
-      router.push("/dashboard");
+      window.location.assign(publicUrl("/dashboard"));
     }
   }
 
@@ -130,7 +129,7 @@ export default function RegisterPage() {
             <p className="text-[10px] text-[var(--text-dim)] uppercase tracking-[0.2em] mb-2">Start for free</p>
             <h2 className="text-3xl font-bold text-white/95 tracking-tight">Create your account</h2>
             <p className="text-sm text-[var(--text-muted)] mt-2">
-              Free daily credits on signup. No card required.
+              15 premium requests per day. No card required.
             </p>
           </div>
           <div className="mb-6 lg:hidden text-center">

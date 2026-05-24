@@ -3,6 +3,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { stripe } from "@/lib/stripe";
 import { requireCsrf } from "@/lib/csrf";
+import { publicUrl } from "@/lib/public-endpoints";
 
 export async function POST(req: NextRequest) {
   const csrfError = requireCsrf(req);
@@ -17,7 +18,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { package_id } = await req.json();
+  let body: { package_id?: unknown };
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const { package_id } = body;
   if (!package_id || typeof package_id !== "string" || package_id.length > 64) {
     return NextResponse.json({ error: "Invalid package_id" }, { status: 400 });
   }
@@ -79,8 +87,8 @@ export async function POST(req: NextRequest) {
       package_id: pkg.id,
       credits: String(pkg.credits),
     },
-    success_url: `${req.nextUrl.origin}/dashboard/billing?checkout=success`,
-    cancel_url: `${req.nextUrl.origin}/dashboard/billing?checkout=cancel`,
+    success_url: publicUrl("/dashboard/billing?checkout=success"),
+    cancel_url: publicUrl("/dashboard/billing?checkout=cancel"),
   });
 
   return NextResponse.json({ url: session.url });

@@ -1,3 +1,5 @@
+import { PUBLIC_API_BASE_URL } from "@/lib/public-endpoints";
+
 export default function DocsPage() {
   return (
     <div className="max-w-4xl">
@@ -18,13 +20,13 @@ export default function DocsPage() {
           <div>
             <p className="text-[10px] text-[var(--text-dim)] uppercase tracking-[0.15em] mb-2">Base URL</p>
             <code className="block bg-[var(--bg-input)] border border-white/[0.04] rounded-xl px-4 py-3 text-sm font-mono text-cyan-300/70">
-              https://aether-router.vercel.app/api/v1
+              {PUBLIC_API_BASE_URL}
             </code>
           </div>
           <div>
             <p className="text-[10px] text-[var(--text-dim)] uppercase tracking-[0.15em] mb-2">Example Request (cURL)</p>
             <pre className="bg-[var(--bg-input)] border border-white/[0.04] rounded-xl px-4 py-3 text-sm font-mono overflow-x-auto whitespace-pre text-white/60">
-{`curl https://aether-router.vercel.app/api/v1/chat/completions \\
+{`curl ${PUBLIC_API_BASE_URL}/chat/completions \\
   -H "Authorization: Bearer YOUR_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -42,7 +44,7 @@ export default function DocsPage() {
 
 client = OpenAI(
     api_key="YOUR_API_KEY",
-    base_url="https://aether-router.vercel.app/api/v1"
+    base_url="${PUBLIC_API_BASE_URL}"
 )
 
 response = client.chat.completions.create(
@@ -152,7 +154,7 @@ print(response.choices[0].message.content)`}
             <tbody>
               <ErrorRow status={400} type="invalid_request" cause="Missing or malformed request body." fix='Check that "model" and "messages" fields are present and valid JSON.' />
               <ErrorRow status={401} type="auth_error" cause="Missing or invalid API key." fix="Ensure your Authorization header is: Bearer sk-aether-..." />
-              <ErrorRow status={402} type="billing_error" cause="Not enough credits to complete the request." fix="Buy more credits or claim daily credits from the Billing page." />
+              <ErrorRow status={402} type="billing_error" cause="Not enough credits to complete the request." fix="Buy more credits or choose a model covered by your remaining premium-request allowance." />
               <ErrorRow status={403} type="claim_required" cause="Premium model (an/) used without claiming daily requests." fix='Go to Billing > "Claim Daily Premium Requests" before making requests.' />
               <ErrorRow status={403} type="invalid_request" cause="Model is restricted or not in the allowed pool." fix="Check the Models page for currently available models." />
               <ErrorRow status={404} type="invalid_request" cause="The requested model ID doesn't exist or is disabled." fix="Check exact model ID on the Models page (IDs are case-sensitive)." />

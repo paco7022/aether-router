@@ -4,8 +4,8 @@ import { useState, useEffect, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getFingerprint } from "@/lib/fingerprint";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { AuthHero } from "@/components/AuthHero";
+import { publicUrl } from "@/lib/public-endpoints";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -13,7 +13,6 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const router = useRouter();
   const supabase = createClient();
   const fpRef = useRef<string | null>(null);
 
@@ -28,7 +27,7 @@ export default function LoginPage() {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: publicUrl("/auth/callback"),
       },
     });
     if (error) setError(error.message);
@@ -56,7 +55,7 @@ export default function LoginPage() {
         }).catch(() => {});
       }
 
-      router.push("/dashboard");
+      window.location.assign(publicUrl("/dashboard"));
     }
   }
 

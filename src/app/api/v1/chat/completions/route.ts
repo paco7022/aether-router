@@ -11,6 +11,7 @@ import {
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireCsrf } from "@/lib/csrf";
 import {
+  getContextAdjustedPremiumRequestCost,
   getCustomKeyNoCreditsError,
   getNoPaidBalanceError,
   isApiKeyAuthHeader,
@@ -33,20 +34,28 @@ import { getBuiltinPreset } from "@/lib/builtinPresets";
 import { tryPcFailover } from "@/lib/pc-failover";
 
 export const runtime = "nodejs";
-// NOTE: If a Vercel function timeout kills a streaming request mid-flight,
-// the `flush()` handler and the `catch` block will NOT fire. The
-// pre-reserved credits will be stuck as "charged" with no usage log.
-// Consider a periodic reconciliation job to detect orphaned reservations.
+// NOTE: If the platform kills a streaming request mid-flight, the `flush()`
+// handler and the `catch` block will NOT fire. The pre-reserved credits will be
+// stuck as "charged" with no usage log. Consider a periodic reconciliation job
+// to detect orphaned reservations.
 export const maxDuration = 300;
 
-// Free-pool limits for airforce deepseek-v3.2 (the only remaining
-// soft/hard-capped daily pool — nano and op/deepseek-v4-flash promos ended).
+// Optional promotional free-pool limits for airforce deepseek-v3.2.
+// Disabled unless AETHER_FREE_PROMOS_ENABLED=true.
 const PER_USER_DAILY_TOKEN_LIMIT = 200_000;
 const GLOBAL_DAILY_TOKEN_POOL = 10_000_000;
 const DEFAULT_STREAM_RESERVATION_COMPLETION_TOKENS = 4096;
 const MAX_STREAM_RESERVATION_COMPLETION_TOKENS = 32_768;
 // Cost in credits to purchase one extra premium request when the daily limit is hit.
 const PREMIUM_OVERAGE_COST = 100;
+// Fair-use guard for plan-"unlimited" providers (e.g. r/ RiftAI on paid plans).
+// AI cost is ~0, but each request still costs infra (Supabase + moderation + CPU),
+// so cap a single account to protect against abuse/resale. Tune freely.
+const FAIRUSE_DAILY_CAP = 1500;
+const FAIRUSE_RATE_LIMIT_SECONDS = 0;
+const FREE_INCLUDED_USAGE_ENABLED =
+  process.env.AETHER_FREE_INCLUDED_USAGE_ENABLED === "true";
+const FREE_PROMOS_ENABLED = process.env.AETHER_FREE_PROMOS_ENABLED === "true";
 
 type StreamChargeReservation = {
   reservedCredits: number;
@@ -147,6 +156,56 @@ function getRequestedCompletionTokens(body: Record<string, unknown>): number | n
   return null;
 }
 
+function shouldBypassIncludedPremiumRequests(keyInfo: {
+  planId: string;
+  isCustom: boolean;
+}): boolean {
+  return (
+    !FREE_INCLUDED_USAGE_ENABLED &&
+    !keyInfo.isCustom &&
+    keyInfo.planId === "free"
+  );
+}
+
+function shouldUsePaidOnlyCredits(keyInfo: {
+  planId: string;
+  isCustom: boolean;
+}): boolean {
+  return !keyInfo.isCustom && keyInfo.planId === "free";
+}
+
+function getAvailableBillableCredits(keyInfo: {
+  credits: number;
+  dailyCredits: number;
+  planId: string;
+  isCustom: boolean;
+}): number {
+  return shouldUsePaidOnlyCredits(keyInfo)
+    ? keyInfo.credits
+    : keyInfo.credits + keyInfo.dailyCredits;
+}
+
+function getIncludedPremiumRequestLimit(planId: string, dbLimit: number | null | undefined): number {
+  if (planId === "free" && FREE_INCLUDED_USAGE_ENABLED) {
+    return 15;
+  }
+  return dbLimit ?? 15;
+}
+
+async function deductUserCredits(
+  supabase: ReturnType<typeof createAdminClient>,
+  userId: string,
+  amount: number,
+  paidOnly: boolean
+): Promise<{ data: unknown; error: { message?: string } | null }> {
+  const rpcName = paidOnly ? "deduct_paid_credits" : "deduct_credits";
+  const { data, error } = await supabase.rpc(rpcName, {
+    p_user_id: userId,
+    p_amount: amount,
+  });
+  return { data, error };
+}
+
 // OpenAI's reasoning families (gpt-5+, o1/o3/o4) reject `max_tokens` and
 // require `max_completion_tokens`. RiftAI's gpt-5.5 hits this directly;
 // TrollLLM accepts both, so normalizing here is safe across resellers.
@@ -214,12 +273,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 0b. PC failover. When PC_ORIGIN_URL is set (Vercel only), forward the
-  // buffered request to the home-PC origin first. If the PC serves it, we
-  // return that response untouched and skip all the work below — no DB
-  // queries, no upstream call, no streaming held on a Vercel function. If
-  // the PC is unreachable/unhealthy, tryPcFailover() returns null and we
-  // fall through to the normal local path with `rawBody` already in hand.
+  // 0b. PC failover. The Cloudflare edge worker should be the primary traffic
+  // director in production. This env-gated fallback remains for direct cloud
+  // app deployments and local ops: if PC_ORIGIN_URL is set, forward the
+  // buffered request to the home-PC origin first. If the PC serves it, we skip
+  // local DB/upstream work. If the PC is unreachable/unhealthy,
+  // tryPcFailover() returns null and we continue locally with `rawBody`.
   const pcResponse = await tryPcFailover(req, rawBody);
   if (pcResponse) return pcResponse;
 
@@ -400,6 +459,7 @@ export async function POST(req: NextRequest) {
   // TEMP (2026-05-02): Gemini models from r/ are free while we evaluate capacity.
   // Remove this block once the promo period ends.
   const isRiftaiGeminiFree =
+    FREE_PROMOS_ENABLED &&
     model.provider === "riftai" &&
     (model.upstream_model_id || modelId).toLowerCase().includes("gemini");
 
@@ -407,6 +467,7 @@ export async function POST(req: NextRequest) {
   // as free — no credits or premium-request budget consumed. Revert by restoring
   // cost/margin values in the models table.
   const isZeroCostPremium =
+    FREE_PROMOS_ENABLED &&
     isPremiumProvider && (
       (Number(model.cost_per_m_input) === 0 && Number(model.premium_request_cost) === 0) ||
       isRiftaiGeminiFree
@@ -415,8 +476,29 @@ export async function POST(req: NextRequest) {
   // Without this short-circuit we'd call deduct_credits(0), which the RPC
   // rejects with -1 → 402 "Insufficient credits, credits_required: 0".
   const isZeroCostFlatRate =
+    FREE_PROMOS_ENABLED &&
     isFlatRateProvider &&
     Number(model.premium_request_cost) === 0;
+
+  const isUnbillableZeroCostModel =
+    !FREE_PROMOS_ENABLED &&
+    !keyInfo.isCustom &&
+    Number(model.cost_per_m_input) === 0 &&
+    Number(model.cost_per_m_output) === 0 &&
+    Number(model.premium_request_cost ?? 0) === 0;
+
+  if (isUnbillableZeroCostModel) {
+    return NextResponse.json(
+      {
+        error: {
+          message:
+            "Free model promotions are paused while capacity is adjusted. Buy credits or choose a paid model to continue.",
+          type: "plan_restricted",
+        },
+      },
+      { status: 402 }
+    );
+  }
 
   // 5.4. Active free event lookup (admin-created pools that make a model
   // prefix free for a set of plans, with their own per-user limits).
@@ -437,7 +519,7 @@ export async function POST(req: NextRequest) {
   let isFreePool = false;
   let activeEventId: string | null = null;
 
-  if (!keyInfo.isCustom) {
+  if (FREE_PROMOS_ENABLED && !keyInfo.isCustom) {
     const { data: eventRow, error: eventLookupError } = await supabase.rpc("find_active_free_event", {
       p_model_id: modelId,
       p_plan_id: keyInfo.planId,
@@ -457,6 +539,24 @@ export async function POST(req: NextRequest) {
   }
 
   if (activeEvent) {
+    // Context cap for this event must run before the atomic reservation.
+    // Otherwise an oversized request can burn a per-user event slot and
+    // update last_request_at even though it returns 413.
+    if (activeEvent.max_context > 0) {
+      const estimatedContext = estimatePromptTokens(body);
+      if (estimatedContext > activeEvent.max_context) {
+        return NextResponse.json(
+          {
+            error: {
+              message: `Context too long (~${estimatedContext} tokens). This event allows ${activeEvent.max_context} tokens max.`,
+              type: "context_limit",
+            },
+          },
+          { status: 413 }
+        );
+      }
+    }
+
     // Atomic per-event reservation: rate limit + per-user message cap +
     // pool-exhaustion check happen inside one transaction with row locks.
     // Replaces the prior SELECT/COUNT-on-usage_logs approach which had a
@@ -516,23 +616,6 @@ export async function POST(req: NextRequest) {
     }
 
     if (activeEvent) {
-      // Context cap for this event (cheap, runs after atomic reservation
-      // so we don't burn a counter if the request is going to bounce).
-      if (activeEvent.max_context > 0) {
-        const estimatedContext = estimatePromptTokens(body);
-        if (estimatedContext > activeEvent.max_context) {
-          return NextResponse.json(
-            {
-              error: {
-                message: `Context too long (~${estimatedContext} tokens). This event allows ${activeEvent.max_context} tokens max.`,
-                type: "context_limit",
-              },
-            },
-            { status: 413 }
-          );
-        }
-      }
-
       isFreePool = true;
       activeEventId = activeEvent.id;
     }
@@ -543,7 +626,12 @@ export async function POST(req: NextRequest) {
   // credit reservation.
   let premiumRequestReserved = false;
   let premiumReservedCost = 0;
+  let premiumRequestCostForUsage = 0;
   let customKeyRequestReserved = false;
+  // Plan-"unlimited" provider (e.g. r/ on paid plans): bypasses the premium pool,
+  // guarded by a separate fair-use counter. Billed as free; logs 0 premium cost.
+  let fairUseReserved = false;
+  let isPlanUnlimited = false;
   let premiumOveragePurchased = false;
   // Combined balance (daily + permanent) right after the overage deduct,
   // captured so the overage charge can be written to the transaction ledger.
@@ -639,11 +727,134 @@ export async function POST(req: NextRequest) {
     // Skipped entirely when an active event covers this model for the user's plan.
     // Zero-cost premium models (free promos) also skip this entire block.
     if (isPremiumProvider && !isZeroCostPremium) {
-      const { data: plan } = await supabase
+      const { data: premiumPlan, error: premiumPlanErr } = await supabase
         .from("plans")
-        .select("gm_daily_requests, gm_max_context")
+        .select("gm_daily_requests, gm_max_context, allowed_providers, unlimited_providers")
         .eq("id", keyInfo.planId)
         .single();
+
+      // Fail closed on a real lookup failure. Falling through silently here used
+      // to degrade EVERY paid plan to the free defaults (15 req/day, 32768 ctx)
+      // whenever the deployed code and the DB schema drifted — e.g. selecting a
+      // column the production DB didn't have yet. Surfacing a 503 keeps billing
+      // correct instead of secretly downgrading paying users.
+      if (premiumPlanErr || !premiumPlan) {
+        console.error(
+          `[premium-gate] plans lookup failed for plan "${keyInfo.planId}": ${premiumPlanErr?.message ?? "no matching plan row"}`
+        );
+        return NextResponse.json(
+          { error: { message: "Plan configuration temporarily unavailable. Please retry shortly.", type: "server_error" } },
+          { status: 503 }
+        );
+      }
+
+      // Plan-level provider allow-list: when set, the plan may only use these
+      // premium providers (cheaper tiers gate out the pricier upstreams).
+      const planAllowed = premiumPlan?.allowed_providers as string[] | null | undefined;
+      if (planAllowed && planAllowed.length > 0 && !planAllowed.includes(model.provider)) {
+        return NextResponse.json(
+          { error: { message: "Your plan doesn't include this model. Upgrade to access it.", type: "plan_restricted" } },
+          { status: 403 }
+        );
+      }
+
+      const planUnlimited = premiumPlan?.unlimited_providers as string[] | null | undefined;
+      isPlanUnlimited = !!planUnlimited && planUnlimited.includes(model.provider);
+
+      if (isPlanUnlimited) {
+        // Provider is ~free for this plan: skip the premium pool entirely.
+        // Still enforce the plan's context cap + a per-user fair-use guard so a
+        // single account can't abuse/resell effectively-free access.
+        const gmMaxContext = (premiumPlan?.gm_max_context ?? 32768) * (isContextBoosted ? 2 : 1);
+        const estimatedContext = estimatePromptTokens(body);
+        if (gmMaxContext > 0 && estimatedContext > gmMaxContext) {
+          return NextResponse.json(
+            { error: { message: `Context too long (~${estimatedContext} tokens). Your plan allows ${gmMaxContext} tokens max. Upgrade for more.`, type: "context_limit" } },
+            { status: 413 }
+          );
+        }
+
+        const { data: fuResult, error: fuErr } = await supabase.rpc("reserve_fair_use_request", {
+          p_user_id: keyInfo.userId,
+          p_daily_limit: FAIRUSE_DAILY_CAP,
+          p_rate_limit_seconds: FAIRUSE_RATE_LIMIT_SECONDS,
+        });
+        if (fuErr) {
+          return NextResponse.json(
+            { error: { message: "Failed to check rate limit", type: "server_error" } },
+            { status: 500 }
+          );
+        }
+        const fu = fuResult as { status: string; retry_after_seconds?: number };
+        if (fu.status === "rate_limited") {
+          const retryAfter = fu.retry_after_seconds ?? 1;
+          return NextResponse.json(
+            { error: { message: `Rate limit. Try again in ${retryAfter}s.`, type: "rate_limit" } },
+            { status: 429, headers: { "Retry-After": String(Math.max(retryAfter, 1)) } }
+          );
+        }
+        if (fu.status === "daily_limit") {
+          return NextResponse.json(
+            { error: { message: `Daily fair-use limit reached (${FAIRUSE_DAILY_CAP}/day). Resets at UTC midnight.`, type: "rate_limit" } },
+            { status: 429 }
+          );
+        }
+        // Reserved on the fair-use counter; refund on upstream failure. Billed
+        // as free pool so no credits/premium budget are consumed.
+        fairUseReserved = true;
+        premiumRequestCostForUsage = 0;
+        isFreePool = true;
+      } else if (shouldBypassIncludedPremiumRequests(keyInfo)) {
+        const availableCredits = getAvailableBillableCredits(keyInfo);
+        if (availableCredits < PREMIUM_OVERAGE_COST) {
+          return NextResponse.json(
+            {
+              error: {
+                message: `Free included premium requests are paused. Buy credits or upgrade to continue (${PREMIUM_OVERAGE_COST} credits/request).`,
+                type: "billing_error",
+                credits_required: PREMIUM_OVERAGE_COST,
+                credits_available: availableCredits,
+              },
+            },
+            { status: 402 }
+          );
+        }
+
+        const { data: overageBalance, error: overageErr } = await deductUserCredits(
+          supabase,
+          keyInfo.userId,
+          PREMIUM_OVERAGE_COST,
+          true
+        );
+        if (overageErr || overageBalance === -1) {
+          return NextResponse.json(
+            {
+              error: {
+                message: "Failed to charge paid credits for this premium request. Try again.",
+                type: "billing_error",
+              },
+            },
+            { status: 402 }
+          );
+        }
+
+        premiumOveragePurchased = true;
+        premiumOverageBalance = overageBalance as number;
+        premiumRequestCostForUsage = 0;
+        isFreePool = true;
+
+        const { error: overageTxErr } = await supabase.from("transactions").insert({
+          user_id: keyInfo.userId,
+          amount: -PREMIUM_OVERAGE_COST,
+          balance: premiumOverageBalance,
+          type: "premium_overage",
+          description: `${model.id} - paid premium request (free included usage paused)`,
+        });
+        if (overageTxErr) {
+          console.error("Failed to log paid premium request charge:", overageTxErr.message);
+        }
+      } else {
+      const plan = premiumPlan;
 
       // Check if user has an active grandfathered override
       const hasActiveOverride =
@@ -653,7 +864,7 @@ export async function POST(req: NextRequest) {
 
       const baseGmDaily = hasActiveOverride
         ? keyInfo.gmDailyOverride!
-        : (plan?.gm_daily_requests ?? 15);
+        : getIncludedPremiumRequestLimit(keyInfo.planId, plan?.gm_daily_requests);
 
       const referralBonusActive =
         keyInfo.referralBonusExpires !== null &&
@@ -662,12 +873,12 @@ export async function POST(req: NextRequest) {
 
       const gmDailyRequests = baseGmDaily + referralBonus;
       const gmMaxContext = (plan?.gm_max_context ?? 32768) * (isContextBoosted ? 2 : 1);
+      const estimatedContext = estimatePromptTokens(body);
 
       // Context cap checked BEFORE the atomic reservation so oversize
       // requests don't inflate the daily counter. Applies to all premium
       // providers (t/, an/, w/); free tier only has t/ and w/ access.
       if (gmMaxContext > 0) {
-        const estimatedContext = estimatePromptTokens(body);
         if (estimatedContext > gmMaxContext) {
           return NextResponse.json(
             { error: { message: `Context too long (~${estimatedContext} tokens). Your plan allows ${gmMaxContext} tokens max. Upgrade for more.`, type: "context_limit" } },
@@ -680,7 +891,13 @@ export async function POST(req: NextRequest) {
       // increment in one transaction. Replaces the prior two SELECTs on
       // usage_logs which had a TOCTOU window — concurrent streams could
       // all pass the check before any log was written.
-      const premiumCost = Number(model.premium_request_cost ?? 1);
+      const premiumCost = getContextAdjustedPremiumRequestCost(
+        modelId,
+        model.provider,
+        Number(model.premium_request_cost ?? 1),
+        estimatedContext
+      );
+      premiumRequestCostForUsage = premiumCost;
       // TEMP (2026-04-24): upstream is flaky and users may need to retry quickly;
       // disable the 60s/req rate limit until providers stabilize. Daily limits
       // still apply. Revert to `60` to re-enable the per-minute rate limit.
@@ -720,7 +937,7 @@ export async function POST(req: NextRequest) {
           );
         }
         // Offer overage: spend PREMIUM_OVERAGE_COST credits for one extra request.
-        const availableCredits = keyInfo.credits + keyInfo.dailyCredits;
+        const availableCredits = getAvailableBillableCredits(keyInfo);
         if (availableCredits >= PREMIUM_OVERAGE_COST) {
           const { data: overageBalance, error: overageErr } = await supabase.rpc("deduct_credits", {
             p_user_id: keyInfo.userId,
@@ -771,6 +988,7 @@ export async function POST(req: NextRequest) {
       // Marking the request free-pool here skips the 1-credit reservation
       // below so a user with 0 credits can still spend their premium pool.
       isFreePool = true;
+      }
     }
   }
 
@@ -806,15 +1024,9 @@ export async function POST(req: NextRequest) {
     delete body.reasoning_effort;
   }
 
-  // Free pool gating.
-  //
-  // airforce deepseek-v3.2: fully free forever. Hard-capped at 200k/day per
-  //                         user and 10M/day globally — crossing either
-  //                         returns 429. Never charges credits.
-  // trolllm (t/):           flat-free short-circuit; keys draining. Handled
-  //                         just below via isFreeProviderName.
-  //
-  // Pools reset at UTC midnight.
+  // Promotional pools are disabled unless AETHER_FREE_PROMOS_ENABLED=true.
+  // When enabled, they bypass credits and premium-request accounting under
+  // their own per-user/global caps. Pools reset at UTC midnight.
   let freePoolName: string | null = null;
   const freePoolReservationTokens = estimatedPrompt + reservedCompletionTokens;
 
@@ -822,7 +1034,7 @@ export async function POST(req: NextRequest) {
   // intentional. No quota tracking — flat free for everyone (no credit
   // deduction, no premium-request cost). Skip the daily-pool reservation
   // path entirely.
-  if (!activeEventId && isFreeProviderName(model.provider)) {
+  if (FREE_PROMOS_ENABLED && !activeEventId && isFreeProviderName(model.provider)) {
     // Free providers (e.g. trolllm) still need a context cap so users
     // can't send unbounded prompts. Enforce the plan's gm_max_context.
     if (!keyInfo.isCustom) {
@@ -872,7 +1084,7 @@ export async function POST(req: NextRequest) {
     isFreePool = true;
   }
 
-  if (!isFreePool && !activeEventId && upstreamModel === "deepseek-v3.2") {
+  if (FREE_PROMOS_ENABLED && !isFreePool && !activeEventId && upstreamModel === "deepseek-v3.2") {
     freePoolName = "deepseek-v3.2";
     const freePoolReservation = await reserveDailyFreePoolAllowance(
       supabase,
@@ -930,7 +1142,8 @@ export async function POST(req: NextRequest) {
   let reservation: StreamChargeReservation | null = null;
 
   if (!keyInfo.isCustom) {
-    const noPaidBalanceError = getNoPaidBalanceError(isFreePool, keyInfo.credits, keyInfo.dailyCredits);
+    const availableBillableCredits = getAvailableBillableCredits(keyInfo);
+    const noPaidBalanceError = getNoPaidBalanceError(isFreePool, availableBillableCredits, 0);
     if (noPaidBalanceError) {
       return NextResponse.json(noPaidBalanceError.payload, { status: noPaidBalanceError.status });
     }
@@ -974,10 +1187,12 @@ export async function POST(req: NextRequest) {
         balanceAfterReserve: keyBalance as number,
       };
     } else {
-      const { data: reserveBalance, error: reserveErr } = await supabase.rpc("deduct_credits", {
-        p_user_id: keyInfo.userId,
-        p_amount: reservedCredits,
-      });
+      const { data: reserveBalance, error: reserveErr } = await deductUserCredits(
+        supabase,
+        keyInfo.userId,
+        reservedCredits,
+        shouldUsePaidOnlyCredits(keyInfo)
+      );
 
       if (reserveErr) {
         return NextResponse.json(
@@ -987,7 +1202,7 @@ export async function POST(req: NextRequest) {
       }
       if (reserveBalance === -1) {
         return NextResponse.json(
-          { error: { message: "Insufficient credits", type: "billing_error", credits_required: reservedCredits, credits_available: keyInfo.credits + keyInfo.dailyCredits } },
+          { error: { message: "Insufficient credits", type: "billing_error", credits_required: reservedCredits, credits_available: getAvailableBillableCredits(keyInfo) } },
           { status: 402 }
         );
       }
@@ -1080,6 +1295,16 @@ export async function POST(req: NextRequest) {
       }
       customKeyRequestReserved = false;
     }
+
+    if (fairUseReserved) {
+      const { error: refundErr } = await supabase.rpc("refund_fair_use_request", {
+        p_user_id: key.userId,
+      });
+      if (refundErr) {
+        console.error("Failed to refund fair-use request reservation:", refundErr.message);
+      }
+      fairUseReserved = false;
+    }
   }
 
   // Helper: settle the difference between reservation and actual cost.
@@ -1105,9 +1330,12 @@ export async function POST(req: NextRequest) {
         if (err || kb === -1) { billingStatus = "settlement_failed"; }
         else { chargedCredits += delta; balanceAfter = kb as number; }
       } else {
-        const { data: nb, error: err } = await supabase.rpc("deduct_credits", {
-          p_user_id: key.userId, p_amount: delta,
-        });
+        const { data: nb, error: err } = await deductUserCredits(
+          supabase,
+          key.userId,
+          delta,
+          shouldUsePaidOnlyCredits(key)
+        );
         if (err || nb === -1) { billingStatus = "settlement_failed"; }
         else { chargedCredits += delta; balanceAfter = nb as number; }
       }
@@ -1150,7 +1378,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const providerResponse = await provider.forward(forwardBody as any);
+    const providerResponse = await provider.forward(forwardBody as any, req.signal);
 
     if (!providerResponse.ok) {
       await refundReservation();
@@ -1197,7 +1425,9 @@ export async function POST(req: NextRequest) {
         reservation,
         refundReservation,
         req.signal,
-        premiumOveragePurchased ? PREMIUM_OVERAGE_COST : 0
+        premiumOveragePurchased ? PREMIUM_OVERAGE_COST : 0,
+        premiumRequestCostForUsage,
+        isPlanUnlimited
       );
     }
 
@@ -1297,7 +1527,9 @@ export async function POST(req: NextRequest) {
     // 10. Log usage (always log, even for free-pool — needed for token tracking)
     const durationMs = Date.now() - startTime;
     // Requests served under a free event don't cost premium-request budget.
-    const premiumCost = isPremiumProvider && !activeEventId ? Number(model.premium_request_cost ?? 1) : 0;
+    const premiumCost = isPremiumProvider && !activeEventId && !isPlanUnlimited
+      ? (premiumRequestCostForUsage || getContextAdjustedPremiumRequestCost(modelId, model.provider, Number(model.premium_request_cost ?? 1), estimatedPrompt))
+      : 0;
     // finish_reason of the upstream response — logged to diagnose cut-offs
     // (length = hit max_tokens, content_filter = blocked, stop = natural end).
     const finishReason =
@@ -1325,20 +1557,14 @@ export async function POST(req: NextRequest) {
       console.error("Failed to write usage log:", usageLogError.message);
     }
 
-    // Accrue premium-request debt when a prompt sneaks past the pre-flight
-    // context estimator and the real prompt_tokens end up over the user's
-    // plan cap. Free tier only — paid plans are exempt because the estimator
-    // under-counts often enough that paid users were getting hit with debt
-    // they didn't deserve.
-    if (isPremiumProvider && !isZeroCostPremium && !activeEventId && !keyInfo.isCustom && keyInfo.planId === "free") {
-      const { error: debtErr } = await supabase.rpc("accrue_prompt_cap_debt", {
-        p_user_id: keyInfo.userId,
-        p_plan_id: keyInfo.planId,
-        p_actual_tokens: promptTokens,
-        p_penalty: 3,
-      });
-      if (debtErr) console.error("Failed to accrue prompt-cap debt:", debtErr.message);
-    }
+    // Premium-request debt accrual DISABLED for free tier (2026-05-24).
+    // It was the only path still calling accrue_prompt_cap_debt (paid plans
+    // were already exempt). Because debt never resets on day rollover and is
+    // counted against the daily cap, the same estimator under-count that got
+    // paid plans exempted was permanently locking free users out of their
+    // 15/day allowance ("limit never resets"). The pre-flight context check
+    // (413 in the premium gate) remains the enforcement mechanism. Do NOT
+    // re-enable without making debt decay/reset per day first.
 
     if (!isFreePool && chargedCredits > 0) {
       const settlementSuffix = billingStatus === "success" ? "" : ` [${billingStatus}]`;
@@ -1404,6 +1630,9 @@ async function handleStreamingResponse(
   // fee is charged (and ledger-logged) up front in the main handler; passed
   // here only so the usage_log row reflects what was actually charged.
   premiumOverageCharged: number = 0,
+  premiumRequestCostForUsage: number = 0,
+  // True when served under a plan-"unlimited" provider: log 0 premium cost.
+  isPlanUnlimited: boolean = false,
 ) {
   const supabase = createAdminClient();
   let totalPromptTokens = 0;
@@ -1418,6 +1647,41 @@ async function handleStreamingResponse(
   let settled = false; // ensures finalize() runs at most once
 
   const decoder = new TextDecoder();
+  let sseBuffer = "";
+
+  function processSseLine(line: string) {
+    if (!line.startsWith("data: ")) return;
+
+    const jsonStr = line.slice(6).trim();
+    if (jsonStr === "[DONE]") return;
+
+    try {
+      const parsed = JSON.parse(jsonStr);
+      if (parsed.usage) {
+        hasUsageData = true;
+        // Use upstream values only when they are positive; a 0 or
+        // negative report is treated as "not provided" so the
+        // finalize() sanity check can substitute our local estimate.
+        const upPrompt = Number(parsed.usage.prompt_tokens);
+        const upCompletion = Number(parsed.usage.completion_tokens);
+        if (upPrompt > 0) totalPromptTokens = upPrompt;
+        if (upCompletion > 0) totalCompletionTokens = upCompletion;
+        const streamCache = extractCacheTokens(parsed.usage, Number(parsed.usage.prompt_tokens) || 0);
+        if (streamCache.read > 0) cacheReadTokens = streamCache.read;
+        if (streamCache.write > 0) cacheWriteTokens = streamCache.write;
+      }
+      const delta = parsed.choices?.[0]?.delta?.content;
+      if (typeof delta === "string") {
+        completionText += delta;
+      }
+      const chunkFinish = parsed.choices?.[0]?.finish_reason;
+      if (typeof chunkFinish === "string" && chunkFinish) {
+        finishReason = chunkFinish;
+      }
+    } catch {
+      // Not valid JSON, skip
+    }
+  }
 
   // --- Final accounting routine, factored out so it can be triggered from
   //     either the natural end of stream OR a client abort (TCP RST / nav-away).
@@ -1532,22 +1796,26 @@ async function handleStreamingResponse(
               balanceAfter = keyBalance as number;
             }
           } else {
-            const { data: newBalance, error: settleErr } = await supabase.rpc("deduct_credits", {
-              p_user_id: keyInfo.userId,
-              p_amount: settlementDelta,
-            });
+            const { data: newBalance, error: settleErr } = await deductUserCredits(
+              supabase,
+              keyInfo.userId,
+              settlementDelta,
+              shouldUsePaidOnlyCredits(keyInfo)
+            );
             if (settleErr || newBalance === -1) {
               // Settlement failed on user balance: drain whatever's left so we
               // don't silently give away the full delta. Then accrue debt as a
               // negative `transactions` row marker for ops to follow up on.
               billingStatus = "settlement_failed";
-              const totalAvailable = keyInfo.credits + keyInfo.dailyCredits;
+              const totalAvailable = getAvailableBillableCredits(keyInfo);
               const remaining = totalAvailable - reservation.reservedCredits;
               if (remaining > 0) {
-                const { data: drained } = await supabase.rpc("deduct_credits", {
-                  p_user_id: keyInfo.userId,
-                  p_amount: remaining,
-                });
+                const { data: drained } = await deductUserCredits(
+                  supabase,
+                  keyInfo.userId,
+                  remaining,
+                  shouldUsePaidOnlyCredits(keyInfo)
+                );
                 if (typeof drained === "number" && drained >= 0) {
                   chargedCredits += remaining;
                   balanceAfter = drained as number;
@@ -1594,10 +1862,12 @@ async function handleStreamingResponse(
           wasCharged = !keyErr && typeof keyBalance === "number" && keyBalance >= 0;
           balanceAfter = (keyBalance as number) ?? 0;
         } else {
-          const { data: newBalance, error: deductError } = await supabase.rpc("deduct_credits", {
-            p_user_id: keyInfo.userId,
-            p_amount: finalCredits,
-          });
+          const { data: newBalance, error: deductError } = await deductUserCredits(
+            supabase,
+            keyInfo.userId,
+            finalCredits,
+            shouldUsePaidOnlyCredits(keyInfo)
+          );
           wasCharged = !deductError && typeof newBalance === "number" && newBalance >= 0;
           balanceAfter = (newBalance as number) ?? 0;
         }
@@ -1610,7 +1880,9 @@ async function handleStreamingResponse(
 
     const durationMs = Date.now() - startTime;
     const isPremium = isPremiumProviderName(model.provider);
-    const streamPremiumCost = isPremium && !activeEventId ? Number(model.premium_request_cost ?? 1) : 0;
+    const streamPremiumCost = isPremium && !activeEventId && !isPlanUnlimited
+      ? (premiumRequestCostForUsage || getContextAdjustedPremiumRequestCost(model.id, model.provider, Number(model.premium_request_cost ?? 1), estimatedPromptTokens))
+      : 0;
     const { error: usageLogError } = await supabase.from("usage_logs").insert({
       user_id: keyInfo.userId,
       api_key_id: keyInfo.keyId,
@@ -1635,18 +1907,10 @@ async function handleStreamingResponse(
       console.error("Failed to write streaming usage log:", usageLogError.message);
     }
 
-    // See non-streaming path: accrue debt when real prompt_tokens exceed
-    // the user's plan cap (estimator under-counted during pre-flight). Free
-    // tier only.
-    if (isPremium && !activeEventId && !keyInfo.isCustom && keyInfo.planId === "free") {
-      const { error: debtErr } = await supabase.rpc("accrue_prompt_cap_debt", {
-        p_user_id: keyInfo.userId,
-        p_plan_id: keyInfo.planId,
-        p_actual_tokens: totalPromptTokens,
-        p_penalty: 3,
-      });
-      if (debtErr) console.error("Failed to accrue prompt-cap debt (stream):", debtErr.message);
-    }
+    // Premium-request debt accrual DISABLED for free tier (2026-05-24).
+    // See the non-streaming path above for the full rationale: permanent debt
+    // + under-counting estimator was permanently locking free users out of
+    // their 15/day. Do NOT re-enable without making debt decay/reset per day.
 
     if (!isFreePool && chargedCredits > 0) {
       const settlementSuffix = billingStatus === "success" ? "" : ` [${billingStatus}]`;
@@ -1675,42 +1939,18 @@ async function handleStreamingResponse(
     transform(chunk, controller) {
       controller.enqueue(chunk);
 
-      const text = decoder.decode(chunk, { stream: true });
-      const lines = text.split("\n").filter((l) => l.startsWith("data: "));
-
-      for (const line of lines) {
-        const jsonStr = line.slice(6).trim();
-        if (jsonStr === "[DONE]") continue;
-        try {
-          const parsed = JSON.parse(jsonStr);
-          if (parsed.usage) {
-            hasUsageData = true;
-            // Use upstream values only when they are positive; a 0 or
-            // negative report is treated as "not provided" so the
-            // finalize() sanity check can substitute our local estimate.
-            const upPrompt = Number(parsed.usage.prompt_tokens);
-            const upCompletion = Number(parsed.usage.completion_tokens);
-            if (upPrompt > 0) totalPromptTokens = upPrompt;
-            if (upCompletion > 0) totalCompletionTokens = upCompletion;
-            const streamCache = extractCacheTokens(parsed.usage, Number(parsed.usage.prompt_tokens) || 0);
-            if (streamCache.read > 0) cacheReadTokens = streamCache.read;
-            if (streamCache.write > 0) cacheWriteTokens = streamCache.write;
-          }
-          const delta = parsed.choices?.[0]?.delta?.content;
-          if (typeof delta === "string") {
-            completionText += delta;
-          }
-          const chunkFinish = parsed.choices?.[0]?.finish_reason;
-          if (typeof chunkFinish === "string" && chunkFinish) {
-            finishReason = chunkFinish;
-          }
-        } catch {
-          // Not valid JSON, skip
-        }
+      sseBuffer += decoder.decode(chunk, { stream: true });
+      let newlineIndex: number;
+      while ((newlineIndex = sseBuffer.indexOf("\n")) >= 0) {
+        const line = sseBuffer.slice(0, newlineIndex).trim();
+        sseBuffer = sseBuffer.slice(newlineIndex + 1);
+        processSseLine(line);
       }
     },
 
     async flush() {
+      const trailing = (sseBuffer + decoder.decode()).trim();
+      if (trailing) processSseLine(trailing);
       await finalize("complete");
     },
   });

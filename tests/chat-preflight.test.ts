@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  getContextAdjustedPremiumRequestCost,
   getCustomKeyNoCreditsError,
   getNoPaidBalanceError,
   getRequestFingerprint,
@@ -36,5 +37,16 @@ describe("chat preflight", () => {
     expect(getNoPaidBalanceError(false, 1, 0)).toBeNull();
     expect(getNoPaidBalanceError(false, 0, 1)).toBeNull();
     expect(getNoPaidBalanceError(true, 0, 0)).toBeNull();
+  });
+
+  it("adds t/ premium request cost by context band", () => {
+    expect(getContextAdjustedPremiumRequestCost("t/claude-opus-4.7", "trolllm", 6, 32_000)).toBe(6);
+    expect(getContextAdjustedPremiumRequestCost("t/claude-opus-4.7", "trolllm", 6, 32_001)).toBe(8);
+    expect(getContextAdjustedPremiumRequestCost("t/claude-opus-4.7", "trolllm", 6, 42_000)).toBe(8);
+    expect(getContextAdjustedPremiumRequestCost("t/claude-opus-4.7", "trolllm", 6, 42_001)).toBe(10);
+  });
+
+  it("does not add context premium cost to non-t models", () => {
+    expect(getContextAdjustedPremiumRequestCost("r/claude-opus-4-7", "riftai", 7, 200_000)).toBe(7);
   });
 });

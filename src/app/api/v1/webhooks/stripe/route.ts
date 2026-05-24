@@ -13,10 +13,17 @@ export async function POST(req: NextRequest) {
 
   let event: Stripe.Event;
   try {
-    event = stripe.webhooks.constructEvent(
+    // Use the async verifier with the SubtleCrypto provider: on Cloudflare
+    // Workers (OpenNext) the synchronous constructEvent relies on Node's
+    // sync crypto, which is unavailable under workerd. constructEventAsync +
+    // createSubtleCryptoProvider verifies the HMAC via Web Crypto and also
+    // works on Node.
+    event = await stripe.webhooks.constructEventAsync(
       body,
       signature,
-      process.env.STRIPE_WEBHOOK_SECRET!
+      process.env.STRIPE_WEBHOOK_SECRET!,
+      undefined,
+      Stripe.createSubtleCryptoProvider()
     );
   } catch (err) {
     console.error("Webhook signature verification failed:", err);

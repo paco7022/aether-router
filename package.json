@@ -6,6 +6,13 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:cf": "opennextjs-cloudflare build",
+    "build:cf:docker": "powershell -ExecutionPolicy Bypass -File scripts/build-cf-docker.ps1",
+    "preview:cf": "opennextjs-cloudflare preview",
+    "deploy:cf": "wrangler deploy --config wrangler.jsonc",
+    "deploy:cf:full": "opennextjs-cloudflare build && opennextjs-cloudflare deploy -- --keep-vars",
+    "upload:cf": "opennextjs-cloudflare upload -- --keep-vars",
+    "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
     "start": "next start",
     "test": "vitest run"
   },
@@ -26,12 +33,14 @@
     "stripe": "^21.0.1"
   },
   "devDependencies": {
+    "@opennextjs/cloudflare": "^1.19.11",
     "@tailwindcss/postcss": "^4.2.2",
     "@types/node": "^25.5.0",
     "@types/react": "^19.2.14",
     "postcss": "^8.5.8",
     "tailwindcss": "^4.2.2",
     "typescript": "^6.0.2",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "wrangler": "^4.93.0"
   }
 }
