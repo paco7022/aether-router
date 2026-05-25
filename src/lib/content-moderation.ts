@@ -14,7 +14,13 @@
 import { createHash } from "node:crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-const MODERATION_URL = "https://api.openai.com/v1/moderations";
+// Primary moderation backend. Defaults to Hapuppy's beta host, which resells
+// OpenAI's omni-moderation model for free and returns the OpenAI-compatible
+// shape (categories + category_scores). OpenAI direct is an automatic fallback
+// (also free, but low-tier orgs get 429-throttled — that's exactly what took
+// this gate offline on 2026-05-14).
+// NOTE: use the `beta.` host — `api.hapuppy.com/v1/moderations` returns 401.
+const MODERATION_DEFAULT_BASE_URL = "https://beta.hapuppy.com/v1";
 const MODERATION_MODEL = "omni-moderation-latest";
 const FETCH_TIMEOUT_MS = 2_000;
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1h
@@ -109,15 +115,77 @@ type OpenAIModerationResponse = {
   }>;
 };
 
+type ModerationBackend = { name: string; url: string; apiKey: string };
+
+// Ordered list of moderation backends. The first one that returns a non-error
+// response wins. Hapuppy (free, OpenAI-compatible) is primary; OpenAI direct
+// is the fallback. Configurable via MODERATION_BASE_URL / MODERATION_API_KEY.
+function getModerationBackends(): ModerationBackend[] {
+  const backends: ModerationBackend[] = [];
+
+  const base = (process.env.MODERATION_BASE_URL || MODERATION_DEFAULT_BASE_URL).replace(/\/+$/, "");
+  const primaryKey = process.env.MODERATION_API_KEY || process.env.HAPUPPY_API_KEY;
+  if (primaryKey) {
+    backends.push({ name: "hapuppy", url: `${base}/moderations`, apiKey: primaryKey });
+  }
+
+  if (process.env.OPENAI_API_KEY) {
+    backends.push({
+      name: "openai",
+      url: "https://api.openai.com/v1/moderations",
+      apiKey: process.env.OPENAI_API_KEY,
+    });
+  }
+
+  return backends;
+}
+
+// Single moderation call against one backend. Returns the parsed response, or
+// null on any error (non-2xx, timeout, network) so the caller can try the next
+// backend and ultimately fail open.
+async function fetchModeration(
+  backend: ModerationBackend,
+  texts: string[],
+): Promise<OpenAIModerationResponse | null> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const resp = await fetch(backend.url, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${backend.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ model: MODERATION_MODEL, input: texts }),
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => "");
+      console.error(`Moderation [${backend.name}] ${resp.status}: ${errText}`);
+      return null;
+    }
+
+    return (await resp.json()) as OpenAIModerationResponse;
+  } catch (err) {
+    console.error(`Moderation [${backend.name}] fetch failed:`, (err as Error).message);
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export async function moderateMessages(messages: ModerationMessage[]): Promise<ModerationResult> {
   const texts = extractUserAuthoredText(messages);
   if (texts.length === 0) {
     return { flagged: false, flaggedItems: [], serviceError: false };
   }
 
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    console.error("Moderation skipped: OPENAI_API_KEY not configured");
+  const backends = getModerationBackends();
+  if (backends.length === 0) {
+    console.error(
+      "Moderation skipped: no backend configured (set MODERATION_API_KEY / HAPUPPY_API_KEY or OPENAI_API_KEY)",
+    );
     return { flagged: false, flaggedItems: [], serviceError: true };
   }
 
@@ -145,62 +213,45 @@ export async function moderateMessages(messages: ModerationMessage[]): Promise<M
   let serviceError = false;
 
   if (inputs.length > 0) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-    try {
-      const resp = await fetch(MODERATION_URL, {
-        method: "POST",
-        signal: controller.signal,
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: MODERATION_MODEL,
-          input: inputs.map((x) => x.text),
-        }),
-      });
+    // Try each backend in order; first non-error response wins. If all fail,
+    // serviceError stays true and we fail open (logged above per backend).
+    let data: OpenAIModerationResponse | null = null;
+    for (const backend of backends) {
+      data = await fetchModeration(backend, inputs.map((x) => x.text));
+      if (data) break;
+    }
 
-      if (!resp.ok) {
-        const errText = await resp.text().catch(() => "");
-        console.error(`Moderation API ${resp.status}: ${errText}`);
-        serviceError = true;
-      } else {
-        const data = (await resp.json()) as OpenAIModerationResponse;
-        const results = Array.isArray(data.results) ? data.results : [];
-        for (let i = 0; i < inputs.length; i++) {
-          const r = results[i];
-          if (!r) continue;
+    if (!data) {
+      serviceError = true;
+    } else {
+      const results = Array.isArray(data.results) ? data.results : [];
+      for (let i = 0; i < inputs.length; i++) {
+        const r = results[i];
+        if (!r) continue;
 
-          const cats = r.categories ?? {};
-          const scores = r.category_scores ?? {};
-          const triggered: string[] = [];
-          for (const [name, hit] of Object.entries(cats)) {
-            if (hit && FLAG_CATEGORIES.has(name)) triggered.push(name);
-          }
+        const cats = r.categories ?? {};
+        const scores = r.category_scores ?? {};
+        const triggered: string[] = [];
+        for (const [name, hit] of Object.entries(cats)) {
+          if (hit && FLAG_CATEGORIES.has(name)) triggered.push(name);
+        }
 
-          const isFlagged = triggered.length > 0;
-          cache.set(inputs[i].hash, {
-            flagged: isFlagged,
-            expiresAt: now + CACHE_TTL_MS,
+        const isFlagged = triggered.length > 0;
+        cache.set(inputs[i].hash, {
+          flagged: isFlagged,
+          expiresAt: now + CACHE_TTL_MS,
+        });
+
+        if (isFlagged) {
+          flaggedItems.push({
+            hash: inputs[i].hash,
+            categories: triggered,
+            scores,
           });
-
-          if (isFlagged) {
-            flaggedItems.push({
-              hash: inputs[i].hash,
-              categories: triggered,
-              scores,
-            });
-          }
         }
       }
-    } catch (err) {
-      console.error("Moderation fetch failed:", (err as Error).message);
-      serviceError = true;
-    } finally {
-      clearTimeout(timeout);
-      cachePrune();
     }
+    cachePrune();
   }
 
   return { flagged: flaggedItems.length > 0, flaggedItems, serviceError };
