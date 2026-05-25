@@ -22,7 +22,15 @@ import { createAdminClient } from "@/lib/supabase/admin";
 // NOTE: use the `beta.` host — `api.hapuppy.com/v1/moderations` returns 401.
 const MODERATION_DEFAULT_BASE_URL = "https://beta.hapuppy.com/v1";
 const MODERATION_MODEL = "omni-moderation-latest";
-const FETCH_TIMEOUT_MS = 2_000;
+// 2s was too tight for Hapuppy's proxy (it aborted mid-call → fail open). 5s
+// gives it room while still bounding the request hot path.
+const FETCH_TIMEOUT_MS = 5_000;
+// Hapuppy caps the TOTAL chars per /moderations request at ~32,768 — verified:
+// 32k array total OK, 40k total = 400, regardless of per-item size. So we both
+// (a) split any single text into <=MAX_BATCH_CHARS chunks and (b) pack chunks
+// into requests whose combined length stays under MAX_BATCH_CHARS. Chunking
+// also stops CSAM from being hidden past a truncation cutoff.
+const MAX_BATCH_CHARS = 30_000;
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1h
 const CACHE_MAX_ENTRIES = 5_000;
 
@@ -191,8 +199,14 @@ export async function moderateMessages(messages: ModerationMessage[]): Promise<M
 
   const hashes = texts.map(hashText);
   const now = Date.now();
-  const inputs: Array<{ text: string; hash: string }> = [];
   const flaggedItems: FlaggedItem[] = [];
+
+  // Build the moderation batch. Each uncached text is split into chunks of
+  // <=MAX_INPUT_CHARS; every chunk is moderated and mapped back to its parent
+  // text so a verdict covers the whole message, not just the first 30k chars.
+  const chunks: Array<{ text: string; parent: number }> = [];
+  const chunkCount: Record<number, number> = {};
+  const uncachedIdx: number[] = [];
 
   for (let i = 0; i < texts.length; i++) {
     const cached = cache.get(hashes[i]);
@@ -202,51 +216,98 @@ export async function moderateMessages(messages: ModerationMessage[]): Promise<M
       }
       continue;
     }
-    inputs.push({ text: texts[i], hash: hashes[i] });
+    uncachedIdx.push(i);
+    chunkCount[i] = 0;
+    for (let off = 0; off < texts[i].length; off += MAX_BATCH_CHARS) {
+      chunks.push({ text: texts[i].slice(off, off + MAX_BATCH_CHARS), parent: i });
+      chunkCount[i]++;
+    }
   }
 
   // Cache says flagged on every input → no network call needed.
-  if (flaggedItems.length > 0 && inputs.length === 0) {
+  if (flaggedItems.length > 0 && chunks.length === 0) {
     return { flagged: true, flaggedItems, serviceError: false };
   }
 
   let serviceError = false;
 
-  if (inputs.length > 0) {
-    // Try each backend in order; first non-error response wins. If all fail,
-    // serviceError stays true and we fail open (logged above per backend).
-    let data: OpenAIModerationResponse | null = null;
-    for (const backend of backends) {
-      data = await fetchModeration(backend, inputs.map((x) => x.text));
-      if (data) break;
+  if (chunks.length > 0) {
+    // Pack chunks into batches whose combined length stays under the per-request
+    // total-char limit; one HTTP call per batch. Most requests are a single
+    // batch (small new message; history is cached); only a huge uncached char
+    // card spills into a second batch.
+    const batches: number[][] = [];
+    let cur: number[] = [];
+    let curLen = 0;
+    for (let i = 0; i < chunks.length; i++) {
+      const len = chunks[i].text.length;
+      if (cur.length > 0 && curLen + len > MAX_BATCH_CHARS) {
+        batches.push(cur);
+        cur = [];
+        curLen = 0;
+      }
+      cur.push(i);
+      curLen += len;
+    }
+    if (cur.length > 0) batches.push(cur);
+
+    type ModItem = NonNullable<OpenAIModerationResponse["results"]>[number];
+    const chunkResults: Array<ModItem | undefined> = new Array(chunks.length);
+
+    for (const batch of batches) {
+      const texts = batch.map((idx) => chunks[idx].text);
+      // Try each backend in order; first non-error response wins.
+      let data: OpenAIModerationResponse | null = null;
+      for (const backend of backends) {
+        data = await fetchModeration(backend, texts);
+        if (data) break;
+      }
+      // Any batch we can't verify means we can't clear the message → fail open.
+      if (!data) {
+        serviceError = true;
+        break;
+      }
+      const rs = Array.isArray(data.results) ? data.results : [];
+      for (let j = 0; j < batch.length; j++) chunkResults[batch[j]] = rs[j];
     }
 
-    if (!data) {
-      serviceError = true;
-    } else {
-      const results = Array.isArray(data.results) ? data.results : [];
-      for (let i = 0; i < inputs.length; i++) {
-        const r = results[i];
+    if (!serviceError) {
+      // Aggregate chunk verdicts back to their parent text.
+      const seen = new Map<number, number>(); // parent -> chunks that returned
+      const cats = new Map<number, Set<string>>();
+      const scores = new Map<number, Record<string, number>>();
+
+      for (let i = 0; i < chunks.length; i++) {
+        const r = chunkResults[i];
         if (!r) continue;
-
-        const cats = r.categories ?? {};
-        const scores = r.category_scores ?? {};
-        const triggered: string[] = [];
-        for (const [name, hit] of Object.entries(cats)) {
-          if (hit && FLAG_CATEGORIES.has(name)) triggered.push(name);
+        const parent = chunks[i].parent;
+        seen.set(parent, (seen.get(parent) ?? 0) + 1);
+        for (const [name, hit] of Object.entries(r.categories ?? {})) {
+          if (!hit || !FLAG_CATEGORIES.has(name)) continue;
+          if (!cats.has(parent)) {
+            cats.set(parent, new Set());
+            scores.set(parent, {});
+          }
+          cats.get(parent)!.add(name);
+          const sc = scores.get(parent)!;
+          sc[name] = Math.max(sc[name] ?? 0, (r.category_scores ?? {})[name] ?? 0);
         }
+      }
 
-        const isFlagged = triggered.length > 0;
-        cache.set(inputs[i].hash, {
-          flagged: isFlagged,
-          expiresAt: now + CACHE_TTL_MS,
-        });
+      for (const i of uncachedIdx) {
+        // Only finalize (and cache) a verdict if every chunk came back — a
+        // partial response shouldn't let a message be cached as "clean".
+        if ((seen.get(i) ?? 0) !== chunkCount[i]) continue;
+
+        const triggered = cats.get(i);
+        const isFlagged = !!triggered && triggered.size > 0;
+        cache.set(hashes[i], { flagged: isFlagged, expiresAt: now + CACHE_TTL_MS });
 
         if (isFlagged) {
           flaggedItems.push({
-            hash: inputs[i].hash,
-            categories: triggered,
-            scores,
+            hash: hashes[i],
+            categories: [...triggered!],
+            scores: scores.get(i) ?? {},
           });
         }
       }
