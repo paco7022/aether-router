@@ -435,22 +435,28 @@ export async function POST(req: NextRequest) {
         { status: 403 }
       );
     }
-    if (keyInfo.planId === "free" && claudePaidOnlyApplies(model.provider)) {
-      return NextResponse.json(
-        { error: { message: CLAUDE_PAID_ONLY_MESSAGE, type: "plan_restricted" } },
-        { status: 403 }
-      );
-    }
-    // Per-user Claude activation gate. Mirrors the API-key
-    // `is_activated` flow: free users start FALSE and an admin must
-    // flip them; paid users + anyone with a prior purchase are
-    // grandfathered/auto-flipped TRUE on Stripe checkout. Custom
-    // keys bypass — they're admin-minted with their own controls.
-    if (!keyInfo.isCustom && !keyInfo.claudeActivated) {
-      return NextResponse.json(
-        { error: { message: CLAUDE_NOT_ACTIVATED_MESSAGE, type: "claude_not_activated" } },
-        { status: 403 }
-      );
+    // TEMP (2026-05-26): during the db/ (DLab) free+unlimited promo, db/ is
+    // open to everyone — free plan included — so skip BOTH the paid-plan-only
+    // rule and the per-user claude_activated gate for db/ while the flag is on.
+    const dlabFreePromo = DLAB_FREE_UNLIMITED && model.provider === "dlab";
+    if (!dlabFreePromo) {
+      if (keyInfo.planId === "free" && claudePaidOnlyApplies(model.provider)) {
+        return NextResponse.json(
+          { error: { message: CLAUDE_PAID_ONLY_MESSAGE, type: "plan_restricted" } },
+          { status: 403 }
+        );
+      }
+      // Per-user Claude activation gate. Mirrors the API-key
+      // `is_activated` flow: free users start FALSE and an admin must
+      // flip them; paid users + anyone with a prior purchase are
+      // grandfathered/auto-flipped TRUE on Stripe checkout. Custom
+      // keys bypass — they're admin-minted with their own controls.
+      if (!keyInfo.isCustom && !keyInfo.claudeActivated) {
+        return NextResponse.json(
+          { error: { message: CLAUDE_NOT_ACTIVATED_MESSAGE, type: "claude_not_activated" } },
+          { status: 403 }
+        );
+      }
     }
   }
 
