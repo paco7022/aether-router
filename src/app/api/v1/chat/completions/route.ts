@@ -56,6 +56,11 @@ const FAIRUSE_RATE_LIMIT_SECONDS = 0;
 const FREE_INCLUDED_USAGE_ENABLED =
   process.env.AETHER_FREE_INCLUDED_USAGE_ENABLED === "true";
 const FREE_PROMOS_ENABLED = process.env.AETHER_FREE_PROMOS_ENABLED === "true";
+// TEMP (2026-05-26): DLab (db/) free + unlimited promo while a donated 24h
+// key lasts. Deliberately independent of FREE_PROMOS_ENABLED so it does NOT
+// reopen the other paused promos (free events, riftai gemini, deepseek free).
+// Unset this flag (or let the upstream key die) to revert.
+const DLAB_FREE_UNLIMITED = process.env.DLAB_FREE_UNLIMITED === "true";
 
 type StreamChargeReservation = {
   reservedCredits: number;
@@ -463,15 +468,24 @@ export async function POST(req: NextRequest) {
     model.provider === "riftai" &&
     (model.upstream_model_id || modelId).toLowerCase().includes("gemini");
 
+  // TEMP (2026-05-26): db/ (DLab) is fully free + unlimited while the donated
+  // 24h key lasts. Routes as zero-cost regardless of its catalog cost, so no
+  // credits, no premium-request pool, and no daily request cap are consumed —
+  // only the plan's context cap (≈line 1065) still applies as an abuse guard.
+  // Gated by its own DLAB_FREE_UNLIMITED flag so the rest of the paused promos
+  // stay off.
+  const isDlabFreeUnlimited = DLAB_FREE_UNLIMITED && model.provider === "dlab";
+
   // Zero-cost premium models (cost_per_m_input=0 + premium_request_cost=0) route
   // as free — no credits or premium-request budget consumed. Revert by restoring
   // cost/margin values in the models table.
   const isZeroCostPremium =
-    FREE_PROMOS_ENABLED &&
-    isPremiumProvider && (
-      (Number(model.cost_per_m_input) === 0 && Number(model.premium_request_cost) === 0) ||
-      isRiftaiGeminiFree
-    );
+    isDlabFreeUnlimited ||
+    (FREE_PROMOS_ENABLED &&
+      isPremiumProvider && (
+        (Number(model.cost_per_m_input) === 0 && Number(model.premium_request_cost) === 0) ||
+        isRiftaiGeminiFree
+      ));
   // Same for flat-rate (openrouter): premium_request_cost=0 means free promo.
   // Without this short-circuit we'd call deduct_credits(0), which the RPC
   // rejects with -1 → 402 "Insufficient credits, credits_required: 0".

@@ -20,7 +20,11 @@
     "ALLOWED_ORIGINS": "https://router-cloud.aether-ai.dev,https://router.aether-ai.dev",
     "TRUST_PROXY": "true",
     "AETHER_FREE_INCLUDED_USAGE_ENABLED": "true",
-    "AETHER_FREE_PROMOS_ENABLED": "false"
+    "AETHER_FREE_PROMOS_ENABLED": "false",
+    // TEMP (2026-05-26): db/ (DLab) free + unlimited promo while the donated
+    // 24h key lasts. Independent of AETHER_FREE_PROMOS_ENABLED. Set to "false"
+    // (or remove) when the upstream key dies.
+    "DLAB_FREE_UNLIMITED": "true"
   },
   "assets": {
     "directory": ".open-next/assets",
