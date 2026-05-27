@@ -1380,6 +1380,32 @@ export async function POST(req: NextRequest) {
     return { chargedCredits, balanceAfter, status: billingStatus };
   }
 
+  // Record a zero-cost failure row so provider outages are visible in
+  // usage_logs (which otherwise only stores successes). Lets us detect a dead
+  // provider via `status like 'error_%'` instead of finding out weeks later.
+  const logErrorUsage = async (statusLabel: string) => {
+    try {
+      await supabase.from("usage_logs").insert({
+        user_id: keyInfo.userId,
+        api_key_id: keyInfo.keyId,
+        model_id: modelId,
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        total_tokens: 0,
+        credits_charged: 0,
+        cost_usd: 0,
+        status: statusLabel,
+        duration_ms: Date.now() - startTime,
+        premium_cost: 0,
+        source: keyInfo.source,
+        estimated_prompt_tokens: estimatedPrompt,
+        finish_reason: null,
+      });
+    } catch (e) {
+      console.error("Failed to write error usage log:", (e as Error).message);
+    }
+  };
+
   try {
     // Ask upstream to include usage data in stream chunks (OpenAI-compatible)
     const forwardBody = { ...body, model: upstreamModel, stream };
@@ -1419,6 +1445,7 @@ export async function POST(req: NextRequest) {
       }
 
       console.error(`Upstream error ${status}: ${errorText}`);
+      await logErrorUsage(`error_${status}`);
 
       return NextResponse.json(
         {
@@ -1463,6 +1490,7 @@ export async function POST(req: NextRequest) {
     // full reservation (credits + premium counter) and bubble a 502 up.
     if ((!data.usage || !Number(data.usage.total_tokens)) && !extractCompletionText(data).trim()) {
       await refundReservation();
+      await logErrorUsage("error_empty");
       return NextResponse.json(
         {
           error: {
