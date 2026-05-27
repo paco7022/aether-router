@@ -103,6 +103,9 @@ export function extractUserAuthoredText(messages: ModerationMessage[]): string[]
 
 export type FlaggedItem = {
   hash: string;
+  // The flagged fragment itself. Kept so the review queue can show a human
+  // exactly what tripped the moderator (the ban path only ever needs the hash).
+  text: string;
   categories: string[];
   scores: Record<string, number>;
 };
@@ -212,7 +215,7 @@ export async function moderateMessages(messages: ModerationMessage[]): Promise<M
     const cached = cache.get(hashes[i]);
     if (cached && cached.expiresAt > now) {
       if (cached.flagged) {
-        flaggedItems.push({ hash: hashes[i], categories: ["cached"], scores: {} });
+        flaggedItems.push({ hash: hashes[i], text: texts[i], categories: ["cached"], scores: {} });
       }
       continue;
     }
@@ -306,6 +309,7 @@ export async function moderateMessages(messages: ModerationMessage[]): Promise<M
         if (isFlagged) {
           flaggedItems.push({
             hash: hashes[i],
+            text: texts[i],
             categories: [...triggered!],
             scores: scores.get(i) ?? {},
           });
@@ -318,16 +322,90 @@ export async function moderateMessages(messages: ModerationMessage[]): Promise<M
   return { flagged: flaggedItems.length > 0, flaggedItems, serviceError };
 }
 
-// Permanent termination on confirmed CSAM hit.
+// Max chars we persist per review row. The whole point is to give a human the
+// context, but we still bound it so one giant char card can't bloat a row.
+const REVIEW_FLAGGED_TEXT_MAX = 40_000;
+const REVIEW_CONTEXT_MAX = 80_000;
+
+// Build a bounded, plain-text copy of the conversation for the reviewer. We
+// keep role + text only (no images/tool payloads) and truncate so a huge
+// prompt can't blow up the row.
+function buildReviewContext(messages: ModerationMessage[]): Array<{ role: string; content: string }> {
+  const out: Array<{ role: string; content: string }> = [];
+  let budget = REVIEW_CONTEXT_MAX;
+  for (const m of messages) {
+    if (!m || typeof m.role !== "string") continue;
+    if (budget <= 0) break;
+    let text = extractTextFromContent(m.content);
+    if (!text) continue;
+    if (text.length > budget) text = text.slice(0, budget) + "…[truncated]";
+    budget -= text.length;
+    out.push({ role: m.role, content: text });
+  }
+  return out;
+}
+
+// Queue a flagged message for MANUAL review. This replaced the old auto-ban:
+// a flag no longer bans, blocks, or disables keys — it just records the
+// flagged text + surrounding context here for an admin to action or dismiss.
 //
-// We never persist the offending text — only the SHA-256, the categories
-// that fired, and the calibrated scores. The hash is enough for repeat
-// detection and for handing over to law enforcement on a court order.
+// Stores one row per (user, exact flagged fragment); the unique index makes a
+// repeat of the same fragment a no-op so a chatty user can't flood the queue.
+// Runs on the service-role client; failures are logged but never propagate —
+// queuing is best-effort and must not affect the user's request.
+export async function recordModerationReview(options: {
+  userId: string;
+  source: "api" | "chat";
+  flaggedItems: FlaggedItem[];
+  messages: ModerationMessage[];
+}): Promise<void> {
+  if (options.flaggedItems.length === 0) return;
+  const supabase = createAdminClient();
+
+  // Merge categories/scores across all flagged fragments of this request.
+  const categories = new Set<string>();
+  const scores: Record<string, number> = {};
+  const fragments: string[] = [];
+  for (const item of options.flaggedItems) {
+    for (const c of item.categories) if (c !== "cached") categories.add(c);
+    for (const [k, v] of Object.entries(item.scores)) scores[k] = Math.max(scores[k] ?? 0, v);
+    if (item.text) fragments.push(item.text);
+  }
+
+  let flaggedText = fragments.join("\n---\n");
+  if (flaggedText.length > REVIEW_FLAGGED_TEXT_MAX) {
+    flaggedText = flaggedText.slice(0, REVIEW_FLAGGED_TEXT_MAX) + "…[truncated]";
+  }
+
+  const { error } = await supabase.from("moderation_reviews").upsert(
+    {
+      user_id: options.userId,
+      content_hash: options.flaggedItems[0].hash,
+      flagged_text: flaggedText,
+      context: buildReviewContext(options.messages),
+      categories: [...categories],
+      category_scores: scores,
+      source: options.source,
+      status: "pending",
+    },
+    { onConflict: "user_id,content_hash", ignoreDuplicates: true },
+  );
+  if (error) {
+    console.error("Failed to queue moderation review:", error.message);
+  }
+}
+
+// Permanent termination — invoked by an admin from the review queue once a
+// flag is CONFIRMED a real violation (not automatically anymore).
 //
-// All steps run with the service-role client. Failures are logged but the
-// caller still returns the 403 either way; the csam_incidents audit row
-// is the source of truth and an admin can re-run the ban manually.
-export async function recordCsamIncidentAndBan(options: {
+// We never persist the offending text in csam_incidents — only the SHA-256,
+// the categories, and the calibrated scores. The hash is enough for repeat
+// detection and for handing over to law enforcement on a court order. (The
+// reviewed text lives in moderation_reviews until the row is cleaned up.)
+//
+// All steps run with the service-role client. Failures are logged but do not
+// throw; the csam_incidents audit row is the source of truth.
+export async function banUserForViolation(options: {
   userId: string;
   source: "api" | "chat";
   flaggedItems: FlaggedItem[];
@@ -355,7 +433,7 @@ export async function recordCsamIncidentAndBan(options: {
     .update({ is_protected: false, is_activated: false })
     .eq("id", options.userId);
   if (profErr) {
-    console.error("Failed to update profile after CSAM detection:", profErr.message);
+    console.error("Failed to update profile after violation:", profErr.message);
   }
 
   // auth.users banned_until is what Supabase actually checks at the auth
@@ -364,18 +442,15 @@ export async function recordCsamIncidentAndBan(options: {
     ban_duration: "876000h",
   });
   if (authErr) {
-    console.error("Failed to ban auth user after CSAM detection:", authErr.message);
+    console.error("Failed to ban auth user after violation:", authErr.message);
   }
 
   // Disable every API key — including custom keys — owned by the user.
   const { error: keyErr } = await supabase
     .from("api_keys")
-    .update({ is_active: false, note: "Auto-disabled: AUP violation" })
+    .update({ is_active: false, note: "Disabled: AUP violation" })
     .eq("user_id", options.userId);
   if (keyErr) {
-    console.error("Failed to disable api_keys after CSAM detection:", keyErr.message);
+    console.error("Failed to disable api_keys after violation:", keyErr.message);
   }
 }
-
-export const CSAM_BLOCK_MESSAGE =
-  "This message violates our acceptable use policy. The account has been suspended. Contact support if you believe this is in error.";

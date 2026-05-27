@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 
-type Tab = "stats" | "users" | "models" | "plans" | "custom_keys" | "events";
+type Tab = "stats" | "users" | "models" | "plans" | "custom_keys" | "events" | "reviews";
 
 interface UserProfile {
   id: string;
@@ -126,6 +126,22 @@ interface Stats {
   topUsersToday: { user_id: string; email: string; requests: number }[];
 }
 
+interface ModerationReview {
+  id: string;
+  user_id: string;
+  email: string;
+  content_hash: string;
+  flagged_text: string;
+  context: { role: string; content: string }[];
+  categories: string[];
+  category_scores: Record<string, number>;
+  source: string;
+  status: string;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+}
+
 const ALL_PROVIDERS = ["trolllm", "airforce", "gemini-cli", "antigravity", "webproxy", "hapuppy", "gameron", "dlab", "riftai"];
 
 async function api(method: "GET" | "POST", params?: Record<string, string>, body?: unknown) {
@@ -179,6 +195,11 @@ export default function AdminPage() {
     max_context: "32768",
     rate_limit_seconds: "120",
   });
+
+  // Moderation reviews
+  const [reviews, setReviews] = useState<ModerationReview[]>([]);
+  const [reviewStatus, setReviewStatus] = useState<"pending" | "actioned" | "dismissed" | "all">("pending");
+  const [expandedReview, setExpandedReview] = useState<string | null>(null);
 
   // Custom Keys
   const [customKeys, setCustomKeys] = useState<CustomKey[]>([]);
@@ -242,6 +263,14 @@ export default function AdminPage() {
     setLoading(false);
   }, []);
 
+  const loadReviews = useCallback(async (status?: string) => {
+    setLoading(true);
+    const data = await api("GET", { action: "moderation_reviews", status: status || reviewStatus });
+    if (data.error) setError(data.error);
+    else setReviews(data.reviews || []);
+    setLoading(false);
+  }, [reviewStatus]);
+
   useEffect(() => {
     if (tab === "stats") loadStats();
     else if (tab === "users") loadUsers();
@@ -249,7 +278,20 @@ export default function AdminPage() {
     else if (tab === "plans") loadPlans();
     else if (tab === "custom_keys") loadCustomKeys();
     else if (tab === "events") loadEvents();
-  }, [tab, loadStats, loadUsers, loadModels, loadPlans, loadCustomKeys, loadEvents]);
+    else if (tab === "reviews") loadReviews();
+  }, [tab, loadStats, loadUsers, loadModels, loadPlans, loadCustomKeys, loadEvents, loadReviews]);
+
+  async function handleReviewDismiss(id: string) {
+    await api("POST", undefined, { action: "review_dismiss", review_id: id });
+    loadReviews();
+  }
+
+  async function handleReviewBan(id: string, email: string) {
+    if (!confirm(`Ban ${email}? This permanently suspends the account and disables every API key it owns.`)) return;
+    const res = await api("POST", undefined, { action: "review_ban", review_id: id });
+    if (res.error) setError(res.error);
+    loadReviews();
+  }
 
   async function selectUser(u: UserProfile) {
     setSelectedUser(u);
@@ -502,6 +544,7 @@ export default function AdminPage() {
     { id: "plans", label: "Plans" },
     { id: "custom_keys", label: "Custom Keys" },
     { id: "events", label: "Events" },
+    { id: "reviews", label: "Reviews" },
   ];
 
   const ALL_PLANS = ["free", "pro", "creator", "master", "ultra", "ultimate", "max"];
@@ -1297,6 +1340,97 @@ export default function AdminPage() {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {tab === "reviews" && (
+        <div className="space-y-4">
+          <div className="glass-card shimmer-line p-5">
+            <h3 className="font-semibold text-sm text-white/85 mb-1">Moderation Review Queue</h3>
+            <p className="text-xs text-[var(--text-muted)]">
+              Messages flagged by the content moderator. Flags no longer auto-ban — review each one and either
+              dismiss it (false positive) or ban the account (confirmed violation).
+            </p>
+            <div className="flex gap-1 mt-4 p-1 w-fit rounded-lg" style={{ background: "rgba(15, 15, 35, 0.6)", border: "1px solid rgba(255, 255, 255, 0.04)" }}>
+              {(["pending", "actioned", "dismissed", "all"] as const).map((s) => (
+                <button key={s}
+                  onClick={() => { setReviewStatus(s); loadReviews(s); }}
+                  className={`px-3 py-1 rounded text-xs font-medium capitalize transition-all ${reviewStatus === s ? "text-white bg-white/10" : "text-[var(--text-muted)] hover:text-[var(--text)]"}`}>
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {reviews.length === 0 ? (
+            <p className="glass-card p-4 text-xs text-[var(--text-dim)]">No {reviewStatus !== "all" ? reviewStatus : ""} reviews.</p>
+          ) : (
+            <div className="space-y-3">
+              {reviews.map((r) => {
+                const topScore = Math.max(0, ...Object.values(r.category_scores || {}));
+                const expanded = expandedReview === r.id;
+                return (
+                  <div key={r.id} className="glass-card p-4">
+                    <div className="flex items-start justify-between gap-3 flex-wrap">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm text-white/90 font-medium">{r.email}</span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-[var(--text-muted)] font-mono">{r.source}</span>
+                          {r.categories.map((c) => (
+                            <span key={c} className="text-[10px] px-1.5 py-0.5 rounded badge-error font-mono">{c}</span>
+                          ))}
+                          {topScore > 0 && (
+                            <span className="text-[10px] text-[var(--text-muted)]">score {topScore.toFixed(3)}</span>
+                          )}
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded capitalize ${r.status === "pending" ? "text-amber-300 bg-amber-500/10" : r.status === "actioned" ? "badge-error" : "text-emerald-300 bg-emerald-500/10"}`}>{r.status}</span>
+                        </div>
+                        <p className="text-[10px] text-[var(--text-dim)] mt-1 font-mono">{r.user_id} · {new Date(r.created_at).toLocaleString()}{r.reviewed_by ? ` · reviewed by ${r.reviewed_by}` : ""}</p>
+                      </div>
+                      {r.status === "pending" && (
+                        <div className="flex gap-2 shrink-0">
+                          <button onClick={() => handleReviewDismiss(r.id)}
+                            className="px-3 py-1.5 rounded-lg text-xs font-medium text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 transition-all">
+                            Dismiss
+                          </button>
+                          <button onClick={() => handleReviewBan(r.id, r.email)}
+                            className="px-3 py-1.5 rounded-lg text-xs font-medium badge-error hover:opacity-80 transition-all">
+                            Ban account
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    <button onClick={() => setExpandedReview(expanded ? null : r.id)}
+                      className="text-[11px] text-cyan-300/70 hover:text-cyan-300 mt-3">
+                      {expanded ? "Hide" : "Show"} flagged text + context
+                    </button>
+
+                    {expanded && (
+                      <div className="mt-2 space-y-3">
+                        <div>
+                          <p className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider mb-1">Flagged fragment</p>
+                          <pre className="text-xs text-white/80 whitespace-pre-wrap break-words bg-[var(--bg-input)] border border-white/[0.06] rounded-lg p-3 max-h-64 overflow-auto">{r.flagged_text || "(empty)"}</pre>
+                        </div>
+                        {Array.isArray(r.context) && r.context.length > 0 && (
+                          <div>
+                            <p className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider mb-1">Context</p>
+                            <div className="space-y-1.5 max-h-96 overflow-auto bg-[var(--bg-input)] border border-white/[0.06] rounded-lg p-3">
+                              {r.context.map((m, i) => (
+                                <div key={i} className="text-xs">
+                                  <span className="text-[10px] uppercase tracking-wider text-[var(--text-dim)] font-mono">{m.role}</span>
+                                  <p className="text-white/75 whitespace-pre-wrap break-words">{m.content}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
     </div>

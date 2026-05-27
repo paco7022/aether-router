@@ -25,9 +25,8 @@ import {
   isClaudeModel,
 } from "@/lib/claude-block";
 import {
-  CSAM_BLOCK_MESSAGE,
   moderateMessages,
-  recordCsamIncidentAndBan,
+  recordModerationReview,
 } from "@/lib/content-moderation";
 import { applyPreset } from "@/lib/preset";
 import { getBuiltinPreset } from "@/lib/builtinPresets";
@@ -379,25 +378,22 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 3.5. CSAM moderation gate — runs before any DB writes, credit
-  // reservations, or upstream selection. Only the `sexual/minors` category
-  // is enforced; everything else passes through. Fails OPEN on transient
-  // OpenAI errors so a moderator outage doesn't take the router down.
+  // 3.5. Moderation queue — only the `sexual/minors` category is checked;
+  // everything else passes through. Fails OPEN on transient moderator errors.
   //
-  // On a confirmed hit: log to csam_incidents, permanently ban the auth
-  // user, disable every API key they own, and return a generic 403 — we
-  // do NOT echo the category back to the client.
+  // A flag NO LONGER bans, blocks, or disables keys. The omni-moderation
+  // boolean fires at a low threshold and was permanently nuking paying
+  // accounts on legitimate adult roleplay (false positives). Instead we
+  // silently queue the flagged text + context to moderation_reviews and let
+  // the request through; an admin reviews the queue and decides whether to ban.
   const moderation = await moderateMessages(messages as { role: string; content: unknown }[]);
   if (moderation.flagged) {
-    await recordCsamIncidentAndBan({
+    await recordModerationReview({
       userId: keyInfo.userId,
       source: keyInfo.source,
       flaggedItems: moderation.flaggedItems,
+      messages: messages as { role: string; content: unknown }[],
     });
-    return NextResponse.json(
-      { error: { message: CSAM_BLOCK_MESSAGE, type: "policy_violation" } },
-      { status: 403 }
-    );
   }
 
   // 4. Look up model

@@ -5,6 +5,7 @@ import { isAdmin } from "@/lib/admin";
 import { hashApiKey } from "@/lib/auth";
 import { API_KEY_PREFIX } from "@/lib/constants";
 import { requireCsrf } from "@/lib/csrf";
+import { banUserForViolation } from "@/lib/content-moderation";
 
 // Escape LIKE/ILIKE wildcards so user input is treated literally.
 function escapeLike(input: string): string {
@@ -225,6 +226,30 @@ export async function GET(req: NextRequest) {
             bannedFingerprintSet.has(fp.fingerprint) ||
             (typeof fp.ip_address === "string" && bannedIpSet.has(fp.ip_address)),
           linked_accounts: linkedAccounts[fp.fingerprint] || [],
+        })),
+      });
+    }
+
+    // ── Moderation review queue ──
+    // List flagged messages awaiting manual review. status filter defaults to
+    // 'pending'; pass status=all to see history. Joins the user's email so the
+    // admin can identify the account at a glance.
+    case "moderation_reviews": {
+      const status = req.nextUrl.searchParams.get("status") || "pending";
+      let query = supabase
+        .from("moderation_reviews")
+        .select("id, user_id, content_hash, flagged_text, context, categories, category_scores, source, status, reviewed_by, reviewed_at, created_at, profiles(email)")
+        .order("created_at", { ascending: false })
+        .limit(100);
+      if (status !== "all") query = query.eq("status", status);
+
+      const { data, error } = await query;
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({
+        reviews: (data || []).map((r) => ({
+          ...r,
+          email: (r.profiles as unknown as { email: string })?.email || r.user_id,
+          profiles: undefined,
         })),
       });
     }
@@ -620,6 +645,55 @@ export async function POST(req: NextRequest) {
         .eq("id", user_id);
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
       return NextResponse.json({ ok: true, claude_activated: !!activated });
+    }
+
+    // ── Moderation review actions ──
+    // Dismiss a queued flag as a false positive. No account change — just
+    // marks the row reviewed so it leaves the pending queue.
+    case "review_dismiss": {
+      const { review_id } = body;
+      if (!review_id) return NextResponse.json({ error: "review_id required" }, { status: 400 });
+      const { error } = await supabase
+        .from("moderation_reviews")
+        .update({ status: "dismissed", reviewed_by: user.email, reviewed_at: new Date().toISOString() })
+        .eq("id", review_id);
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ ok: true });
+    }
+
+    // Confirm a queued flag as a real violation: permanently ban the account,
+    // disable its keys, and write the hash-only csam_incidents audit row. Marks
+    // the review 'actioned'.
+    case "review_ban": {
+      const { review_id } = body;
+      if (!review_id) return NextResponse.json({ error: "review_id required" }, { status: 400 });
+
+      const { data: review, error: fetchErr } = await supabase
+        .from("moderation_reviews")
+        .select("user_id, content_hash, categories, category_scores, source")
+        .eq("id", review_id)
+        .single();
+      if (fetchErr || !review) {
+        return NextResponse.json({ error: fetchErr?.message || "Review not found" }, { status: 404 });
+      }
+
+      await banUserForViolation({
+        userId: review.user_id,
+        source: (review.source as "api" | "chat") ?? "api",
+        flaggedItems: [{
+          hash: review.content_hash,
+          text: "",
+          categories: review.categories || [],
+          scores: (review.category_scores as Record<string, number>) || {},
+        }],
+      });
+
+      const { error } = await supabase
+        .from("moderation_reviews")
+        .update({ status: "actioned", reviewed_by: user.email, reviewed_at: new Date().toISOString() })
+        .eq("id", review_id);
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ ok: true, banned_user: review.user_id });
     }
 
     default:
