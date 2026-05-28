@@ -20,6 +20,7 @@ import {
   CLAUDE_BLOCK_MESSAGE,
   CLAUDE_NOT_ACTIVATED_MESSAGE,
   CLAUDE_PAID_ONLY_MESSAGE,
+  claudeActivationApplies,
   claudePaidOnlyApplies,
   isAllowedClaudeProvider,
   isClaudeModel,
@@ -447,7 +448,13 @@ export async function POST(req: NextRequest) {
       // flip them; paid users + anyone with a prior purchase are
       // grandfathered/auto-flipped TRUE on Stripe checkout. Custom
       // keys bypass — they're admin-minted with their own controls.
-      if (!keyInfo.isCustom && !keyInfo.claudeActivated) {
+      // or/ also bypasses (flat-rate upstream, no per-user fairness
+      // load) via CLAUDE_ACTIVATION_BYPASS.
+      if (
+        !keyInfo.isCustom &&
+        !keyInfo.claudeActivated &&
+        claudeActivationApplies(model.provider)
+      ) {
         return NextResponse.json(
           { error: { message: CLAUDE_NOT_ACTIVATED_MESSAGE, type: "claude_not_activated" } },
           { status: 403 }

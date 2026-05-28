@@ -22,8 +22,22 @@ const ALLOWED_CLAUDE_PROVIDERS = new Set(["trolllm", "gameron", "dlab", "riftai"
 // paid-plan-only rule for these providers.
 const CLAUDE_PAID_ONLY_BYPASS = new Set(["trolllm", "orbit"]);
 
+// Providers whose Claude routing also bypasses the per-user
+// profiles.claude_activated gate. Use sparingly — this turns Claude
+// access into "anyone with an activated API key can route", with no
+// admin opt-in per user.
+//
+// orbit: upstream is a flat-rate Kiro Pro subscription (not pay-as-you-
+// go), so per-user fairness is not load-bearing. Standard premium-pool
+// + context-cap enforcement is enough.
+const CLAUDE_ACTIVATION_BYPASS = new Set(["orbit"]);
+
 export function claudePaidOnlyApplies(provider: string | null | undefined): boolean {
   return !!provider && !CLAUDE_PAID_ONLY_BYPASS.has(provider);
+}
+
+export function claudeActivationApplies(provider: string | null | undefined): boolean {
+  return !!provider && !CLAUDE_ACTIVATION_BYPASS.has(provider);
 }
 
 export function isClaudeModel(model: {

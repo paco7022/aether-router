@@ -32,24 +32,24 @@ INSERT INTO models (
   margin, is_active, premium_request_cost, capabilities
 ) VALUES
   -- Normal (1x): per-call upstream cost ≈ $0.20 / 1M tokens, 1 premium request
-  ('or/claude-sonnet-4-5',           'orbit', 'claude-sonnet-4-5',           'Claude Sonnet 4.5 (Orbit)',           0.20, 0.20, 0.02, 0.25, 1.0, true, 1, '["streaming", "system_message"]'::jsonb),
-  ('or/claude-sonnet-4-6',           'orbit', 'claude-sonnet-4-6',           'Claude Sonnet 4.6 (Orbit)',           0.20, 0.20, 0.02, 0.25, 1.0, true, 1, '["streaming", "system_message"]'::jsonb),
-  ('or/claude-opus-4-5',             'orbit', 'claude-opus-4-5',             'Claude Opus 4.5 (Orbit)',             0.20, 0.20, 0.02, 0.25, 1.0, true, 1, '["streaming", "system_message"]'::jsonb),
-  ('or/claude-opus-4-6',             'orbit', 'claude-opus-4-6',             'Claude Opus 4.6 (Orbit)',             0.20, 0.20, 0.02, 0.25, 1.0, true, 1, '["streaming", "system_message"]'::jsonb),
-  ('or/deepseek-3-2',                'orbit', 'deepseek-3-2',                'DeepSeek 3.2 (Orbit)',                0.20, 0.20, 0.02, 0.25, 1.0, true, 1, '["streaming", "system_message"]'::jsonb),
-  ('or/glm-5',                       'orbit', 'glm-5',                       'GLM 5 (Orbit)',                       0.20, 0.20, 0.02, 0.25, 1.0, true, 1, '["streaming", "system_message"]'::jsonb),
-  ('or/minimax-m2-5',                'orbit', 'minimax-m2-5',                'Minimax M2.5 (Orbit)',                0.20, 0.20, 0.02, 0.25, 1.0, true, 1, '["streaming", "system_message"]'::jsonb),
+  ('or/claude-sonnet-4-5',           'orbit', 'claude-sonnet-4-5',           'Claude Sonnet 4.5',           0.20, 0.20, 0.02, 0.25, 1.0, true, 1, '["streaming", "system_message"]'::jsonb),
+  ('or/claude-sonnet-4-6',           'orbit', 'claude-sonnet-4-6',           'Claude Sonnet 4.6',           0.20, 0.20, 0.02, 0.25, 1.0, true, 1, '["streaming", "system_message"]'::jsonb),
+  ('or/claude-opus-4-5',             'orbit', 'claude-opus-4-5',             'Claude Opus 4.5',             0.20, 0.20, 0.02, 0.25, 1.0, true, 1, '["streaming", "system_message"]'::jsonb),
+  ('or/claude-opus-4-6',             'orbit', 'claude-opus-4-6',             'Claude Opus 4.6',             0.20, 0.20, 0.02, 0.25, 1.0, true, 1, '["streaming", "system_message"]'::jsonb),
+  ('or/deepseek-3-2',                'orbit', 'deepseek-3-2',                'DeepSeek 3.2',                0.20, 0.20, 0.02, 0.25, 1.0, true, 1, '["streaming", "system_message"]'::jsonb),
+  ('or/glm-5',                       'orbit', 'glm-5',                       'GLM 5',                       0.20, 0.20, 0.02, 0.25, 1.0, true, 1, '["streaming", "system_message"]'::jsonb),
+  ('or/minimax-m2-5',                'orbit', 'minimax-m2-5',                'Minimax M2.5',                0.20, 0.20, 0.02, 0.25, 1.0, true, 1, '["streaming", "system_message"]'::jsonb),
 
   -- Inflated (2x): -agentic variants ship Kiro's full IDE system prompt;
   -- Opus 4.7 and 4.6-thinking burn extra completion tokens via extended
   -- reasoning. 2 premium requests/call + 0.40 / 1M for accounting.
-  ('or/claude-sonnet-4-5-agentic',   'orbit', 'claude-sonnet-4-5-agentic',   'Claude Sonnet 4.5 Agentic (Orbit)',   0.40, 0.40, 0.04, 0.50, 1.0, true, 2, '["streaming", "system_message"]'::jsonb),
-  ('or/claude-sonnet-4-6-agentic',   'orbit', 'claude-sonnet-4-6-agentic',   'Claude Sonnet 4.6 Agentic (Orbit)',   0.40, 0.40, 0.04, 0.50, 1.0, true, 2, '["streaming", "system_message"]'::jsonb),
-  ('or/claude-opus-4-7',             'orbit', 'claude-opus-4-7',             'Claude Opus 4.7 (Orbit)',             0.40, 0.40, 0.04, 0.50, 1.0, true, 2, '["streaming", "system_message"]'::jsonb),
-  ('or/claude-opus-4-7-agentic',     'orbit', 'claude-opus-4-7-agentic',     'Claude Opus 4.7 Agentic (Orbit)',     0.40, 0.40, 0.04, 0.50, 1.0, true, 2, '["streaming", "system_message"]'::jsonb),
-  ('or/claude-opus-4-6-thinking',    'orbit', 'claude-opus-4-6-thinking',    'Claude Opus 4.6 Thinking (Orbit)',    0.40, 0.40, 0.04, 0.50, 1.0, true, 2, '["streaming", "system_message"]'::jsonb),
-  ('or/glm-5-agentic',               'orbit', 'glm-5-agentic',               'GLM 5 Agentic (Orbit)',               0.40, 0.40, 0.04, 0.50, 1.0, true, 2, '["streaming", "system_message"]'::jsonb),
-  ('or/minimax-m2-5-agentic',        'orbit', 'minimax-m2-5-agentic',        'Minimax M2.5 Agentic (Orbit)',        0.40, 0.40, 0.04, 0.50, 1.0, true, 2, '["streaming", "system_message"]'::jsonb)
+  ('or/claude-sonnet-4-5-agentic',   'orbit', 'claude-sonnet-4-5-agentic',   'Claude Sonnet 4.5 Agentic',   0.40, 0.40, 0.04, 0.50, 1.0, true, 2, '["streaming", "system_message"]'::jsonb),
+  ('or/claude-sonnet-4-6-agentic',   'orbit', 'claude-sonnet-4-6-agentic',   'Claude Sonnet 4.6 Agentic',   0.40, 0.40, 0.04, 0.50, 1.0, true, 2, '["streaming", "system_message"]'::jsonb),
+  ('or/claude-opus-4-7',             'orbit', 'claude-opus-4-7',             'Claude Opus 4.7',             0.40, 0.40, 0.04, 0.50, 1.0, true, 2, '["streaming", "system_message"]'::jsonb),
+  ('or/claude-opus-4-7-agentic',     'orbit', 'claude-opus-4-7-agentic',     'Claude Opus 4.7 Agentic',     0.40, 0.40, 0.04, 0.50, 1.0, true, 2, '["streaming", "system_message"]'::jsonb),
+  ('or/claude-opus-4-6-thinking',    'orbit', 'claude-opus-4-6-thinking',    'Claude Opus 4.6 Thinking',    0.40, 0.40, 0.04, 0.50, 1.0, true, 2, '["streaming", "system_message"]'::jsonb),
+  ('or/glm-5-agentic',               'orbit', 'glm-5-agentic',               'GLM 5 Agentic',               0.40, 0.40, 0.04, 0.50, 1.0, true, 2, '["streaming", "system_message"]'::jsonb),
+  ('or/minimax-m2-5-agentic',        'orbit', 'minimax-m2-5-agentic',        'Minimax M2.5 Agentic',        0.40, 0.40, 0.04, 0.50, 1.0, true, 2, '["streaming", "system_message"]'::jsonb)
 ON CONFLICT (id) DO UPDATE SET
   provider               = EXCLUDED.provider,
   upstream_model_id      = EXCLUDED.upstream_model_id,
