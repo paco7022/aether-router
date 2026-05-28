@@ -36,6 +36,7 @@ const PREMIUM_PROVIDERS = new Set<string>([
   "riftai",
   "opencode",
   "trolllm",
+  "orbit",
 ]);
 
 export function isPremiumProvider(provider: string | null | undefined): boolean {

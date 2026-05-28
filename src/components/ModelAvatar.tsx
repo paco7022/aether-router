@@ -8,6 +8,17 @@ function getPrefix(modelId: string): string {
   if (lower.startsWith("m/") || lower.startsWith("mistral")) return "m";
   if (lower.startsWith("w/")) return "w";
   if (lower.startsWith("t/")) return "w";
+  if (lower.startsWith("or/")) {
+    // Orbit serves multiple model families; classify by sub-id so the
+    // avatar matches the underlying model. Default to a generic "w"
+    // tile when nothing more specific applies.
+    const rest = lower.slice(3);
+    if (rest.startsWith("claude")) return "c";
+    if (rest.startsWith("gpt") || rest.startsWith("openai")) return "o";
+    if (rest.startsWith("gemini")) return "g";
+    if (rest.startsWith("grok") || rest.startsWith("xai")) return "x";
+    return "w";
+  }
   return "default";
 }
 

@@ -14,13 +14,13 @@ export const CLAUDE_NOT_ACTIVATED_MESSAGE =
   "Your account is not yet activated for Claude. Message an admin on Discord to request activation.";
 
 // Providers currently approved to route Claude requests.
-const ALLOWED_CLAUDE_PROVIDERS = new Set(["trolllm", "gameron", "dlab", "riftai", "hapuppy"]);
+const ALLOWED_CLAUDE_PROVIDERS = new Set(["trolllm", "gameron", "dlab", "riftai", "hapuppy", "orbit"]);
 
 // Providers whose Claude routing bypasses the paid-plan-only rule.
-// trolllm: free users can use Claude on t/ once admin flips
+// trolllm + orbit: free users can use Claude here once admin flips
 // profiles.claude_activated; the per-user gate replaces the
-// paid-plan-only rule for this provider.
-const CLAUDE_PAID_ONLY_BYPASS = new Set(["trolllm"]);
+// paid-plan-only rule for these providers.
+const CLAUDE_PAID_ONLY_BYPASS = new Set(["trolllm", "orbit"]);
 
 export function claudePaidOnlyApplies(provider: string | null | undefined): boolean {
   return !!provider && !CLAUDE_PAID_ONLY_BYPASS.has(provider);
