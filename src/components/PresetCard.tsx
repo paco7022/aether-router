@@ -154,6 +154,20 @@ function PromptCard({
       <div className="flex items-center gap-2">
         <SmallToggle value={prompt.enabled} onChange={(v) => onChange({ ...prompt, enabled: v })} />
 
+        {prompt.position === "depth" && (
+          <span
+            className="text-[10px] font-mono px-1.5 py-0.5 rounded shrink-0"
+            style={{
+              background: "rgba(139,92,246,0.15)",
+              color: "rgba(196,181,253,0.9)",
+              border: "1px solid rgba(139,92,246,0.25)",
+            }}
+            title={`In-chat injection at depth ${prompt.depth ?? 0}`}
+          >
+            @{prompt.depth ?? 0}
+          </span>
+        )}
+
         <input
           value={prompt.name}
           onChange={(e) => onChange({ ...prompt, name: e.target.value })}
@@ -259,19 +273,80 @@ function PromptCard({
       </div>
 
       {expanded && (
-        <textarea
-          value={prompt.content}
-          onChange={(e) => onChange({ ...prompt, content: e.target.value.slice(0, 32 * 1024) })}
-          placeholder="Prompt content…"
-          rows={6}
-          className="mt-3 w-full rounded-lg text-sm text-white/75 resize-y placeholder:text-white/20 focus:outline-none transition-colors"
-          style={{
-            background: "rgba(255,255,255,0.025)",
-            border: "1px solid rgba(255,255,255,0.06)",
-            padding: "0.6rem 0.75rem",
-            fontFamily: "inherit",
-          }}
-        />
+        <div className="mt-3 space-y-2">
+          <div className="flex items-center gap-2 flex-wrap text-xs">
+            <span className="text-[var(--text-dim)] uppercase tracking-wider text-[10px]">Injection</span>
+            <select
+              value={prompt.position ?? "relative"}
+              onChange={(e) => {
+                const pos = e.target.value as "relative" | "depth";
+                if (pos === "depth") {
+                  onChange({ ...prompt, position: "depth", relative_to: undefined, depth: prompt.depth ?? 0, order: prompt.order ?? 100 });
+                } else {
+                  onChange({ ...prompt, position: "relative", relative_to: prompt.relative_to ?? "before_history", depth: undefined, order: undefined });
+                }
+              }}
+              className="rounded-lg px-2 py-1 cursor-pointer focus:outline-none"
+              style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.7)" }}
+            >
+              <option value="relative">Relative</option>
+              <option value="depth">In-chat depth</option>
+            </select>
+
+            {(prompt.position ?? "relative") === "relative" ? (
+              <select
+                value={prompt.relative_to ?? "before_history"}
+                onChange={(e) => onChange({ ...prompt, relative_to: e.target.value as "before_history" | "after_history" })}
+                className="rounded-lg px-2 py-1 cursor-pointer focus:outline-none"
+                style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.7)" }}
+              >
+                <option value="before_history">Before history</option>
+                <option value="after_history">After history</option>
+              </select>
+            ) : (
+              <>
+                <label className="flex items-center gap-1 text-[var(--text-dim)]">
+                  Depth
+                  <input
+                    type="number"
+                    min={0}
+                    max={999}
+                    step={1}
+                    value={prompt.depth ?? 0}
+                    onChange={(e) => onChange({ ...prompt, depth: Math.max(0, parseInt(e.target.value, 10) || 0) })}
+                    className="w-16 rounded-lg px-2 py-1 text-white/80 focus:outline-none"
+                    style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}
+                  />
+                </label>
+                <label className="flex items-center gap-1 text-[var(--text-dim)]">
+                  Order
+                  <input
+                    type="number"
+                    step={1}
+                    value={prompt.order ?? 100}
+                    onChange={(e) => onChange({ ...prompt, order: parseInt(e.target.value, 10) || 0 })}
+                    className="w-16 rounded-lg px-2 py-1 text-white/80 focus:outline-none"
+                    style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}
+                  />
+                </label>
+              </>
+            )}
+          </div>
+
+          <textarea
+            value={prompt.content}
+            onChange={(e) => onChange({ ...prompt, content: e.target.value.slice(0, 32 * 1024) })}
+            placeholder="Prompt content…"
+            rows={6}
+            className="w-full rounded-lg text-sm text-white/75 resize-y placeholder:text-white/20 focus:outline-none transition-colors"
+            style={{
+              background: "rgba(255,255,255,0.025)",
+              border: "1px solid rgba(255,255,255,0.06)",
+              padding: "0.6rem 0.75rem",
+              fontFamily: "inherit",
+            }}
+          />
+        </div>
       )}
     </div>
   );
@@ -296,6 +371,8 @@ function newPrompt(): PromptItem {
     role: "system",
     content: "",
     enabled: true,
+    position: "relative",
+    relative_to: "before_history",
   };
 }
 
@@ -414,8 +491,12 @@ export function PresetCard({
         const json = JSON.parse(ev.target?.result as string);
         const parsed = parseSillyTavernPreset(json);
         setPreset(parsed);
-        setImportMsg(`Imported ${parsed.prompts.length} prompt${parsed.prompts.length !== 1 ? "s" : ""} from "${parsed.name}"`);
-        setTimeout(() => setImportMsg(""), 4000);
+        const depthCount = parsed.prompts.filter((p) => p.position === "depth").length;
+        const depthNote = depthCount > 0 ? `, ${depthCount} depth-injected` : "";
+        setImportMsg(
+          `Imported ${parsed.prompts.length} prompt${parsed.prompts.length !== 1 ? "s" : ""}${depthNote} from "${parsed.name}"`
+        );
+        setTimeout(() => setImportMsg(""), 5000);
       } catch (err) {
         setErrorMsg(err instanceof Error ? err.message : "Could not parse JSON file.");
         setStatus("error");
@@ -477,9 +558,11 @@ export function PresetCard({
       </div>
 
       <p className="text-xs text-[var(--text-dim)] mb-5 leading-relaxed">
-        When enabled, this preset is applied to every request: sampling parameters override client
-        values, prompts are prepended in order, and optional prefill is appended. Import a
-        SillyTavern preset JSON to populate it automatically.
+        When enabled, this preset is applied to every request, SillyTavern-style: sampling
+        parameters apply (and optionally override the client's), prompts are injected relative to
+        the chat history or at a set depth (the <span className="font-mono">@N</span> badge), macros
+        are resolved, and optional prefill is appended. Import a SillyTavern preset JSON to populate
+        it automatically.
       </p>
 
       {/* Aether built-in presets */}
@@ -662,13 +745,44 @@ export function PresetCard({
         )}
       </div>
 
-      {/* Squash system messages */}
-      <div className="flex items-center gap-3 mb-4 py-2 border-t border-white/[0.04]">
-        <SmallToggle
-          value={preset.squash_system_messages}
-          onChange={(v) => setPreset((p) => ({ ...p, squash_system_messages: v }))}
-        />
-        <span className="text-xs text-[var(--text-dim)]">Squash consecutive system messages into one</span>
+      {/* Behaviour */}
+      <div className="border-t border-white/[0.04] pt-2">
+        <div className="flex items-center gap-3 mb-3 py-1">
+          <SmallToggle
+            value={preset.strip_client_params === true}
+            onChange={(v) => setPreset((p) => ({ ...p, strip_client_params: v }))}
+          />
+          <span className="text-xs text-[var(--text-dim)]">
+            Ignore client sampler params (temp, top_p…) — preset is authoritative
+          </span>
+        </div>
+        <div className="flex items-center gap-3 mb-3 py-1">
+          <SmallToggle
+            value={preset.squash_system_messages}
+            onChange={(v) => setPreset((p) => ({ ...p, squash_system_messages: v }))}
+          />
+          <span className="text-xs text-[var(--text-dim)]">Squash consecutive system messages into one</span>
+        </div>
+        <div className="flex items-center gap-3 mb-4 py-1">
+          <span className="text-xs text-[var(--text-dim)] w-36 shrink-0">Message post-processing</span>
+          <select
+            value={preset.post_processing ?? "none"}
+            onChange={(e) =>
+              setPreset((p) => ({ ...p, post_processing: e.target.value as UserPreset["post_processing"] }))
+            }
+            className="text-xs rounded-lg px-2 py-1 cursor-pointer focus:outline-none"
+            style={{
+              background: "rgba(255,255,255,0.05)",
+              border: "1px solid rgba(255,255,255,0.08)",
+              color: "rgba(255,255,255,0.7)",
+            }}
+          >
+            <option value="none">None</option>
+            <option value="merge">Merge consecutive roles</option>
+            <option value="semi_strict">Semi-strict</option>
+            <option value="strict">Strict</option>
+          </select>
+        </div>
       </div>
 
       {/* Prompts */}
