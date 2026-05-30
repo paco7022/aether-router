@@ -163,6 +163,10 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Viewer role: admins see the full panel, mods see a scoped panel.
+  const [role, setRole] = useState<"admin" | "mod" | null>(null);
+  const [roleLoaded, setRoleLoaded] = useState(false);
+
   // Stats
   const [stats, setStats] = useState<Stats | null>(null);
 
@@ -271,7 +275,17 @@ export default function AdminPage() {
     setLoading(false);
   }, [reviewStatus]);
 
+  // Resolve our own role before rendering either panel.
   useEffect(() => {
+    api("GET", { action: "whoami" }).then((d) => {
+      setRole(d?.role === "admin" || d?.role === "mod" ? d.role : null);
+      setRoleLoaded(true);
+    });
+  }, []);
+
+  useEffect(() => {
+    // Full-admin tab data. Mods never load these (the API would 403 anyway).
+    if (role !== "admin") return;
     if (tab === "stats") loadStats();
     else if (tab === "users") loadUsers();
     else if (tab === "models") loadModels();
@@ -279,7 +293,7 @@ export default function AdminPage() {
     else if (tab === "custom_keys") loadCustomKeys();
     else if (tab === "events") loadEvents();
     else if (tab === "reviews") loadReviews();
-  }, [tab, loadStats, loadUsers, loadModels, loadPlans, loadCustomKeys, loadEvents, loadReviews]);
+  }, [tab, role, loadStats, loadUsers, loadModels, loadPlans, loadCustomKeys, loadEvents, loadReviews]);
 
   async function handleReviewDismiss(id: string) {
     await api("POST", undefined, { action: "review_dismiss", review_id: id });
@@ -549,6 +563,16 @@ export default function AdminPage() {
 
   const ALL_PLANS = ["free", "pro", "creator", "master", "ultra", "ultimate", "max"];
 
+  if (!roleLoaded) {
+    return <p className="text-sm text-[var(--text-muted)]">Loading...</p>;
+  }
+
+  // Gifted moderators get a scoped panel: find a user and flip their free-tier
+  // activation / Claude access. Nothing else is reachable (API enforces it too).
+  if (role === "mod") {
+    return <ModPanel />;
+  }
+
   return (
     <div>
       <div className="mb-6">
@@ -713,6 +737,7 @@ export default function AdminPage() {
                       <option value="ultra">ultra</option>
                       <option value="ultimate">ultimate</option>
                       <option value="max">max</option>
+                      <option value="mod">mod (Pro + moderation panel)</option>
                     </select>
                     <button onClick={handleSetPlan} className="btn-aurora text-xs font-medium px-3 py-1.5">Set</button>
                   </div>
@@ -1459,6 +1484,168 @@ function StatCard({ label, value, color }: { label: string; value: number; color
         </div>
       </div>
       <p className="text-3xl font-bold text-white/90">{value.toLocaleString()}</p>
+    </div>
+  );
+}
+
+// Scoped panel for gifted moderators (plan `mod`). They can search users and
+// flip the free-tier activation / Claude gates — nothing else. The API
+// re-enforces both the action allowlist and the free-tier-only restriction.
+function ModPanel() {
+  const [users, setUsers] = useState<UserProfile[]>([]);
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState<UserProfile | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadUsers = useCallback(async (q?: string) => {
+    setLoading(true);
+    const data = await api("GET", { action: "users", search: q || "" });
+    if (data.error) setError(data.error);
+    else setUsers(data.users || []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    loadUsers();
+  }, [loadUsers]);
+
+  async function toggle(kind: "activation" | "claude") {
+    if (!selected) return;
+    const isClaude = kind === "claude";
+    const next = isClaude ? !selected.claude_activated : !selected.is_activated;
+    const result = await api("POST", undefined, {
+      action: isClaude ? "set_claude_activation" : "set_activation",
+      user_id: selected.id,
+      activated: next,
+    });
+    if (result.error) {
+      setError(result.error);
+      return;
+    }
+    const patch = isClaude ? { claude_activated: next } : { is_activated: next };
+    setSelected({ ...selected, ...patch });
+    setUsers((prev) => prev.map((u) => (u.id === selected.id ? { ...u, ...patch } : u)));
+  }
+
+  const targetIsFree = selected?.plan_id === "free";
+
+  return (
+    <div>
+      <div className="mb-6">
+        <h2 className="text-2xl font-bold text-white/90">Moderation Panel</h2>
+        <p className="text-sm text-[var(--text-muted)] mt-1">
+          Activate or deactivate free-tier users and their Claude access.
+        </p>
+      </div>
+
+      {error && (
+        <div className="badge-error rounded-xl p-3 mb-4 text-sm flex items-center justify-between">
+          {error}
+          <button onClick={() => setError(null)} className="text-xs underline opacity-70 hover:opacity-100">dismiss</button>
+        </div>
+      )}
+
+      <div className="flex gap-6">
+        <div className="flex-1 min-w-0">
+          <div className="mb-4">
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && loadUsers(search)}
+              placeholder="Search by email or name... (Enter)"
+              className="w-full bg-[var(--bg-input)] border border-white/[0.06] rounded-xl px-4 py-2.5 text-sm text-white/90 placeholder-[var(--text-dim)] transition-all"
+            />
+          </div>
+
+          {loading && <p className="text-sm text-[var(--text-muted)] mb-4">Loading...</p>}
+
+          <div className="glass-card overflow-hidden">
+            <div className="divide-y divide-white/[0.04]">
+              {users.map((u) => (
+                <button
+                  key={u.id}
+                  onClick={() => setSelected(u)}
+                  className={`w-full text-left px-4 py-3 hover:bg-[var(--bg-hover)] transition-colors ${
+                    selected?.id === u.id ? "bg-[var(--bg-hover)]" : ""
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-white/85">{u.display_name || u.email}</p>
+                      <p className="text-xs text-cyan-300/50 font-mono">{u.email}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-[var(--text-dim)]">{u.plan_id}</p>
+                      <div className="flex gap-1 mt-1 justify-end">
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded ${u.is_activated ? "badge-success" : "badge-error"}`}>
+                          {u.is_activated ? "on" : "off"}
+                        </span>
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded ${u.claude_activated ? "badge-success" : "badge-error"}`}>
+                          claude
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              ))}
+              {users.length === 0 && !loading && (
+                <p className="p-4 text-sm text-[var(--text-dim)]">No users found.</p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {selected && (
+          <div className="w-96 shrink-0">
+            <div className="glass-card shimmer-line p-4">
+              <h3 className="font-semibold text-sm text-white/85 mb-1">{selected.display_name || selected.email}</h3>
+              <p className="text-xs text-cyan-300/50 font-mono mb-1">{selected.email}</p>
+              <p className="text-xs text-[var(--text-dim)] mb-3">Plan: <span className="text-white/70">{selected.plan_id}</span></p>
+
+              {!targetIsFree ? (
+                <div className="rounded-lg p-3 text-xs" style={{
+                  background: "rgba(251, 191, 36, 0.06)",
+                  border: "1px solid rgba(251, 191, 36, 0.15)",
+                  color: "rgba(251, 191, 36, 0.85)",
+                }}>
+                  Moderators can only toggle free-tier users. This account is on the
+                  <span className="font-medium"> {selected.plan_id} </span>plan.
+                </div>
+              ) : (
+                <>
+                  <div className="space-y-2 mb-4">
+                    <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">API Key Activation</label>
+                    <button onClick={() => toggle("activation")}
+                      className="w-full text-xs font-medium rounded-lg px-3 py-1.5 transition-colors"
+                      style={selected.is_activated ? {
+                        background: "rgba(74, 222, 128, 0.10)", border: "1px solid rgba(74, 222, 128, 0.25)", color: "#4ade80",
+                      } : {
+                        background: "rgba(248, 113, 113, 0.08)", border: "1px solid rgba(248, 113, 113, 0.18)", color: "#f87171",
+                      }}>
+                      {selected.is_activated ? "Active — click to deactivate" : "Inactive — click to activate"}
+                    </button>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">Claude Activation</label>
+                    <button onClick={() => toggle("claude")}
+                      className="w-full text-xs font-medium rounded-lg px-3 py-1.5 transition-colors"
+                      style={selected.claude_activated ? {
+                        background: "rgba(74, 222, 128, 0.10)", border: "1px solid rgba(74, 222, 128, 0.25)", color: "#4ade80",
+                      } : {
+                        background: "rgba(248, 113, 113, 0.08)", border: "1px solid rgba(248, 113, 113, 0.18)", color: "#f87171",
+                      }}>
+                      {selected.claude_activated ? "Active Claude — click to deactivate" : "Inactive Claude — click to activate"}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

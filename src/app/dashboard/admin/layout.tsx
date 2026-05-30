@@ -1,12 +1,12 @@
-import { createServerSupabase } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import { isAdmin } from "@/lib/admin";
+import { getAdminRole } from "@/lib/admin-role";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
-  const supabase = await createServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-
-  if (!user || !isAdmin(user.email)) {
+  // Admins get the full panel; mods (gifted moderators on the `mod` plan) get a
+  // scoped slice. Anyone else is bounced. The per-action scoping lives in the
+  // /api/v1/admin route — this only controls who may load the page.
+  const identity = await getAdminRole();
+  if (!identity) {
     redirect("/dashboard");
   }
 

@@ -1,24 +1,50 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { isAdmin } from "@/lib/admin";
 import { hashApiKey } from "@/lib/auth";
 import { API_KEY_PREFIX } from "@/lib/constants";
 import { requireCsrf } from "@/lib/csrf";
 import { banUserForViolation } from "@/lib/content-moderation";
+import { getAdminRole, type AdminRole } from "@/lib/admin-role";
 
 // Escape LIKE/ILIKE wildcards so user input is treated literally.
 function escapeLike(input: string): string {
   return input.replace(/[%_\\]/g, "\\$&");
 }
 
-async function requireAdmin(req: NextRequest) {
-  const supabase = await createServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user || !isAdmin(user.email)) {
-    return null;
+// GET actions a "mod" (gifted moderator) may call. Everything else is admin-only.
+const MOD_GET_ACTIONS = new Set(["whoami", "users"]);
+// POST actions a "mod" may call. Both are further restricted to free-tier
+// targets inside their handlers.
+const MOD_POST_ACTIONS = new Set(["set_activation", "set_claude_activation"]);
+
+async function requireAdmin(
+  _req: NextRequest,
+): Promise<{ user: { id: string; email: string | null }; role: AdminRole } | null> {
+  const identity = await getAdminRole();
+  if (!identity) return null;
+  return { user: { id: identity.userId, email: identity.email }, role: identity.role };
+}
+
+// Moderators may only act on free-tier accounts. Returns a 403 response when a
+// mod targets a non-free user (paid, another mod, or an admin); null otherwise.
+async function assertModFreeTarget(
+  supabase: ReturnType<typeof createAdminClient>,
+  role: AdminRole,
+  userId: string,
+): Promise<NextResponse | null> {
+  if (role !== "mod") return null;
+  const { data: target } = await supabase
+    .from("profiles")
+    .select("plan_id")
+    .eq("id", userId)
+    .single();
+  if (!target || target.plan_id !== "free") {
+    return NextResponse.json(
+      { error: "Moderators can only toggle free-tier users" },
+      { status: 403 },
+    );
   }
-  return user;
+  return null;
 }
 
 // GET /api/v1/admin?action=users|stats|plans|models|keys
@@ -26,13 +52,24 @@ export async function GET(req: NextRequest) {
   const csrfError = requireCsrf(req);
   if (csrfError) return csrfError;
 
-  const user = await requireAdmin(req);
-  if (!user) {
+  const auth = await requireAdmin(req);
+  if (!auth) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
   }
+  const { role } = auth;
 
   const supabase = createAdminClient();
   const action = req.nextUrl.searchParams.get("action");
+
+  // "whoami" lets the client discover its own role to render the right panel.
+  if (action === "whoami") {
+    return NextResponse.json({ role });
+  }
+
+  // Moderators get a tiny slice of the panel — reject everything else early.
+  if (role === "mod" && !MOD_GET_ACTIONS.has(action ?? "")) {
+    return NextResponse.json({ error: "Forbidden for moderator role" }, { status: 403 });
+  }
 
   switch (action) {
     case "users": {
@@ -264,10 +301,11 @@ export async function POST(req: NextRequest) {
   const csrfError = requireCsrf(req);
   if (csrfError) return csrfError;
 
-  const user = await requireAdmin(req);
-  if (!user) {
+  const auth = await requireAdmin(req);
+  if (!auth) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
   }
+  const { user, role } = auth;
 
   const supabase = createAdminClient();
   let body: Record<string, any>;
@@ -277,6 +315,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
   const { action } = body;
+
+  // Moderators may only flip free-tier activation gates — reject anything else.
+  if (role === "mod" && !MOD_POST_ACTIONS.has(action)) {
+    return NextResponse.json({ error: "Forbidden for moderator role" }, { status: 403 });
+  }
 
   switch (action) {
     // ── User credit management ──
@@ -627,6 +670,8 @@ export async function POST(req: NextRequest) {
     case "set_activation": {
       const { user_id, activated } = body;
       if (!user_id) return NextResponse.json({ error: "user_id required" }, { status: 400 });
+      const modError = await assertModFreeTarget(supabase, role, user_id);
+      if (modError) return modError;
       const { error } = await supabase
         .from("profiles")
         .update({ is_activated: !!activated })
@@ -639,6 +684,8 @@ export async function POST(req: NextRequest) {
     case "set_claude_activation": {
       const { user_id, activated } = body;
       if (!user_id) return NextResponse.json({ error: "user_id required" }, { status: 400 });
+      const modError = await assertModFreeTarget(supabase, role, user_id);
+      if (modError) return modError;
       const { error } = await supabase
         .from("profiles")
         .update({ claude_activated: !!activated })
