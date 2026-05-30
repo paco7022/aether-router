@@ -1586,23 +1586,32 @@ export async function POST(req: NextRequest) {
     const finishReason =
       (data as { choices?: Array<{ finish_reason?: string | null }> })
         .choices?.[0]?.finish_reason ?? null;
-    const { error: usageLogError } = await supabase.from("usage_logs").insert({
-      user_id: keyInfo.userId,
-      api_key_id: keyInfo.keyId,
-      model_id: modelId,
-      prompt_tokens: promptTokens,
-      completion_tokens: completionTokens,
-      total_tokens: totalTokens,
-      cache_read_tokens: cacheTokens.read,
-      cache_write_tokens: cacheTokens.write,
-      credits_charged: premiumOveragePurchased ? PREMIUM_OVERAGE_COST : (isFreePool ? 0 : chargedCredits),
-      cost_usd: costUsd,
-      status: isFreePool ? "success" : billingStatus,
-      duration_ms: durationMs,
-      premium_cost: premiumCost,
-      source: keyInfo.source,
-      estimated_prompt_tokens: estimatedPrompt,
-      finish_reason: finishReason,
+    const writeTx = !isFreePool && chargedCredits > 0;
+    const settlementSuffix = billingStatus === "success" ? "" : ` [${billingStatus}]`;
+    // One round-trip / one commit for the usage log + ledger entry (see the
+    // log_usage_and_tx function). Credit settlement already happened above, so
+    // a logging failure here is non-fatal — we just record it.
+    const { error: usageLogError } = await supabase.rpc("log_usage_and_tx", {
+      p_user_id: keyInfo.userId,
+      p_api_key_id: keyInfo.keyId,
+      p_model_id: modelId,
+      p_prompt_tokens: promptTokens,
+      p_completion_tokens: completionTokens,
+      p_total_tokens: totalTokens,
+      p_credits_charged: premiumOveragePurchased ? PREMIUM_OVERAGE_COST : (isFreePool ? 0 : chargedCredits),
+      p_cost_usd: costUsd,
+      p_status: isFreePool ? "success" : billingStatus,
+      p_duration_ms: durationMs,
+      p_premium_cost: premiumCost,
+      p_cache_read_tokens: cacheTokens.read,
+      p_cache_write_tokens: cacheTokens.write,
+      p_source: keyInfo.source,
+      p_estimated_prompt_tokens: estimatedPrompt,
+      p_finish_reason: finishReason,
+      p_tx_amount: writeTx ? -chargedCredits : null,
+      p_tx_balance: writeTx ? newBalance : null,
+      p_tx_type: writeTx ? (keyInfo.isCustom ? "custom_key_usage" : "usage") : null,
+      p_tx_description: writeTx ? `${modelId} - ${totalTokens} tokens${settlementSuffix}` : null,
     });
     if (usageLogError) {
       console.error("Failed to write usage log:", usageLogError.message);
@@ -1617,19 +1626,8 @@ export async function POST(req: NextRequest) {
     // (413 in the premium gate) remains the enforcement mechanism. Do NOT
     // re-enable without making debt decay/reset per day first.
 
-    if (!isFreePool && chargedCredits > 0) {
-      const settlementSuffix = billingStatus === "success" ? "" : ` [${billingStatus}]`;
-      const { error: txError } = await supabase.from("transactions").insert({
-        user_id: keyInfo.userId,
-        amount: -chargedCredits,
-        balance: newBalance,
-        type: keyInfo.isCustom ? "custom_key_usage" : "usage",
-        description: `${modelId} - ${totalTokens} tokens${settlementSuffix}`,
-      });
-      if (txError) {
-        console.error("Failed to write transaction log:", txError.message);
-      }
-    }
+    // (transaction ledger row is written together with the usage log above
+    // via log_usage_and_tx)
 
     // Do not return a successful model response when final settlement failed.
     if (!isFreePool && billingStatus === "settlement_failed") {
@@ -1934,25 +1932,35 @@ async function handleStreamingResponse(
     const streamPremiumCost = isPremium && !activeEventId && !isPlanUnlimited
       ? (premiumRequestCostForUsage || getContextAdjustedPremiumRequestCost(model.id, model.provider, Number(model.premium_request_cost ?? 1), estimatedPromptTokens))
       : 0;
-    const { error: usageLogError } = await supabase.from("usage_logs").insert({
-      user_id: keyInfo.userId,
-      api_key_id: keyInfo.keyId,
-      model_id: model.id,
-      prompt_tokens: totalPromptTokens,
-      completion_tokens: totalCompletionTokens,
-      total_tokens: totalTokens,
-      cache_read_tokens: cacheReadTokens,
-      cache_write_tokens: cacheWriteTokens,
-      credits_charged: premiumOverageCharged > 0 ? premiumOverageCharged : chargedCredits,
-      cost_usd: costUsd,
-      status: isFreePool ? "success" : (reason === "aborted" ? "aborted" : billingStatus),
-      duration_ms: durationMs,
-      premium_cost: streamPremiumCost,
-      source: keyInfo.source,
-      estimated_prompt_tokens: estimatedPromptTokens,
+    const writeStreamTx = !isFreePool && chargedCredits > 0;
+    const streamSettlementSuffix = billingStatus === "success" ? "" : ` [${billingStatus}]`;
+    // One round-trip / one commit for usage log + ledger entry (see
+    // log_usage_and_tx). Settlement already happened above; logging is non-fatal.
+    const { error: usageLogError } = await supabase.rpc("log_usage_and_tx", {
+      p_user_id: keyInfo.userId,
+      p_api_key_id: keyInfo.keyId,
+      p_model_id: model.id,
+      p_prompt_tokens: totalPromptTokens,
+      p_completion_tokens: totalCompletionTokens,
+      p_total_tokens: totalTokens,
+      p_credits_charged: premiumOverageCharged > 0 ? premiumOverageCharged : chargedCredits,
+      p_cost_usd: costUsd,
+      p_status: isFreePool ? "success" : (reason === "aborted" ? "aborted" : billingStatus),
+      p_duration_ms: durationMs,
+      p_premium_cost: streamPremiumCost,
+      p_cache_read_tokens: cacheReadTokens,
+      p_cache_write_tokens: cacheWriteTokens,
+      p_source: keyInfo.source,
+      p_estimated_prompt_tokens: estimatedPromptTokens,
       // "aborted" overrides finish_reason — the client cut the stream, so
       // any upstream finish_reason seen so far is incomplete/misleading.
-      finish_reason: reason === "aborted" ? "aborted" : finishReason,
+      p_finish_reason: reason === "aborted" ? "aborted" : finishReason,
+      p_tx_amount: writeStreamTx ? -chargedCredits : null,
+      p_tx_balance: writeStreamTx ? balanceAfter : null,
+      p_tx_type: writeStreamTx ? (keyInfo.isCustom ? "custom_key_usage" : "usage") : null,
+      p_tx_description: writeStreamTx
+        ? `${model.id} - ${totalTokens} tokens (stream${reason === "aborted" ? ":aborted" : ""})${streamSettlementSuffix}`
+        : null,
     });
     if (usageLogError) {
       console.error("Failed to write streaming usage log:", usageLogError.message);
@@ -1963,19 +1971,8 @@ async function handleStreamingResponse(
     // + under-counting estimator was permanently locking free users out of
     // their 15/day. Do NOT re-enable without making debt decay/reset per day.
 
-    if (!isFreePool && chargedCredits > 0) {
-      const settlementSuffix = billingStatus === "success" ? "" : ` [${billingStatus}]`;
-      const { error: txError } = await supabase.from("transactions").insert({
-        user_id: keyInfo.userId,
-        amount: -chargedCredits,
-        balance: balanceAfter,
-        type: keyInfo.isCustom ? "custom_key_usage" : "usage",
-        description: `${model.id} - ${totalTokens} tokens (stream${reason === "aborted" ? ":aborted" : ""})${settlementSuffix}`,
-      });
-      if (txError) {
-        console.error("Failed to write streaming transaction log:", txError.message);
-      }
-    }
+    // (transaction ledger row is written together with the usage log above
+    // via log_usage_and_tx)
 
     try {
       if (activeEventId) {
