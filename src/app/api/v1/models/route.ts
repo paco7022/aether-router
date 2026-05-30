@@ -3,7 +3,20 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 
-export async function GET(req: Request) {
+// The active model list changes rarely (admin toggles), but /v1/models is
+// polled on every dashboard load and by API clients. Cache the built payload
+// in-process with a short TTL so we stop seq-scanning the models table on
+// every request, and let the edge/CDN cache the response for a minute too.
+const CACHE_TTL_MS = 60_000;
+let cache: { body: unknown; expires: number } | null = null;
+
+export async function GET() {
+  if (cache && cache.expires > Date.now()) {
+    return NextResponse.json(cache.body, {
+      headers: { "Cache-Control": "public, max-age=60, s-maxage=60" },
+    });
+  }
+
   const supabase = createAdminClient();
 
   const { data: models, error } = await supabase
@@ -28,8 +41,10 @@ export async function GET(req: Request) {
     capabilities: m.capabilities ?? ["streaming", "system_message"],
   }));
 
-  return NextResponse.json({
-    object: "list",
-    data,
+  const body = { object: "list", data };
+  cache = { body, expires: Date.now() + CACHE_TTL_MS };
+
+  return NextResponse.json(body, {
+    headers: { "Cache-Control": "public, max-age=60, s-maxage=60" },
   });
 }

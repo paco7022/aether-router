@@ -17,6 +17,37 @@ const DEFAULT_PC_ACTIVE_END_HOUR = 22;
 const DEFAULT_TIMEZONE_OFFSET_MINUTES = -360;
 
 const PC_TIMEOUT_MS = 25000;
+
+// PC circuit breaker (per-isolate). When the home PC is down, the old code
+// paid a PC subrequest + up to a 25s timeout on EVERY request before falling
+// back to cloud — which both doubled edge subrequests (the "14M" problem) and
+// added huge latency. Once the PC fails CIRCUIT_FAIL_THRESHOLD times in a row
+// we "open" the circuit and route straight to cloud for CIRCUIT_COOLDOWN_MS,
+// then let a single probe through to see if the PC recovered.
+const CIRCUIT_FAIL_THRESHOLD = 3;
+const CIRCUIT_COOLDOWN_MS = 30_000;
+const pcCircuit = { openUntil: 0, consecutiveFailures: 0 };
+
+function circuitIsOpen() {
+  return Date.now() < pcCircuit.openUntil;
+}
+
+function recordPcSuccess() {
+  pcCircuit.consecutiveFailures = 0;
+  pcCircuit.openUntil = 0;
+}
+
+function recordPcFailure() {
+  pcCircuit.consecutiveFailures += 1;
+  if (pcCircuit.consecutiveFailures >= CIRCUIT_FAIL_THRESHOLD) {
+    pcCircuit.openUntil = Date.now() + CIRCUIT_COOLDOWN_MS;
+  }
+}
+
+// GET endpoints safe to cache at the edge (origin sends a matching
+// Cache-Control). Keeps near-static, frequently-polled reads off the origin.
+const EDGE_CACHEABLE_PATHS = new Set(["/api/v1/models"]);
+
 const ALWAYS_CLOUD_PATHS = ["/api/v1/webhooks/stripe"];
 const RATE_LIMITED_PATHS = new Set([
   "/api/v1/fingerprint/check",
@@ -190,14 +221,17 @@ async function tryPc(request, config) {
     ]);
 
     if (res.status >= 500 && res.status !== 503) {
+      recordPcFailure();
       return { ok: false, reason: `pc-${res.status}` };
     }
 
+    recordPcSuccess();
     return { ok: true, res };
   } catch (e) {
     try {
       ctrl.abort();
     } catch {}
+    recordPcFailure();
     return { ok: false, reason: e.message || "pc-error" };
   }
 }
@@ -215,10 +249,26 @@ function tagResponse(res, tags) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const config = getConfig(env);
     const normalizedPathname = normalizeAppPath(url.pathname);
+
+    // Serve cacheable GETs (e.g. /api/v1/models) from the edge cache so the
+    // frequently-polled, near-static reads never touch PC or cloud origin.
+    const isEdgeCacheable =
+      request.method === "GET" && EDGE_CACHEABLE_PATHS.has(normalizedPathname);
+    if (isEdgeCacheable) {
+      const cache = caches.default;
+      const cacheKey = new Request(url.toString(), { method: "GET" });
+      const hit = await cache.match(cacheKey);
+      if (hit) {
+        return tagResponse(hit, {
+          "x-aether-origin": "edge-cache",
+          ...getCorsHeaders(request, config),
+        });
+      }
+    }
 
     if (RATE_LIMITED_PATHS.has(normalizedPathname)) {
       pruneIpHits();
@@ -254,30 +304,52 @@ export default {
       });
     }
 
-    if (isPcWindow(new Date(), config)) {
+    let finalResponse;
+    let originForCache = null; // raw origin response (no CORS/routing tags)
+
+    const inPcWindow = isPcWindow(new Date(), config);
+
+    if (inPcWindow && !circuitIsOpen()) {
       const pcAttempt = await tryPc(request.clone(), config);
       if (pcAttempt.ok) {
-        return tagResponse(pcAttempt.res, {
+        if (isEdgeCacheable) originForCache = pcAttempt.res.clone();
+        finalResponse = tagResponse(pcAttempt.res, {
           "x-aether-origin": "pc",
           "x-aether-routing-mode": "day-pc-first",
           ...getCorsHeaders(request, config),
         });
+      } else {
+        const cloudRes = await forward(request, config.cloudOrigin, undefined, true);
+        if (isEdgeCacheable) originForCache = cloudRes.clone();
+        finalResponse = tagResponse(cloudRes, {
+          "x-aether-origin": "cloud",
+          "x-aether-routing-mode": "day-pc-fallback",
+          "x-aether-fallback-reason": pcAttempt.reason || "unknown",
+          ...getCorsHeaders(request, config),
+        });
       }
-
+    } else {
+      // Night, or the PC circuit is open: skip the PC probe entirely and go
+      // straight to cloud. This is what kills the duplicate subrequest + 25s
+      // timeout that the PC-first strategy paid on every request when the PC
+      // was down.
       const cloudRes = await forward(request, config.cloudOrigin, undefined, true);
-      return tagResponse(cloudRes, {
+      if (isEdgeCacheable) originForCache = cloudRes.clone();
+      finalResponse = tagResponse(cloudRes, {
         "x-aether-origin": "cloud",
-        "x-aether-routing-mode": "day-pc-fallback",
-        "x-aether-fallback-reason": pcAttempt.reason || "unknown",
+        "x-aether-routing-mode": inPcWindow ? "day-circuit-open" : "night-cloud",
         ...getCorsHeaders(request, config),
       });
     }
 
-    const cloudRes = await forward(request, config.cloudOrigin, undefined, true);
-    return tagResponse(cloudRes, {
-      "x-aether-origin": "cloud",
-      "x-aether-routing-mode": "night-cloud",
-      ...getCorsHeaders(request, config),
-    });
+    // Store cacheable GETs at the edge with NO CORS/routing headers so fresh
+    // CORS is applied per-request and never poisons the cache.
+    if (originForCache && originForCache.ok) {
+      const cache = caches.default;
+      const cacheKey = new Request(url.toString(), { method: "GET" });
+      ctx.waitUntil(cache.put(cacheKey, originForCache));
+    }
+
+    return finalResponse;
   },
 };
