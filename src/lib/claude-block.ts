@@ -30,7 +30,12 @@ const CLAUDE_PAID_ONLY_BYPASS = new Set(["trolllm", "orbit"]);
 // orbit: upstream is a flat-rate Kiro Pro subscription (not pay-as-you-
 // go), so per-user fairness is not load-bearing. Standard premium-pool
 // + context-cap enforcement is enough.
-const CLAUDE_ACTIVATION_BYPASS = new Set(["orbit"]);
+//
+// trolllm (2026-06-02): capacity increased, so t/ is open to everyone —
+// free plan included — with no admin activation needed. Still costs the
+// normal premium-request price (Opus = 6, Sonnet = 3) from the user's
+// premium pool + overage; only the per-user activation gate is lifted.
+const CLAUDE_ACTIVATION_BYPASS = new Set(["orbit", "trolllm"]);
 
 export function claudePaidOnlyApplies(provider: string | null | undefined): boolean {
   return !!provider && !CLAUDE_PAID_ONLY_BYPASS.has(provider);

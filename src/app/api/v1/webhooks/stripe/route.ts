@@ -32,15 +32,17 @@ export async function POST(req: NextRequest) {
 
   const admin = createAdminClient();
 
-  // Idempotency: process each Stripe event only once.
+  // Idempotency: process each Stripe event only once *successfully*.
   //
-  // SECURITY: previously, on retry the row was reset (`processed_at = null`)
-  // and the entire switch re-ran. If `add_credits` had already succeeded but
-  // a later step (e.g. transactions insert, period retrieval) crashed, Stripe
-  // would redeliver and we'd grant credits a second time. We now refuse retry
-  // outright once the row exists — operators must inspect/clear it manually.
-  // Failed-once events are ack'd so Stripe stops retrying; we'd rather
-  // alert+investigate than silently double-spend.
+  // We record the event before processing. On a duplicate delivery:
+  //   - if the prior attempt SUCCEEDED → ack and skip (never re-run a
+  //     completed event — that's what prevents double-grants),
+  //   - if the prior attempt FAILED (success=false) → re-run it. This is safe
+  //     because every side effect below is now idempotent: credit purchases go
+  //     through purchase_credits (keyed on event.id + a unique index), and the
+  //     subscription path guards on stripe_subscription_id. Auto-recovery beats
+  //     the old "refuse retry, fix by hand" model that let a transient failure
+  //     silently strand a paid purchase (incident 2026-06-02).
   const { error: lockError } = await admin
     .from("stripe_webhook_events")
     .insert({
@@ -58,16 +60,18 @@ export async function POST(req: NextRequest) {
         .eq("event_id", event.id)
         .maybeSingle();
 
-      // Always treat the event as already-handled. If the previous attempt
-      // genuinely failed before any side-effect, manual replay (after
-      // deleting the row) is the safe path.
+      if (existing?.success) {
+        return NextResponse.json({ received: true, duplicate: true });
+      }
+      // Prior attempt failed — fall through and retry (side effects are
+      // idempotent).
       console.warn(
-        `[stripe-webhook] duplicate delivery for ${event.id} (success=${existing?.success}, prev_error=${existing?.error}) — refusing to re-run`
+        `[stripe-webhook] retrying previously-failed event ${event.id} (prev_error=${existing?.error})`
       );
-      return NextResponse.json({ received: true, duplicate: true });
+    } else {
+      console.error("Failed to acquire webhook idempotency lock:", lockError);
+      return NextResponse.json({ error: "Webhook lock failed" }, { status: 500 });
     }
-    console.error("Failed to acquire webhook idempotency lock:", lockError);
-    return NextResponse.json({ error: "Webhook lock failed" }, { status: 500 });
   }
 
   try {
@@ -82,35 +86,34 @@ export async function POST(req: NextRequest) {
           const packageId = session.metadata?.package_id;
 
           if (userId && credits > 0) {
-            // Add permanent credits
-            await admin.rpc("add_credits", {
-              p_user_id: userId,
-              p_amount: credits,
-            });
+            // Single atomic, idempotent grant: increments credits, flips the
+            // activation gates (paying auto-approves API keys + Claude routes,
+            // never auto-reverted), and writes the ledger row with the correct
+            // post-grant balance — all in one DB transaction, keyed on the
+            // Stripe event id so a retry can't double-grant.
+            //
+            // CRITICAL: check the result and throw on failure. The previous
+            // code ignored add_credits' error and still wrote the ledger row +
+            // marked the event success, silently losing a paid 50k purchase
+            // (incident 2026-06-02). Throwing routes us to the catch below,
+            // which marks the event failed so Stripe redelivers and we recover.
+            const { data: newBalance, error: grantError } = await admin.rpc(
+              "purchase_credits",
+              {
+                p_user_id: userId,
+                p_amount: credits,
+                p_description: `Purchased ${packageId} (${credits.toLocaleString()} credits)`,
+                p_reference: event.id,
+              }
+            );
 
-            // Log transaction
-            const { data: profile } = await admin
-              .from("profiles")
-              .select("credits")
-              .eq("id", userId)
-              .single();
-
-            await admin.from("transactions").insert({
-              user_id: userId,
-              amount: credits,
-              balance: profile?.credits || 0,
-              type: "purchase",
-              description: `Purchased ${packageId} (${credits.toLocaleString()} credits)`,
-            });
-
-            // Paying for credits flips the API-key activation gate so
-            // the user's keys start working immediately. Same for the
-            // Claude gate — pay-as-you-go credit purchases auto-approve
-            // Claude routes. Once activated we never auto-revert.
-            await admin
-              .from("profiles")
-              .update({ is_activated: true, claude_activated: true })
-              .eq("id", userId);
+            if (grantError || newBalance == null || Number(newBalance) < 0) {
+              throw new Error(
+                `purchase_credits failed for user ${userId} (event ${event.id}): ${
+                  grantError?.message ?? `unexpected balance ${newBalance}`
+                }`
+              );
+            }
           }
         }
 
@@ -124,6 +127,19 @@ export async function POST(req: NextRequest) {
               : session.subscription?.id;
 
           if (userId && planId && stripeSubId) {
+            // Idempotency guard: if we already recorded this Stripe
+            // subscription, a redelivery must not re-cancel/re-insert it or
+            // re-grant the referral bonus. Bail out — it's already handled.
+            const { data: existingSub } = await admin
+              .from("subscriptions")
+              .select("id")
+              .eq("stripe_subscription_id", stripeSubId)
+              .maybeSingle();
+
+            if (existingSub) {
+              break;
+            }
+
             // Deactivate any existing subscriptions
             await admin
               .from("subscriptions")
