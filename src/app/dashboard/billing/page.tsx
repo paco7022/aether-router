@@ -6,6 +6,7 @@ import { BuyCreditsCard } from "@/components/BuyCreditsCard";
 import { ClaimDailyButton } from "@/components/ClaimDailyButton";
 import { GmRequestsCard } from "@/components/GmRequestsCard";
 import { ContextBoostCard } from "@/components/ContextBoostCard";
+import { TDiscountCard } from "@/components/TDiscountCard";
 import { CheckoutFeedback } from "@/components/CheckoutFeedback";
 
 export default async function BillingPage() {
@@ -21,7 +22,7 @@ export default async function BillingPage() {
     { data: packages },
     { data: transactions },
   ] = await Promise.all([
-    supabase.from("profiles").select("credits, daily_credits, plan_id, gm_claimed_date, context_boost_expires_at").eq("id", user!.id).single(),
+    supabase.from("profiles").select("credits, daily_credits, plan_id, gm_claimed_date, context_boost_expires_at, t_discount_expires_at").eq("id", user!.id).single(),
     supabase
       .from("subscriptions")
       .select("*, plans(*)")
@@ -157,6 +158,12 @@ export default async function BillingPage() {
           boostExpiresAt={(profile as unknown as { context_boost_expires_at?: string | null })?.context_boost_expires_at ?? null}
           totalCredits={totalCredits}
         />
+        <div className="mt-4">
+          <TDiscountCard
+            discountExpiresAt={(profile as unknown as { t_discount_expires_at?: string | null })?.t_discount_expires_at ?? null}
+            totalCredits={totalCredits}
+          />
+        </div>
       </div>
 
       {/* Plans */}

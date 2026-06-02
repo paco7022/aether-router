@@ -914,12 +914,20 @@ export async function POST(req: NextRequest) {
       // increment in one transaction. Replaces the prior two SELECTs on
       // usage_logs which had a TOCTOU window — concurrent streams could
       // all pass the check before any log was written.
-      const premiumCost = getContextAdjustedPremiumRequestCost(
+      const basePremiumCost = getContextAdjustedPremiumRequestCost(
         modelId,
         model.provider,
         Number(model.premium_request_cost ?? 1),
         estimatedContext
       );
+      // t/ half-price package: 50k-credit perk halves trolllm premium cost
+      // (Opus 6→3, Sonnet 3→1.5) for 30 days. Only applies to trolllm; the
+      // expiry lives on profiles.t_discount_expires_at.
+      const tDiscountActive =
+        model.provider === "trolllm" &&
+        !!keyInfo.tDiscountExpires &&
+        new Date(keyInfo.tDiscountExpires) > new Date();
+      const premiumCost = tDiscountActive ? basePremiumCost * 0.5 : basePremiumCost;
       premiumRequestCostForUsage = premiumCost;
       // TEMP (2026-04-24): upstream is flaky and users may need to retry quickly;
       // disable the 60s/req rate limit until providers stabilize. Daily limits
