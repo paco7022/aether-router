@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { validateApiKey, validateSession } from "@/lib/auth";
 import { calculateCredits } from "@/lib/credits";
-import { estimateTokens, estimatePromptTokens } from "@/lib/token-estimator";
+import { estimateTokens, estimatePromptTokens, floorPromptTokens } from "@/lib/token-estimator";
 import { getProvider } from "@/lib/providers";
 import {
   isPremiumProvider as isPremiumProviderName,
@@ -1541,11 +1541,21 @@ export async function POST(req: NextRequest) {
           total_tokens: (usage.prompt_tokens ?? 0) + localCompletionEstimate,
         };
       }
-      if ((usage.prompt_tokens ?? 0) <= 0 && localPromptEstimate > 0) {
+      // Prompt-token sanity floor (mirrors the completion floor above): the
+      // billed prompt side can never be smaller than the prompt we actually
+      // forwarded. Some upstreams under-report it (notably Orbit's Anthropic
+      // bridge in streaming). See floorPromptTokens for the cache-aware math.
+      const flooredPrompt = floorPromptTokens(
+        usage.prompt_tokens ?? 0,
+        cacheTokens.read,
+        cacheTokens.write,
+        localPromptEstimate
+      );
+      if (flooredPrompt !== (usage.prompt_tokens ?? 0)) {
         usage = {
           ...usage,
-          prompt_tokens: localPromptEstimate,
-          total_tokens: localPromptEstimate + (usage.completion_tokens ?? 0),
+          prompt_tokens: flooredPrompt,
+          total_tokens: flooredPrompt + (usage.completion_tokens ?? 0),
         };
       }
     }
@@ -1787,10 +1797,18 @@ async function handleStreamingResponse(
       if (observedCompletion > 0 && totalCompletionTokens < observedCompletion) {
         totalCompletionTokens = observedCompletion;
       }
-      // Prompt tokens: upstream said 0 but we know the prompt wasn't empty.
-      if (totalPromptTokens <= 0 && estimatedPromptTokens > 0) {
-        totalPromptTokens = estimatedPromptTokens;
-      }
+      // Prompt-token sanity floor (mirrors the completion floor above): the
+      // billed prompt side can never be smaller than the prompt we actually
+      // forwarded. Some upstreams under-report it in streaming — e.g. Orbit's
+      // Anthropic bridge emits only the visible-message count in
+      // message_start.usage and omits the ~4k system prompt it injects (146 vs
+      // ~4300 tokens for the identical request). See floorPromptTokens.
+      totalPromptTokens = floorPromptTokens(
+        totalPromptTokens,
+        cacheReadTokens,
+        cacheWriteTokens,
+        estimatedPromptTokens
+      );
     }
 
     const totalTokens = totalPromptTokens + totalCompletionTokens;

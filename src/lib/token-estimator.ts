@@ -82,6 +82,36 @@ export function estimatePromptTokens(
   return total;
 }
 
+/**
+ * Sanity floor for upstream-reported prompt tokens.
+ *
+ * The billed prompt side can never be smaller than the prompt we actually
+ * forwarded (measured locally with o200k). Some upstreams under-report it —
+ * notably Orbit's Anthropic bridge, whose streaming `message_start.usage`
+ * emits only the visible-message count and omits the ~4k system prompt it
+ * injects (e.g. 146 vs ~4300 tokens for the identical request, where the
+ * non-stream call reports the full count).
+ *
+ * The comparison is against the FULL prompt side — reported prompt PLUS
+ * already-counted cache read/write tokens — so cached tokens are never
+ * double-counted into the floor. Only the shortfall is added back to the
+ * plain prompt count; a legitimately-higher upstream value is left untouched.
+ */
+export function floorPromptTokens(
+  reportedPrompt: number,
+  cacheRead: number,
+  cacheWrite: number,
+  estimate: number
+): number {
+  const prompt = Number(reportedPrompt) || 0;
+  if (!(estimate > 0)) return prompt;
+  const accounted = prompt + (Number(cacheRead) || 0) + (Number(cacheWrite) || 0);
+  if (estimate > accounted) {
+    return prompt + (estimate - accounted);
+  }
+  return prompt;
+}
+
 function estimateContentTokens(content: unknown): number {
   if (typeof content === "string") return estimateTokens(content);
   if (!Array.isArray(content)) return 0;
