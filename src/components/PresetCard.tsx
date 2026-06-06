@@ -1,9 +1,14 @@
 "use client";
 
-import { useRef, useState, useCallback } from "react";
-import { parseSillyTavernPreset, type UserPreset } from "@/lib/preset";
+import { useMemo, useRef, useState, useCallback } from "react";
+import { parseSillyTavernPreset, validatePreset, type UserPreset, type UserPresetRow } from "@/lib/preset";
 
 const MAX_PRESET_BYTES = 256 * 1024;
+
+const JSON_HEADERS = {
+  "Content-Type": "application/json",
+  "X-Requested-With": "AetherRouter",
+} as const;
 
 interface BuiltinPresetMeta {
   id: string;
@@ -12,7 +17,8 @@ interface BuiltinPresetMeta {
 }
 
 interface Props {
-  initialPreset: UserPreset | null;
+  initialPresets: UserPresetRow[];
+  initialActiveId: string | null;
   initialEnabled: boolean;
   builtinPresets: BuiltinPresetMeta[];
   initialBuiltinId: string | null;
@@ -91,35 +97,40 @@ function SectionHeader({
   title,
   open,
   onToggle,
+  right,
 }: {
   title: string;
   open: boolean;
   onToggle: () => void;
+  right?: React.ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onToggle}
-      className="flex items-center gap-2 w-full text-left cursor-pointer group"
-    >
-      <svg
-        width="12"
-        height="12"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        className="text-[var(--text-dim)] transition-transform duration-200"
-        style={{ transform: open ? "rotate(90deg)" : "rotate(0deg)" }}
+    <div className="flex items-center justify-between gap-2">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex items-center gap-2 text-left cursor-pointer group"
       >
-        <polyline points="9 18 15 12 9 6" />
-      </svg>
-      <span className="text-xs font-semibold uppercase tracking-wider text-[var(--text-dim)] group-hover:text-white/50 transition-colors">
-        {title}
-      </span>
-    </button>
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="text-[var(--text-dim)] transition-transform duration-200"
+          style={{ transform: open ? "rotate(90deg)" : "rotate(0deg)" }}
+        >
+          <polyline points="9 18 15 12 9 6" />
+        </svg>
+        <span className="text-xs font-semibold uppercase tracking-wider text-[var(--text-dim)] group-hover:text-white/50 transition-colors">
+          {title}
+        </span>
+      </button>
+      {right}
+    </div>
   );
 }
 
@@ -129,29 +140,61 @@ function PromptCard({
   prompt,
   index,
   total,
+  expanded,
+  onToggleExpand,
   onChange,
   onDelete,
   onMove,
+  draggable,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  dragging,
 }: {
   prompt: PromptItem;
   index: number;
   total: number;
+  expanded: boolean;
+  onToggleExpand: () => void;
   onChange: (p: PromptItem) => void;
   onDelete: () => void;
   onMove: (dir: -1 | 1) => void;
+  draggable: boolean;
+  onDragStart: () => void;
+  onDragOver: (e: React.DragEvent) => void;
+  onDrop: () => void;
+  dragging: boolean;
 }) {
-  const [expanded, setExpanded] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   return (
     <div
+      onDragOver={draggable ? onDragOver : undefined}
+      onDrop={draggable ? onDrop : undefined}
       className="rounded-xl p-3 transition-colors"
       style={{
         background: prompt.enabled ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.015)",
         border: "1px solid rgba(255,255,255,0.06)",
+        opacity: dragging ? 0.4 : 1,
       }}
     >
       <div className="flex items-center gap-2">
+        {draggable && (
+          <span
+            draggable
+            onDragStart={onDragStart}
+            onDragEnd={onDrop}
+            className="cursor-grab active:cursor-grabbing text-[var(--text-dim)] hover:text-white/50 transition-colors shrink-0 px-0.5"
+            title="Drag to reorder"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+              <circle cx="9" cy="6" r="1.6" /><circle cx="15" cy="6" r="1.6" />
+              <circle cx="9" cy="12" r="1.6" /><circle cx="15" cy="12" r="1.6" />
+              <circle cx="9" cy="18" r="1.6" /><circle cx="15" cy="18" r="1.6" />
+            </svg>
+          </span>
+        )}
+
         <SmallToggle value={prompt.enabled} onChange={(v) => onChange({ ...prompt, enabled: v })} />
 
         {prompt.position === "depth" && (
@@ -197,7 +240,7 @@ function PromptCard({
 
         <button
           type="button"
-          onClick={() => setExpanded((v) => !v)}
+          onClick={onToggleExpand}
           className="p-1 rounded-lg text-[var(--text-dim)] hover:text-white/60 transition-colors cursor-pointer"
           title={expanded ? "Collapse" : "Expand"}
         >
@@ -352,10 +395,10 @@ function PromptCard({
   );
 }
 
-function emptyPreset(): UserPreset {
+function emptyPreset(name = "My Preset"): UserPreset {
   return {
-    version: 1,
-    name: "My Preset",
+    version: 2,
+    name,
     sampling: {},
     prompts: [],
     assistant_prefill: "",
@@ -393,41 +436,53 @@ const SAMPLING_FIELDS: Array<{
 ];
 
 export function PresetCard({
-  initialPreset,
+  initialPresets,
+  initialActiveId,
   initialEnabled,
   builtinPresets,
   initialBuiltinId,
 }: Props) {
+  const [presets, setPresets] = useState<UserPresetRow[]>(initialPresets);
+  const [activeId, setActiveId] = useState<string | null>(initialActiveId);
+  const [selectedId, setSelectedId] = useState<string | null>(
+    initialActiveId ?? initialPresets[0]?.id ?? null
+  );
+  const initialSelected = initialPresets.find((p) => p.id === (initialActiveId ?? initialPresets[0]?.id));
+  const [preset, setPreset] = useState<UserPreset>(initialSelected?.preset ?? emptyPreset());
+
   const [enabled, setEnabled] = useState(initialEnabled);
-  const [preset, setPreset] = useState<UserPreset>(initialPreset ?? emptyPreset());
   const [activeBuiltinId, setActiveBuiltinId] = useState<string | null>(initialBuiltinId);
   const [builtinStatus, setBuiltinStatus] = useState<"idle" | "saving" | "error">("idle");
   const [builtinError, setBuiltinError] = useState("");
+
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState("");
   const [importMsg, setImportMsg] = useState("");
+
   const [samplingOpen, setSamplingOpen] = useState(false);
   const [promptsOpen, setPromptsOpen] = useState(true);
   const [prefillOpen, setPrefillOpen] = useState(false);
+  const [promptSearch, setPromptSearch] = useState("");
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const builtinActive = activeBuiltinId !== null;
+  const selectedRow = presets.find((p) => p.id === selectedId) ?? null;
+  const dirty = selectedRow
+    ? JSON.stringify(selectedRow.preset) !== JSON.stringify(preset)
+    : preset.prompts.length > 0 || Object.keys(preset.sampling).length > 0;
 
   async function setBuiltin(id: string | null) {
     setBuiltinStatus("saving");
     setBuiltinError("");
     const res = await fetch("/api/v1/account/builtin-preset", {
       method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Requested-With": "AetherRouter",
-      },
+      headers: JSON_HEADERS,
       body: JSON.stringify({ builtin_preset_id: id }),
     });
     if (res.ok) {
       setActiveBuiltinId(id);
-      // Server flips preset_enabled=true when activating a built-in;
-      // mirror that locally so the toggle UI stays in sync.
       if (id !== null) setEnabled(true);
       setBuiltinStatus("idle");
     } else {
@@ -437,7 +492,22 @@ export function PresetCard({
     }
   }
 
-  const serializedSize = JSON.stringify({ preset, preset_enabled: enabled }).length;
+  async function setEnabledRemote(v: boolean) {
+    setEnabled(v); // optimistic
+    const res = await fetch("/api/v1/account/preset", {
+      method: "PATCH",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ preset_enabled: v }),
+    });
+    if (!res.ok) {
+      setEnabled(!v); // revert
+      const d = await res.json().catch(() => ({}));
+      setErrorMsg((d as { error?: string }).error ?? "Failed to toggle preset.");
+      setStatus("error");
+    }
+  }
+
+  const serializedSize = JSON.stringify(preset).length;
   const nearLimit = serializedSize > MAX_PRESET_BYTES * 0.85;
   const overLimit = serializedSize > MAX_PRESET_BYTES;
 
@@ -445,27 +515,20 @@ export function PresetCard({
     (key: keyof UserPreset["sampling"], value: number | undefined) => {
       setPreset((p) => {
         const s = { ...p.sampling };
-        if (value === undefined) {
-          delete s[key];
-        } else {
-          s[key] = value;
-        }
+        if (value === undefined) delete s[key];
+        else s[key] = value;
         return { ...p, sampling: s };
       });
     },
     []
   );
 
-  const updatePrompt = useCallback((index: number, updated: PromptItem) => {
-    setPreset((p) => {
-      const prompts = [...p.prompts];
-      prompts[index] = updated;
-      return { ...p, prompts };
-    });
+  const updatePrompt = useCallback((id: string, updated: PromptItem) => {
+    setPreset((p) => ({ ...p, prompts: p.prompts.map((pr) => (pr.id === id ? updated : pr)) }));
   }, []);
 
-  const deletePrompt = useCallback((index: number) => {
-    setPreset((p) => ({ ...p, prompts: p.prompts.filter((_, i) => i !== index) }));
+  const deletePrompt = useCallback((id: string) => {
+    setPreset((p) => ({ ...p, prompts: p.prompts.filter((pr) => pr.id !== id) }));
   }, []);
 
   const movePrompt = useCallback((index: number, dir: -1 | 1) => {
@@ -478,9 +541,49 @@ export function PresetCard({
     });
   }, []);
 
-  const addPrompt = useCallback(() => {
-    setPreset((p) => ({ ...p, prompts: [...p.prompts, newPrompt()] }));
+  const reorderPrompt = useCallback((from: number, to: number) => {
+    setPreset((p) => {
+      if (from === to || from < 0 || to < 0 || from >= p.prompts.length || to >= p.prompts.length) return p;
+      const prompts = [...p.prompts];
+      const [moved] = prompts.splice(from, 1);
+      prompts.splice(to, 0, moved);
+      return { ...p, prompts };
+    });
   }, []);
+
+  const addPrompt = useCallback(() => {
+    const np = newPrompt();
+    setPreset((p) => ({ ...p, prompts: [...p.prompts, np] }));
+    setExpandedIds((s) => new Set(s).add(np.id));
+  }, []);
+
+  const setAllEnabled = useCallback((v: boolean) => {
+    setPreset((p) => ({ ...p, prompts: p.prompts.map((pr) => ({ ...pr, enabled: v })) }));
+  }, []);
+
+  const toggleExpand = useCallback((id: string) => {
+    setExpandedIds((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  function loadRow(row: UserPresetRow | null) {
+    setSelectedId(row?.id ?? null);
+    setPreset(row?.preset ?? emptyPreset());
+    setExpandedIds(new Set());
+    setPromptSearch("");
+    setStatus("idle");
+    setErrorMsg("");
+  }
+
+  function selectPreset(id: string) {
+    if (id === selectedId) return;
+    if (dirty && !confirm("Discard unsaved changes to the current preset?")) return;
+    loadRow(presets.find((p) => p.id === id) ?? null);
+  }
 
   function importFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -489,14 +592,18 @@ export function PresetCard({
     reader.onload = (ev) => {
       try {
         const json = JSON.parse(ev.target?.result as string);
-        const parsed = parseSillyTavernPreset(json);
+        // Round-trip: our own export validates directly; otherwise treat as a
+        // SillyTavern Chat Completion preset and convert.
+        const parsed = validatePreset(json) ? (json as UserPreset) : parseSillyTavernPreset(json);
         setPreset(parsed);
+        setExpandedIds(new Set());
+        setPromptSearch("");
         const depthCount = parsed.prompts.filter((p) => p.position === "depth").length;
         const depthNote = depthCount > 0 ? `, ${depthCount} depth-injected` : "";
         setImportMsg(
-          `Imported ${parsed.prompts.length} prompt${parsed.prompts.length !== 1 ? "s" : ""}${depthNote} from "${parsed.name}"`
+          `Imported ${parsed.prompts.length} prompt${parsed.prompts.length !== 1 ? "s" : ""}${depthNote} from "${parsed.name}" — Save or Save as to keep it`
         );
-        setTimeout(() => setImportMsg(""), 5000);
+        setTimeout(() => setImportMsg(""), 6000);
       } catch (err) {
         setErrorMsg(err instanceof Error ? err.message : "Could not parse JSON file.");
         setStatus("error");
@@ -506,63 +613,177 @@ export function PresetCard({
     reader.readAsText(file);
   }
 
+  function exportPreset() {
+    const blob = new Blob([JSON.stringify(preset, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${preset.name.replace(/[^\w.-]+/g, "_").slice(0, 60) || "preset"}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // Save = update the selected library row, or create one if nothing is selected.
   async function save() {
     if (overLimit) return;
     setStatus("saving");
     setErrorMsg("");
-    const res = await fetch("/api/v1/account/preset", {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Requested-With": "AetherRouter",
-      },
-      body: JSON.stringify({ preset, preset_enabled: enabled }),
-    });
-    if (res.ok) {
+    try {
+      if (selectedId) {
+        const res = await fetch(`/api/v1/account/presets/${selectedId}`, {
+          method: "PATCH",
+          headers: JSON_HEADERS,
+          body: JSON.stringify({ name: preset.name, preset }),
+        });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "Failed to save.");
+        const { preset: row } = (await res.json()) as { preset: UserPresetRow };
+        setPresets((list) => list.map((p) => (p.id === row.id ? row : p)));
+      } else {
+        const { row } = await createPreset(preset.name, preset);
+        setSelectedId(row.id);
+      }
       setStatus("saved");
       setTimeout(() => setStatus("idle"), 2500);
-    } else {
-      const d = await res.json().catch(() => ({}));
-      setErrorMsg((d as { error?: string }).error ?? "Failed to save.");
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Failed to save.");
       setStatus("error");
     }
   }
+
+  async function createPreset(name: string, p: UserPreset): Promise<{ row: UserPresetRow }> {
+    const res = await fetch("/api/v1/account/presets", {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ name, preset: p }),
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "Failed to create preset.");
+    const { preset: row } = (await res.json()) as { preset: UserPresetRow };
+    setPresets((list) => [row, ...list]);
+    return { row };
+  }
+
+  async function newBlankPreset() {
+    if (dirty && !confirm("Discard unsaved changes to the current preset?")) return;
+    setStatus("saving");
+    setErrorMsg("");
+    try {
+      const blank = emptyPreset(`Preset ${presets.length + 1}`);
+      const { row } = await createPreset(blank.name, blank);
+      loadRow(row);
+      setStatus("idle");
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Failed.");
+      setStatus("error");
+    }
+  }
+
+  async function saveAs() {
+    setStatus("saving");
+    setErrorMsg("");
+    try {
+      const copyName = `${preset.name} copy`.slice(0, 120);
+      const { row } = await createPreset(copyName, { ...preset, name: copyName });
+      loadRow(row);
+      setStatus("saved");
+      setTimeout(() => setStatus("idle"), 2500);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Failed.");
+      setStatus("error");
+    }
+  }
+
+  async function activateSelected() {
+    if (overLimit) return;
+    setStatus("saving");
+    setErrorMsg("");
+    try {
+      let id = selectedId;
+      if (!id) {
+        const { row } = await createPreset(preset.name, preset);
+        id = row.id;
+        setSelectedId(id);
+      }
+      const res = await fetch(`/api/v1/account/presets/${id}`, {
+        method: "PATCH",
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ name: preset.name, preset, activate: true }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "Failed to activate.");
+      const { preset: row } = (await res.json()) as { preset: UserPresetRow };
+      setPresets((list) => list.map((p) => (p.id === row.id ? row : p)));
+      setActiveId(id);
+      setActiveBuiltinId(null); // server cleared the built-in selection
+      setEnabled(true);
+      setStatus("saved");
+      setTimeout(() => setStatus("idle"), 2500);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Failed.");
+      setStatus("error");
+    }
+  }
+
+  async function deleteSelected() {
+    if (!selectedId) {
+      loadRow(null);
+      return;
+    }
+    if (!confirm(`Delete preset "${preset.name}"? This cannot be undone.`)) return;
+    setStatus("saving");
+    setErrorMsg("");
+    try {
+      const res = await fetch(`/api/v1/account/presets/${selectedId}`, {
+        method: "DELETE",
+        headers: JSON_HEADERS,
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "Failed to delete.");
+      const remaining = presets.filter((p) => p.id !== selectedId);
+      setPresets(remaining);
+      if (activeId === selectedId) setActiveId(null);
+      loadRow(remaining[0] ?? null);
+      setStatus("idle");
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Failed.");
+      setStatus("error");
+    }
+  }
+
+  const filteredPrompts = useMemo(() => {
+    const q = promptSearch.trim().toLowerCase();
+    return preset.prompts
+      .map((p, realIndex) => ({ p, realIndex }))
+      .filter(({ p }) =>
+        !q || p.name.toLowerCase().includes(q) || p.content.toLowerCase().includes(q)
+      );
+  }, [preset.prompts, promptSearch]);
+
+  const canDrag = promptSearch.trim() === "";
+  const customDisabled = builtinActive;
 
   return (
     <div className="glass-card shimmer-line p-6 mt-6">
       {/* Header */}
       <div className="flex items-center justify-between mb-5">
         <div className="flex items-center gap-2">
-          <svg
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="var(--aurora-cyan)"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="opacity-60"
-          >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--aurora-cyan)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="opacity-60">
             <path d="M12 2L2 7l10 5 10-5-10-5z" />
             <path d="M2 17l10 5 10-5" />
             <path d="M2 12l10 5 10-5" />
           </svg>
-          <h3 className="font-semibold text-white/85">Preset</h3>
+          <h3 className="font-semibold text-white/85">Presets</h3>
         </div>
         <Toggle
           value={enabled}
-          onChange={setEnabled}
-          label={enabled ? "Disable preset" : "Enable preset"}
+          onChange={setEnabledRemote}
+          label={enabled ? "Disable presets" : "Enable presets"}
         />
       </div>
 
       <p className="text-xs text-[var(--text-dim)] mb-5 leading-relaxed">
-        When enabled, this preset is applied to every request, SillyTavern-style: sampling
-        parameters apply (and optionally override the client's), prompts are injected relative to
-        the chat history or at a set depth (the <span className="font-mono">@N</span> badge), macros
-        are resolved, and optional prefill is appended. Import a SillyTavern preset JSON to populate
-        it automatically.
+        Save multiple named presets and switch the active one. The active preset is applied to every
+        request SillyTavern-style: sampling parameters apply (and optionally override the client&apos;s),
+        prompts are injected relative to the chat history or at a set depth (the{" "}
+        <span className="font-mono">@N</span> badge), macros are resolved, and optional prefill is
+        appended. Import a SillyTavern preset JSON to populate one automatically.
       </p>
 
       {/* Aether built-in presets */}
@@ -582,7 +803,7 @@ export function PresetCard({
             </h4>
           </div>
           <p className="text-[11px] text-[var(--text-dim)] mb-3 leading-relaxed">
-            Curated by Aether. When active, the built-in preset overrides your custom one below.
+            Curated by Aether. When active, the built-in preset overrides your own ones below.
             Prompt contents are private and only injected on the server.
           </p>
           <div className="space-y-2">
@@ -594,9 +815,7 @@ export function PresetCard({
                   className="flex items-start gap-3 rounded-lg p-3 transition-colors"
                   style={{
                     background: isActive ? "rgba(139,92,246,0.10)" : "rgba(255,255,255,0.02)",
-                    border: isActive
-                      ? "1px solid rgba(139,92,246,0.35)"
-                      : "1px solid rgba(255,255,255,0.06)",
+                    border: isActive ? "1px solid rgba(139,92,246,0.35)" : "1px solid rgba(255,255,255,0.06)",
                   }}
                 >
                   <div className="flex-1 min-w-0">
@@ -604,19 +823,13 @@ export function PresetCard({
                       <span className="text-sm font-medium text-white/85">{bp.name}</span>
                       {isActive && (
                         <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded"
-                          style={{
-                            background: "rgba(34,211,238,0.15)",
-                            color: "rgba(34,211,238,0.9)",
-                            border: "1px solid rgba(34,211,238,0.25)",
-                          }}
+                          style={{ background: "rgba(34,211,238,0.15)", color: "rgba(34,211,238,0.9)", border: "1px solid rgba(34,211,238,0.25)" }}
                         >
                           Active
                         </span>
                       )}
                     </div>
-                    <p className="text-[11px] text-[var(--text-dim)] mt-1 leading-relaxed">
-                      {bp.description}
-                    </p>
+                    <p className="text-[11px] text-[var(--text-dim)] mt-1 leading-relaxed">{bp.description}</p>
                   </div>
                   <button
                     type="button"
@@ -625,17 +838,8 @@ export function PresetCard({
                     className="shrink-0 px-3 py-1.5 rounded-lg text-xs transition-all cursor-pointer disabled:opacity-50"
                     style={
                       isActive
-                        ? {
-                            background: "rgba(255,255,255,0.05)",
-                            border: "1px solid rgba(255,255,255,0.1)",
-                            color: "rgba(255,255,255,0.7)",
-                          }
-                        : {
-                            background:
-                              "linear-gradient(135deg, rgba(139,92,246,0.3), rgba(34,211,238,0.2))",
-                            border: "1px solid rgba(139,92,246,0.3)",
-                            color: "white",
-                          }
+                        ? { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.7)" }
+                        : { background: "linear-gradient(135deg, rgba(139,92,246,0.3), rgba(34,211,238,0.2))", border: "1px solid rgba(139,92,246,0.3)", color: "white" }
                     }
                   >
                     {isActive ? "Deactivate" : `Activate ${bp.name}`}
@@ -644,51 +848,100 @@ export function PresetCard({
               );
             })}
           </div>
-          {builtinError && (
-            <p className="mt-2 text-xs text-red-400/80">{builtinError}</p>
-          )}
+          {builtinError && <p className="mt-2 text-xs text-red-400/80">{builtinError}</p>}
         </div>
       )}
 
       {/* Notice when a built-in is overriding custom */}
       {builtinActive && (
         <div className="mb-4 rounded-lg px-3 py-2 text-xs leading-relaxed"
-          style={{
-            background: "rgba(251,191,36,0.06)",
-            border: "1px solid rgba(251,191,36,0.18)",
-            color: "rgba(251,191,36,0.85)",
-          }}
+          style={{ background: "rgba(251,191,36,0.06)", border: "1px solid rgba(251,191,36,0.18)", color: "rgba(251,191,36,0.85)" }}
         >
-          A built-in preset is currently active — your custom preset below is not being applied.
-          Deactivate the built-in to use your own.
+          A built-in preset is currently active — your own presets below are not being applied.
+          Deactivate the built-in, or activate one of your presets, to use your own.
         </div>
       )}
 
+      {/* Preset library */}
+      <div className="mb-5 rounded-xl p-4" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)" }}>
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <h4 className="text-xs font-semibold uppercase tracking-wider text-[var(--text-dim)]">
+            My Presets ({presets.length})
+          </h4>
+          <button
+            type="button"
+            onClick={newBlankPreset}
+            className="px-2.5 py-1 rounded-lg text-xs btn-ghost transition-all cursor-pointer flex items-center gap-1.5"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            New
+          </button>
+        </div>
+
+        {presets.length === 0 ? (
+          <p className="text-xs text-[var(--text-dim)] py-1">
+            No saved presets yet. Edit below and hit Save, or import a SillyTavern JSON.
+          </p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {presets.map((row) => {
+              const isSelected = row.id === selectedId;
+              const isActive = row.id === activeId;
+              return (
+                <button
+                  key={row.id}
+                  type="button"
+                  onClick={() => selectPreset(row.id)}
+                  className="px-3 py-1.5 rounded-lg text-xs transition-all cursor-pointer flex items-center gap-1.5 max-w-[16rem]"
+                  style={{
+                    background: isSelected ? "rgba(34,211,238,0.10)" : "rgba(255,255,255,0.03)",
+                    border: isSelected ? "1px solid rgba(34,211,238,0.4)" : "1px solid rgba(255,255,255,0.08)",
+                    color: isSelected ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.6)",
+                  }}
+                  title={isActive ? `${row.name} (active)` : row.name}
+                >
+                  {isActive && (
+                    <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: "rgba(34,211,238,0.9)", boxShadow: "0 0 6px rgba(34,211,238,0.8)" }} />
+                  )}
+                  <span className="truncate">{row.name}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Active / dirty status line */}
+      <div className="flex items-center gap-2 mb-4 flex-wrap text-xs">
+        {selectedRow && activeId === selectedRow.id ? (
+          <span className="px-2 py-0.5 rounded" style={{ background: "rgba(34,211,238,0.12)", color: "rgba(34,211,238,0.9)", border: "1px solid rgba(34,211,238,0.25)" }}>
+            Editing the active preset
+          </span>
+        ) : (
+          <span className="text-[var(--text-dim)]">
+            {selectedRow ? "Editing a saved preset (not active)" : "Unsaved new preset"}
+          </span>
+        )}
+        {dirty && <span className="text-amber-400/80">• unsaved changes</span>}
+      </div>
+
       {/* Preset name */}
       <div className="mb-5">
-        <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider block mb-1">
-          Preset Name
-        </label>
+        <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider block mb-1">Preset Name</label>
         <input
           value={preset.name}
           onChange={(e) => setPreset((p) => ({ ...p, name: e.target.value }))}
           placeholder="My Preset"
           className="w-full rounded-xl text-sm text-white/80 placeholder:text-white/20 focus:outline-none transition-colors"
-          style={{
-            background: "rgba(255,255,255,0.03)",
-            border: "1px solid rgba(255,255,255,0.07)",
-            padding: "0.5rem 0.75rem",
-          }}
+          style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", padding: "0.5rem 0.75rem" }}
         />
       </div>
 
       {/* Sampling */}
       <div className="mb-4">
-        <SectionHeader
-          title="Sampling Parameters"
-          open={samplingOpen}
-          onToggle={() => setSamplingOpen((v) => !v)}
-        />
+        <SectionHeader title="Sampling Parameters" open={samplingOpen} onToggle={() => setSamplingOpen((v) => !v)} />
         {samplingOpen && (
           <div className="mt-3 space-y-2">
             {SAMPLING_FIELDS.map(({ key, label, min, max, step }) => {
@@ -698,28 +951,17 @@ export function PresetCard({
                   <SmallToggle
                     value={active}
                     onChange={(v) => {
-                      if (!v) {
-                        updateSampling(key, undefined);
-                      } else {
+                      if (!v) updateSampling(key, undefined);
+                      else {
                         const defaults: UserPreset["sampling"] = {
-                          temperature: 1,
-                          top_p: 1,
-                          top_k: 0,
-                          frequency_penalty: 0,
-                          presence_penalty: 0,
-                          repetition_penalty: 1,
-                          max_tokens: 2048,
+                          temperature: 1, top_p: 1, top_k: 0, frequency_penalty: 0,
+                          presence_penalty: 0, repetition_penalty: 1, max_tokens: 2048,
                         };
                         updateSampling(key, defaults[key]);
                       }
                     }}
                   />
-                  <span
-                    className="text-xs w-36 shrink-0"
-                    style={{ color: active ? "rgba(255,255,255,0.65)" : "var(--text-dim)" }}
-                  >
-                    {label}
-                  </span>
+                  <span className="text-xs w-36 shrink-0" style={{ color: active ? "rgba(255,255,255,0.65)" : "var(--text-dim)" }}>{label}</span>
                   <input
                     type="number"
                     min={min}
@@ -732,11 +974,7 @@ export function PresetCard({
                       if (!isNaN(v)) updateSampling(key, v);
                     }}
                     className="w-24 rounded-lg text-sm text-white/80 focus:outline-none transition-colors disabled:opacity-30"
-                    style={{
-                      background: "rgba(255,255,255,0.04)",
-                      border: "1px solid rgba(255,255,255,0.07)",
-                      padding: "0.35rem 0.6rem",
-                    }}
+                    style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", padding: "0.35rem 0.6rem" }}
                   />
                 </div>
               );
@@ -748,34 +986,20 @@ export function PresetCard({
       {/* Behaviour */}
       <div className="border-t border-white/[0.04] pt-2">
         <div className="flex items-center gap-3 mb-3 py-1">
-          <SmallToggle
-            value={preset.strip_client_params === true}
-            onChange={(v) => setPreset((p) => ({ ...p, strip_client_params: v }))}
-          />
-          <span className="text-xs text-[var(--text-dim)]">
-            Ignore client sampler params (temp, top_p…) — preset is authoritative
-          </span>
+          <SmallToggle value={preset.strip_client_params === true} onChange={(v) => setPreset((p) => ({ ...p, strip_client_params: v }))} />
+          <span className="text-xs text-[var(--text-dim)]">Ignore client sampler params (temp, top_p…) — preset is authoritative</span>
         </div>
         <div className="flex items-center gap-3 mb-3 py-1">
-          <SmallToggle
-            value={preset.squash_system_messages}
-            onChange={(v) => setPreset((p) => ({ ...p, squash_system_messages: v }))}
-          />
+          <SmallToggle value={preset.squash_system_messages} onChange={(v) => setPreset((p) => ({ ...p, squash_system_messages: v }))} />
           <span className="text-xs text-[var(--text-dim)]">Squash consecutive system messages into one</span>
         </div>
         <div className="flex items-center gap-3 mb-4 py-1">
           <span className="text-xs text-[var(--text-dim)] w-36 shrink-0">Message post-processing</span>
           <select
             value={preset.post_processing ?? "none"}
-            onChange={(e) =>
-              setPreset((p) => ({ ...p, post_processing: e.target.value as UserPreset["post_processing"] }))
-            }
+            onChange={(e) => setPreset((p) => ({ ...p, post_processing: e.target.value as UserPreset["post_processing"] }))}
             className="text-xs rounded-lg px-2 py-1 cursor-pointer focus:outline-none"
-            style={{
-              background: "rgba(255,255,255,0.05)",
-              border: "1px solid rgba(255,255,255,0.08)",
-              color: "rgba(255,255,255,0.7)",
-            }}
+            style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.7)" }}
           >
             <option value="none">None</option>
             <option value="merge">Merge consecutive roles</option>
@@ -791,33 +1015,79 @@ export function PresetCard({
           title={`Prompts (${preset.prompts.length})`}
           open={promptsOpen}
           onToggle={() => setPromptsOpen((v) => !v)}
+          right={
+            preset.prompts.length > 0 ? (
+              <div className="flex items-center gap-2 text-[10px]">
+                <button type="button" onClick={() => setAllEnabled(true)} className="text-[var(--text-dim)] hover:text-cyan-300/80 transition-colors cursor-pointer">Enable all</button>
+                <span className="text-white/10">|</span>
+                <button type="button" onClick={() => setAllEnabled(false)} className="text-[var(--text-dim)] hover:text-white/60 transition-colors cursor-pointer">Disable all</button>
+                <span className="text-white/10">|</span>
+                <button type="button" onClick={() => setExpandedIds(new Set(preset.prompts.map((p) => p.id)))} className="text-[var(--text-dim)] hover:text-white/60 transition-colors cursor-pointer">Expand all</button>
+                <span className="text-white/10">|</span>
+                <button type="button" onClick={() => setExpandedIds(new Set())} className="text-[var(--text-dim)] hover:text-white/60 transition-colors cursor-pointer">Collapse all</button>
+              </div>
+            ) : undefined
+          }
         />
         {promptsOpen && (
           <div className="mt-3 space-y-2">
-            {preset.prompts.length === 0 && (
-              <p className="text-xs text-[var(--text-dim)] py-2">
-                No prompts yet. Import a SillyTavern JSON or add one manually.
-              </p>
+            {preset.prompts.length > 3 && (
+              <div className="relative">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-dim)]">
+                  <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+                <input
+                  value={promptSearch}
+                  onChange={(e) => setPromptSearch(e.target.value)}
+                  placeholder={`Search ${preset.prompts.length} prompts by name or content…`}
+                  className="w-full rounded-lg text-xs text-white/80 placeholder:text-white/25 focus:outline-none"
+                  style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", padding: "0.45rem 0.6rem 0.45rem 2rem" }}
+                />
+                {promptSearch && (
+                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-[var(--text-dim)]">
+                    {filteredPrompts.length} match{filteredPrompts.length !== 1 ? "es" : ""} · drag off
+                  </span>
+                )}
+              </div>
             )}
-            {preset.prompts.map((prompt, i) => (
+
+            {preset.prompts.length === 0 && (
+              <p className="text-xs text-[var(--text-dim)] py-2">No prompts yet. Import a SillyTavern JSON or add one manually.</p>
+            )}
+
+            {filteredPrompts.map(({ p: prompt, realIndex }) => (
               <PromptCard
                 key={prompt.id}
                 prompt={prompt}
-                index={i}
+                index={realIndex}
                 total={preset.prompts.length}
-                onChange={(updated) => updatePrompt(i, updated)}
-                onDelete={() => deletePrompt(i)}
-                onMove={(dir) => movePrompt(i, dir)}
+                expanded={expandedIds.has(prompt.id)}
+                onToggleExpand={() => toggleExpand(prompt.id)}
+                onChange={(updated) => updatePrompt(prompt.id, updated)}
+                onDelete={() => deletePrompt(prompt.id)}
+                onMove={(dir) => movePrompt(realIndex, dir)}
+                draggable={canDrag}
+                dragging={dragIndex === realIndex}
+                onDragStart={() => setDragIndex(realIndex)}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={() => {
+                  if (dragIndex !== null && dragIndex !== realIndex) reorderPrompt(dragIndex, realIndex);
+                  setDragIndex(null);
+                }}
               />
             ))}
+
+            {promptSearch && filteredPrompts.length === 0 && (
+              <p className="text-xs text-[var(--text-dim)] py-2">No prompts match “{promptSearch}”.</p>
+            )}
+
             <button
               type="button"
               onClick={addPrompt}
               className="mt-1 px-3 py-1.5 rounded-xl text-xs btn-ghost transition-all cursor-pointer flex items-center gap-1.5"
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="12" y1="5" x2="12" y2="19" />
-                <line x1="5" y1="12" x2="19" y2="12" />
+                <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
               </svg>
               Add Prompt
             </button>
@@ -827,18 +1097,11 @@ export function PresetCard({
 
       {/* Assistant prefill */}
       <div className="mb-5 border-t border-white/[0.04] pt-4">
-        <SectionHeader
-          title="Assistant Prefill"
-          open={prefillOpen}
-          onToggle={() => setPrefillOpen((v) => !v)}
-        />
+        <SectionHeader title="Assistant Prefill" open={prefillOpen} onToggle={() => setPrefillOpen((v) => !v)} />
         {prefillOpen && (
           <div className="mt-3">
             <div className="flex items-center gap-3 mb-3">
-              <SmallToggle
-                value={preset.prefill_enabled}
-                onChange={(v) => setPreset((p) => ({ ...p, prefill_enabled: v }))}
-              />
+              <SmallToggle value={preset.prefill_enabled} onChange={(v) => setPreset((p) => ({ ...p, prefill_enabled: v }))} />
               <span className="text-xs text-[var(--text-dim)]">Enable assistant prefill</span>
             </div>
             <textarea
@@ -848,12 +1111,7 @@ export function PresetCard({
               rows={4}
               disabled={!preset.prefill_enabled}
               className="w-full rounded-xl text-sm text-white/80 resize-y placeholder:text-white/20 focus:outline-none transition-colors disabled:opacity-40"
-              style={{
-                background: "rgba(255,255,255,0.03)",
-                border: "1px solid rgba(255,255,255,0.07)",
-                padding: "0.75rem 1rem",
-                fontFamily: "inherit",
-              }}
+              style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", padding: "0.75rem 1rem", fontFamily: "inherit" }}
             />
             <p className="mt-1.5 text-[10px] text-[var(--text-dim)] leading-relaxed">
               Only applied on providers that accept a trailing assistant turn as a prefill signal
@@ -865,71 +1123,81 @@ export function PresetCard({
 
       {/* Size warning */}
       {nearLimit && (
-        <p
-          className="mb-3 text-xs font-mono"
-          style={{ color: overLimit ? "rgba(239,68,68,0.8)" : "rgba(251,191,36,0.7)" }}
-        >
+        <p className="mb-3 text-xs font-mono" style={{ color: overLimit ? "rgba(239,68,68,0.8)" : "rgba(251,191,36,0.7)" }}>
           Preset size: {(serializedSize / 1024).toFixed(1)} KB / 256 KB
           {overLimit && " — exceeds limit, cannot save"}
         </p>
       )}
 
-      {/* Import confirmation */}
-      {importMsg && (
-        <p className="mb-3 text-xs" style={{ color: "rgba(34,211,238,0.8)" }}>
-          {importMsg}
-        </p>
-      )}
+      {importMsg && <p className="mb-3 text-xs" style={{ color: "rgba(34,211,238,0.8)" }}>{importMsg}</p>}
 
       {/* Actions */}
-      <div className="flex items-center gap-3 flex-wrap">
+      <div className="flex items-center gap-2 flex-wrap">
         <button
           type="button"
           onClick={save}
           disabled={status === "saving" || overLimit}
           className="px-4 py-2 rounded-xl text-sm font-medium text-white transition-all cursor-pointer disabled:opacity-50"
-          style={{
-            background: "linear-gradient(135deg, rgba(139,92,246,0.35), rgba(34,211,238,0.25))",
-            border: "1px solid rgba(139,92,246,0.25)",
-          }}
+          style={{ background: "linear-gradient(135deg, rgba(139,92,246,0.35), rgba(34,211,238,0.25))", border: "1px solid rgba(139,92,246,0.25)" }}
         >
           {status === "saving" ? "Saving..." : status === "saved" ? "Saved" : "Save"}
         </button>
 
         <button
           type="button"
-          onClick={() => fileRef.current?.click()}
-          className="px-4 py-2 rounded-xl text-sm btn-ghost transition-all cursor-pointer flex items-center gap-1.5"
+          onClick={activateSelected}
+          disabled={status === "saving" || overLimit || (selectedRow !== null && activeId === selectedRow.id && !dirty && enabled && !builtinActive)}
+          className="px-4 py-2 rounded-xl text-sm font-medium transition-all cursor-pointer disabled:opacity-40"
+          style={{ background: "rgba(34,211,238,0.12)", border: "1px solid rgba(34,211,238,0.3)", color: "rgba(34,211,238,0.95)" }}
+          title="Save, make this the active preset, and turn presets on"
         >
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <polyline points="17 8 12 3 7 8" />
-            <line x1="12" y1="3" x2="12" y2="15" />
+          {selectedRow && activeId === selectedRow.id && !builtinActive ? "Re-apply" : "Activate"}
+        </button>
+
+        <button type="button" onClick={saveAs} disabled={status === "saving"} className="px-3 py-2 rounded-xl text-xs btn-ghost transition-all cursor-pointer disabled:opacity-50">
+          Save as…
+        </button>
+
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          className="px-3 py-2 rounded-xl text-xs btn-ghost transition-all cursor-pointer flex items-center gap-1.5"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
           </svg>
-          Import SillyTavern JSON
+          Import JSON
         </button>
         <input ref={fileRef} type="file" accept=".json" className="hidden" onChange={importFile} />
 
         <button
           type="button"
-          onClick={() => setPreset(emptyPreset())}
-          className="px-3 py-2 rounded-xl text-xs text-[var(--text-dim)] hover:text-white/60 transition-all cursor-pointer"
+          onClick={exportPreset}
+          className="px-3 py-2 rounded-xl text-xs btn-ghost transition-all cursor-pointer flex items-center gap-1.5"
+          title="Download this preset as JSON"
         >
-          Reset
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+          Export
+        </button>
+
+        <button
+          type="button"
+          onClick={deleteSelected}
+          disabled={status === "saving"}
+          className="px-3 py-2 rounded-xl text-xs text-[var(--text-dim)] hover:text-red-400/80 transition-all cursor-pointer disabled:opacity-50 ml-auto"
+        >
+          {selectedRow ? "Delete preset" : "Clear"}
         </button>
       </div>
 
-      {status === "error" && errorMsg && (
-        <p className="mt-3 text-xs text-red-400/80">{errorMsg}</p>
+      {status === "error" && errorMsg && <p className="mt-3 text-xs text-red-400/80">{errorMsg}</p>}
+
+      {customDisabled && (
+        <p className="mt-3 text-[10px] text-[var(--text-dim)]">
+          Tip: activating one of your presets automatically turns off the Aether built-in.
+        </p>
       )}
     </div>
   );

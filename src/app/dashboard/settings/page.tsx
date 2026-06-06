@@ -1,7 +1,9 @@
 import { createServerSupabase } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { DeleteAccountButton } from "@/components/DeleteAccountButton";
 import { PresetCard } from "@/components/PresetCard";
 import { listPublicBuiltinPresets } from "@/lib/builtinPresets";
+import type { UserPresetRow } from "@/lib/preset";
 
 export default async function SettingsPage() {
   const supabase = await createServerSupabase();
@@ -11,9 +13,16 @@ export default async function SettingsPage() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("display_name, created_at, preset, preset_enabled, builtin_preset_id")
+    .select("display_name, created_at, preset_enabled, builtin_preset_id, active_preset_id")
     .eq("id", user!.id)
     .single();
+
+  const admin = createAdminClient();
+  const { data: presetRows } = await admin
+    .from("user_presets")
+    .select("id, name, preset, updated_at")
+    .eq("user_id", user!.id)
+    .order("updated_at", { ascending: false });
 
   const builtinPresets = listPublicBuiltinPresets();
 
@@ -70,7 +79,8 @@ export default async function SettingsPage() {
       </div>
 
       <PresetCard
-        initialPreset={profile?.preset ?? null}
+        initialPresets={(presetRows ?? []) as UserPresetRow[]}
+        initialActiveId={profile?.active_preset_id ?? null}
         initialEnabled={profile?.preset_enabled ?? false}
         builtinPresets={builtinPresets}
         initialBuiltinId={profile?.builtin_preset_id ?? null}
