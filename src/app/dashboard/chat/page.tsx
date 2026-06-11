@@ -23,10 +23,34 @@ type Message = {
   id: string;
   role: "user" | "assistant" | "system";
   content: unknown;
+  reasoning?: string | null;
   model_id?: string | null;
   error?: string | null;
   created_at: string;
 };
+
+// Split inline <think>/<thinking> reasoning out of a message body. Handles
+// multiple blocks and an unclosed trailing block (mid-stream). Returns the
+// extracted reasoning and the visible body with the tags removed.
+function splitThink(text: string): { reasoning: string; body: string } {
+  if (!text.includes("<think>") && !text.includes("<thinking>")) {
+    return { reasoning: "", body: text };
+  }
+  const parts: string[] = [];
+  let body = text.replace(/<think(?:ing)?>([\s\S]*?)<\/think(?:ing)?>/g, (_m, inner) => {
+    const t = String(inner).trim();
+    if (t) parts.push(t);
+    return "";
+  });
+  // Unclosed trailing block while the model is still emitting its reasoning.
+  const openMatch = body.match(/<think(?:ing)?>/);
+  if (openMatch && openMatch.index !== undefined) {
+    const tail = body.slice(openMatch.index + openMatch[0].length).trim();
+    if (tail) parts.push(tail);
+    body = body.slice(0, openMatch.index);
+  }
+  return { reasoning: parts.join("\n\n").trim(), body: body.trim() };
+}
 
 type Model = {
   id: string;
@@ -85,6 +109,7 @@ export default function ChatPage() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [streamingText, setStreamingText] = useState("");
+  const [streamingReasoning, setStreamingReasoning] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [activeArtifactId, setActiveArtifactId] = useState<string | null>(null);
@@ -103,14 +128,33 @@ export default function ChatPage() {
     const map = new Map<string, ReturnType<typeof parseMessage>>();
     for (const m of messages) {
       if (m.role === "assistant") {
-        map.set(m.id, parseMessage(m.id, extractText(m.content)));
+        map.set(m.id, parseMessage(m.id, splitThink(extractText(m.content)).body));
       }
     }
     if (streaming) {
-      map.set("__streaming__", parseMessage("__streaming__", streamingText));
+      map.set("__streaming__", parseMessage("__streaming__", splitThink(streamingText).body));
     }
     return map;
   }, [messages, streaming, streamingText]);
+
+  // Reasoning to show per message: the persisted `reasoning` column (from
+  // reasoning_content deltas) merged with any inline <think> block in the body.
+  const reasoningByMsgId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const m of messages) {
+      if (m.role === "assistant") {
+        const inline = splitThink(extractText(m.content)).reasoning;
+        const combined = [m.reasoning ?? "", inline].filter(Boolean).join("\n\n").trim();
+        if (combined) map.set(m.id, combined);
+      }
+    }
+    if (streaming) {
+      const inline = splitThink(streamingText).reasoning;
+      const combined = [streamingReasoning, inline].filter(Boolean).join("\n\n").trim();
+      if (combined) map.set("__streaming__", combined);
+    }
+    return map;
+  }, [messages, streaming, streamingText, streamingReasoning]);
 
   const allArtifacts = useMemo<Artifact[]>(() => {
     const out: Artifact[] = [];
@@ -361,6 +405,7 @@ export default function ChatPage() {
       const decoder = new TextDecoder();
       let buffer = "";
       let assembled = "";
+      let assembledReasoning = "";
 
       while (true) {
         const { value, done } = await reader.read();
@@ -383,12 +428,17 @@ export default function ChatPage() {
 
           try {
             const parsed = JSON.parse(dataLine) as {
-              choices?: Array<{ delta?: { content?: unknown } }>;
+              choices?: Array<{ delta?: { content?: unknown; reasoning_content?: unknown } }>;
             };
             const delta = parsed.choices?.[0]?.delta?.content;
             if (typeof delta === "string") {
               assembled += delta;
               setStreamingText(assembled);
+            }
+            const reasoningDelta = parsed.choices?.[0]?.delta?.reasoning_content;
+            if (typeof reasoningDelta === "string") {
+              assembledReasoning += reasoningDelta;
+              setStreamingReasoning(assembledReasoning);
             }
           } catch {
             // skip non-JSON lines
@@ -403,13 +453,14 @@ export default function ChatPage() {
     } finally {
       setStreaming(false);
       setStreamingText("");
+      setStreamingReasoning("");
     }
   }
 
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [messages, streamingText]);
+  }, [messages, streamingText, streamingReasoning]);
 
   const activeConversation = conversations.find((c) => c.id === activeId);
 
@@ -556,9 +607,10 @@ export default function ChatPage() {
               <MessageBubble
                 key={m.id}
                 role={m.role}
-                text={extractText(m.content)}
+                text={splitThink(extractText(m.content)).body}
                 images={extractImages(m.content)}
                 error={m.error ?? null}
+                reasoning={reasoningByMsgId.get(m.id) ?? null}
                 segments={parsed?.segments ?? null}
                 artifactsById={artifactsById}
                 activeArtifactId={activeArtifactId}
@@ -570,9 +622,10 @@ export default function ChatPage() {
           {streaming && (
             <MessageBubble
               role="assistant"
-              text={streamingText}
+              text={splitThink(streamingText).body}
               images={[]}
               pulsing
+              reasoning={reasoningByMsgId.get("__streaming__") ?? null}
               segments={parsedByMsgId.get("__streaming__")?.segments ?? null}
               artifactsById={artifactsById}
               activeArtifactId={activeArtifactId}
@@ -701,6 +754,7 @@ function MessageBubble({
   images,
   error,
   pulsing,
+  reasoning,
   segments,
   artifactsById,
   activeArtifactId,
@@ -711,6 +765,7 @@ function MessageBubble({
   images: string[];
   error?: string | null;
   pulsing?: boolean;
+  reasoning?: string | null;
   segments?: import("@/lib/chat/artifacts").Segment[] | null;
   artifactsById?: Map<string, Artifact>;
   activeArtifactId?: string | null;
@@ -718,6 +773,7 @@ function MessageBubble({
 }) {
   const isUser = role === "user";
   const hasArtifact = (segments ?? []).some((s) => s.kind === "artifact-ref");
+  const [showReasoning, setShowReasoning] = useState(true);
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
@@ -730,6 +786,30 @@ function MessageBubble({
           color: "rgba(240, 240, 255, 0.92)",
         }}
       >
+        {!isUser && reasoning && (
+          <div
+            className="mb-2 rounded-lg overflow-hidden"
+            style={{ background: "rgba(34, 211, 238, 0.05)", border: "1px solid rgba(34, 211, 238, 0.14)" }}
+          >
+            <button
+              type="button"
+              onClick={() => setShowReasoning((v) => !v)}
+              className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium text-cyan-200/80 hover:text-cyan-100 transition-colors"
+            >
+              <span>{showReasoning ? "▾" : "▸"}</span>
+              <span>💭 Reasoning</span>
+              {pulsing && <span className="opacity-60">· thinking…</span>}
+            </button>
+            {showReasoning && (
+              <div
+                className="px-3 pb-2.5 pt-0.5 text-xs leading-relaxed text-cyan-100/55 max-h-72 overflow-y-auto"
+                style={{ whiteSpace: "pre-wrap" }}
+              >
+                {reasoning}
+              </div>
+            )}
+          </div>
+        )}
         {images.length > 0 && (
           <div className="mb-2 flex gap-2 flex-wrap">
             {images.map((src, i) => (

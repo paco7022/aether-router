@@ -28,11 +28,14 @@ export async function getAdminRole(): Promise<AdminIdentity | null> {
   const admin = createAdminClient();
   const { data: profile } = await admin
     .from("profiles")
-    .select("plan_id")
+    .select("plan_id, is_moderator")
     .eq("id", user.id)
     .single();
 
-  if (profile?.plan_id === "mod") {
+  // Moderator role is granted either by the gifted `mod` plan or by the
+  // explicit is_moderator flag (which lets paying users moderate without
+  // losing their plan).
+  if (profile?.plan_id === "mod" || profile?.is_moderator === true) {
     return { userId: user.id, email: user.email ?? null, role: "mod" };
   }
 

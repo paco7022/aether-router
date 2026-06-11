@@ -81,7 +81,7 @@ export async function GET(_req: NextRequest, { params }: Ctx) {
 
   const { data: messages } = await supabase
     .from("chat_messages")
-    .select("id, role, content, model_id, prompt_tokens, completion_tokens, credits_charged, error, created_at")
+    .select("id, role, content, reasoning, model_id, prompt_tokens, completion_tokens, credits_charged, error, created_at")
     .eq("conversation_id", id)
     .eq("user_id", user.id)
     .order("created_at", { ascending: true });

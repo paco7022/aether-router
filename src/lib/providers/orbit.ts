@@ -279,7 +279,7 @@ function makeAnthropicToOpenAIStreamTransform(
     }
 
     if (type === "content_block_delta") {
-      const delta = parsed.delta as { type?: string; text?: string } | undefined;
+      const delta = parsed.delta as { type?: string; text?: string; thinking?: string } | undefined;
       if (delta?.type === "text_delta" && typeof delta.text === "string" && delta.text) {
         emit(controller, {
           id,
@@ -287,6 +287,18 @@ function makeAnthropicToOpenAIStreamTransform(
           created,
           model,
           choices: [{ index: 0, delta: { content: delta.text }, finish_reason: null }],
+        });
+      }
+      // Surface extended-thinking blocks as `reasoning_content` (the DeepSeek/
+      // OpenAI-compat convention) instead of dropping them, so clients that
+      // want to show the model's reasoning can. `signature_delta` is ignored.
+      if (delta?.type === "thinking_delta" && typeof delta.thinking === "string" && delta.thinking) {
+        emit(controller, {
+          id,
+          object: "chat.completion.chunk",
+          created,
+          model,
+          choices: [{ index: 0, delta: { reasoning_content: delta.thinking }, finish_reason: null }],
         });
       }
       return;

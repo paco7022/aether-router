@@ -255,6 +255,7 @@ export async function POST(req: NextRequest, { params }: Ctx) {
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
   let completionText = "";
+  let reasoningText = "";
   let promptTokens = 0;
   let completionTokens = 0;
   let creditsCharged: number | null = null;
@@ -292,7 +293,7 @@ export async function POST(req: NextRequest, { params }: Ctx) {
             try {
               const parsed = JSON.parse(payload) as {
                 usage?: { prompt_tokens?: number; completion_tokens?: number };
-                choices?: Array<{ delta?: { content?: unknown } }>;
+                choices?: Array<{ delta?: { content?: unknown; reasoning_content?: unknown } }>;
               };
               if (parsed.usage) {
                 promptTokens = parsed.usage.prompt_tokens ?? promptTokens;
@@ -300,6 +301,8 @@ export async function POST(req: NextRequest, { params }: Ctx) {
               }
               const delta = parsed.choices?.[0]?.delta?.content;
               if (typeof delta === "string") completionText += delta;
+              const reasoningDelta = parsed.choices?.[0]?.delta?.reasoning_content;
+              if (typeof reasoningDelta === "string") reasoningText += reasoningDelta;
             } catch {
               // ignore non-JSON lines
             }
@@ -334,6 +337,7 @@ export async function POST(req: NextRequest, { params }: Ctx) {
               user_id: user!.id,
               role: "assistant",
               content: { type: "text", text: completionText },
+              reasoning: reasoningText || null,
               model_id: conv.model_id,
               prompt_tokens: promptTokens || null,
               completion_tokens: completionTokens || null,

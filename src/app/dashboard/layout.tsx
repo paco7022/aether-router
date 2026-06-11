@@ -48,9 +48,10 @@ export default function DashboardLayout({
         dailyCredits: profile?.daily_credits || 0,
         planName: (profile?.plans as { name: string } | null)?.name,
       });
-      // Show the Admin link to real admins AND gifted moderators (plan `mod`).
-      // The admin page + API enforce what each role can actually do.
-      setIsAdmin(checkAdmin(authUser.email) || profile?.plan_id === "mod");
+      // Show the Admin link to real admins AND moderators (gifted `mod` plan
+      // or the is_moderator flag). The admin page + API enforce what each role
+      // can actually do.
+      setIsAdmin(checkAdmin(authUser.email) || profile?.plan_id === "mod" || profile?.is_moderator === true);
       setLoading(false);
     }
 

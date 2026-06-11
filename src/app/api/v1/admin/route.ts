@@ -5,6 +5,7 @@ import { API_KEY_PREFIX } from "@/lib/constants";
 import { requireCsrf } from "@/lib/csrf";
 import { banUserForViolation } from "@/lib/content-moderation";
 import { getAdminRole, type AdminRole } from "@/lib/admin-role";
+import { isAdmin } from "@/lib/admin";
 
 // Escape LIKE/ILIKE wildcards so user input is treated literally.
 function escapeLike(input: string): string {
@@ -12,10 +13,32 @@ function escapeLike(input: string): string {
 }
 
 // GET actions a "mod" (gifted moderator) may call. Everything else is admin-only.
-const MOD_GET_ACTIONS = new Set(["whoami", "users"]);
-// POST actions a "mod" may call. Both are further restricted to free-tier
-// targets inside their handlers.
-const MOD_POST_ACTIONS = new Set(["set_activation", "set_claude_activation"]);
+// Mods get read access to the data they need to moderate (users, their keys,
+// device fingerprints, the review queue, basic stats) but never billing data
+// (plans, models, custom keys, events).
+const MOD_GET_ACTIONS = new Set([
+  "whoami",
+  "stats",
+  "users",
+  "keys",
+  "fingerprints",
+  "moderation_reviews",
+]);
+// POST actions a "mod" may call. Money-touching actions (credits, plans,
+// models, custom keys, events) are NEVER in this set. The activation toggles
+// are further restricted to free-tier targets; the ban/key actions are
+// further restricted to non-staff targets — both inside their handlers.
+const MOD_POST_ACTIONS = new Set([
+  "set_activation",
+  "set_claude_activation",
+  "review_dismiss",
+  "review_ban",
+  "ban_fingerprint",
+  "unban_fingerprint",
+  "ban_ip",
+  "unban_ip",
+  "toggle_key",
+]);
 
 async function requireAdmin(
   _req: NextRequest,
@@ -43,6 +66,54 @@ async function assertModFreeTarget(
       { error: "Moderators can only toggle free-tier users" },
       { status: 403 },
     );
+  }
+  return null;
+}
+
+// Moderators may moderate regular users (free or paid) but never act on staff
+// accounts — admins (env allowlist) or other moderators (plan `mod`). Returns a
+// 403 response when a mod targets a staff account; null otherwise.
+async function assertModNotProtectedUser(
+  supabase: ReturnType<typeof createAdminClient>,
+  role: AdminRole,
+  userId: string,
+): Promise<NextResponse | null> {
+  if (role !== "mod") return null;
+  const { data } = await supabase
+    .from("profiles")
+    .select("id, email, plan_id, is_moderator")
+    .eq("id", userId)
+    .single();
+  if (data && (data.plan_id === "mod" || data.is_moderator === true || isAdmin(data.email, data.id))) {
+    return NextResponse.json(
+      { error: "Moderators cannot act on staff accounts" },
+      { status: 403 },
+    );
+  }
+  return null;
+}
+
+// Same staff protection for device-level bans: block a mod from banning a
+// fingerprint/IP that any staff account has used.
+async function assertModNotProtectedDevice(
+  supabase: ReturnType<typeof createAdminClient>,
+  role: AdminRole,
+  opts: { fingerprint?: string; ip?: string },
+): Promise<NextResponse | null> {
+  if (role !== "mod") return null;
+  let query = supabase.from("device_fingerprints").select("profiles(id, email, plan_id, is_moderator)");
+  if (opts.fingerprint) query = query.eq("fingerprint", opts.fingerprint);
+  else if (opts.ip) query = query.eq("ip_address", opts.ip);
+  else return null;
+  const { data } = await query;
+  for (const row of data || []) {
+    const p = row.profiles as unknown as { id: string; email: string | null; plan_id: string; is_moderator: boolean } | null;
+    if (p && (p.plan_id === "mod" || p.is_moderator === true || isAdmin(p.email, p.id))) {
+      return NextResponse.json(
+        { error: "Moderators cannot ban a device used by staff accounts" },
+        { status: 403 },
+      );
+    }
   }
   return null;
 }
@@ -385,6 +456,14 @@ export async function POST(req: NextRequest) {
     // ── API key management ──
     case "toggle_key": {
       const { key_id, is_active } = body;
+      if (!key_id) return NextResponse.json({ error: "key_id required" }, { status: 400 });
+      if (role === "mod") {
+        const { data: keyRow } = await supabase.from("api_keys").select("user_id").eq("id", key_id).single();
+        if (keyRow) {
+          const guard = await assertModNotProtectedUser(supabase, role, keyRow.user_id);
+          if (guard) return guard;
+        }
+      }
       const { error } = await supabase.from("api_keys").update({ is_active }).eq("id", key_id);
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
       return NextResponse.json({ ok: true });
@@ -461,6 +540,8 @@ export async function POST(req: NextRequest) {
     case "ban_fingerprint": {
       const { fingerprint, reason } = body;
       if (!fingerprint) return NextResponse.json({ error: "fingerprint required" }, { status: 400 });
+      const deviceGuard = await assertModNotProtectedDevice(supabase, role, { fingerprint });
+      if (deviceGuard) return deviceGuard;
       const { error } = await supabase.from("banned_fingerprints").upsert(
         { fingerprint, reason: reason || "Banned by admin", banned_by: user.email },
         { onConflict: "fingerprint" }
@@ -484,6 +565,9 @@ export async function POST(req: NextRequest) {
       if (!normalizedIp || normalizedIp === "unknown") {
         return NextResponse.json({ error: "valid ip_address required" }, { status: 400 });
       }
+
+      const ipDeviceGuard = await assertModNotProtectedDevice(supabase, role, { ip: normalizedIp });
+      if (ipDeviceGuard) return ipDeviceGuard;
 
       const { error } = await supabase.from("banned_fingerprints").upsert(
         { ip_address: normalizedIp, reason: reason || "IP banned by admin", banned_by: user.email },
@@ -723,6 +807,9 @@ export async function POST(req: NextRequest) {
       if (fetchErr || !review) {
         return NextResponse.json({ error: fetchErr?.message || "Review not found" }, { status: 404 });
       }
+
+      const reviewGuard = await assertModNotProtectedUser(supabase, role, review.user_id);
+      if (reviewGuard) return reviewGuard;
 
       await banUserForViolation({
         userId: review.user_id,
