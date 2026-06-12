@@ -7,7 +7,10 @@
 
 // Run with: npx tsx scripts/test-orbit-adapter.mjs
 
-process.env.ORBIT_API_KEY ||= "sk-orbit-08709a12c536de4e84354a7442451719";
+if (!process.env.ORBIT_API_KEY) {
+  console.error("ORBIT_API_KEY is required. Set it in your env before running this smoke-test.");
+  process.exit(1);
+}
 
 const { orbitProvider } = await import("../src/lib/providers/orbit.ts");
 
