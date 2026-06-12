@@ -40,6 +40,21 @@ export function calculateCredits(
   return { credits, costUsd };
 }
 
+// Flat per-token billing for enterprise contracts (api_keys.pricing_mode =
+// 'flat_per_token'). Every token — prompt + completion, including cached —
+// is billed at `ratePerMTokens` USD per 1M tokens. No margin, no cache
+// discount: the contract is a flat $/token, so all tokens count equally.
+// e.g. rate=3 → 30,000 credits per 1M tokens (CREDITS_PER_USD=10000).
+export function flatTokenCredits(
+  promptTokens: number,
+  completionTokens: number,
+  ratePerMTokens: number
+): { credits: number; costUsd: number } {
+  const tokens = Math.max(promptTokens, 0) + Math.max(completionTokens, 0);
+  const costUsd = (tokens / 1_000_000) * ratePerMTokens;
+  return { credits: Math.ceil(costUsd * CREDITS_PER_USD), costUsd };
+}
+
 export function creditsToUsd(credits: number): number {
   return credits / CREDITS_PER_USD;
 }

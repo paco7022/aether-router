@@ -374,6 +374,29 @@ function makeAnthropicToOpenAIStreamTransform(
   });
 }
 
+// ORBIT_API_KEY may hold a single key or a comma-separated pool. For the
+// enterprise volume (600M tokens/week) a single Kiro account can't keep up,
+// so we spread load across keys and, on a per-key rate-limit (429) or
+// transient 5xx, fail over to a DIFFERENT key on retry. Trailing
+// whitespace/newlines are trimmed — PS-set secrets sometimes carry \r\n (→ 401).
+function getOrbitKeys(): string[] {
+  return (process.env.ORBIT_API_KEY || "")
+    .split(",")
+    .map((k) => k.trim())
+    .filter(Boolean);
+}
+
+// Fisher-Yates shuffle so each request starts on a random key (load spread)
+// and successive retries walk distinct keys.
+function shuffled<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 export const orbitProvider: Provider = {
   name: "orbit",
   baseUrl:
@@ -381,10 +404,12 @@ export const orbitProvider: Provider = {
     "https://api.orbit-provider.com/api/provider/agy",
 
   async forward(request: ProviderRequest, signal?: AbortSignal): Promise<Response> {
-    const apiKey = process.env.ORBIT_API_KEY;
-    if (!apiKey) {
+    const keys = getOrbitKeys();
+    if (keys.length === 0) {
       throw new Error("ORBIT_API_KEY not configured");
     }
+    // Distinct key per attempt (wraps if pool smaller than attempt count).
+    const keyOrder = shuffled(keys);
 
     const wantStream = request.stream === true;
     const anthBody = openAIToAnthropic(request);
@@ -394,6 +419,9 @@ export const orbitProvider: Provider = {
       if (attempt > 0) {
         await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * attempt));
       }
+
+      const apiKey = keyOrder[attempt % keyOrder.length];
+      const keyTag = apiKey.slice(0, 10);
 
       const upstream = await fetch(`${this.baseUrl}/v1/messages`, {
         method: "POST",
@@ -413,7 +441,12 @@ export const orbitProvider: Provider = {
       // Anthropic error JSON to OpenAI shape; the route only inspects
       // status + raw body text on the error path.
       if (!upstream.ok) {
-        if (upstream.status >= 500 && upstream.status !== 503) {
+        // Per-key rate limit (429) or transient 5xx → fail over to the next
+        // key on retry. 503 (global upstream down) and other 4xx return as-is.
+        if (upstream.status === 429 || (upstream.status >= 500 && upstream.status !== 503)) {
+          console.warn(
+            `[orbit] key ${keyTag}… attempt ${attempt + 1}/${MAX_RETRIES + 1} → ${upstream.status}; failing over to next key`
+          );
           lastResponse = upstream;
           continue;
         }

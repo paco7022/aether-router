@@ -36,6 +36,11 @@ export interface ApiKeyInfo {
   dailyRequestLimit: number | null;
   rateLimitSeconds: number | null;
   expiresAt: string | null;
+  // Enterprise per-token billing. When pricingMode === "flat_per_token",
+  // (prompt+completion) tokens are billed at flatCostPerMTokens USD/1M against
+  // custom_credits, bypassing the premium-request pool. Otherwise "standard".
+  pricingMode: string;
+  flatCostPerMTokens: number | null;
   // Traffic source for usage_logs. "chat" means session-authed (dashboard),
   // "api" means Bearer-authed (public API).
   source: "api" | "chat";
@@ -57,7 +62,7 @@ export async function validateApiKey(key: string): Promise<ApiKeyInfo | null> {
   // Look up key and join with profile for credits
   const { data: result, error } = await supabase
     .from("api_keys")
-    .select("id, user_id, is_active, is_custom, custom_credits, max_context, allowed_providers, daily_request_limit, rate_limit_seconds, expires_at, last_used, profiles(credits, daily_credits, plan_id, gm_claimed_date, gm_daily_override, gm_override_expires, referral_bonus_requests, referral_bonus_expires, is_activated, claude_activated, preset, preset_enabled, builtin_preset_id, context_boost_expires_at, t_discount_expires_at)")
+    .select("id, user_id, is_active, is_custom, custom_credits, max_context, allowed_providers, daily_request_limit, rate_limit_seconds, expires_at, pricing_mode, flat_cost_per_m_tokens, last_used, profiles(credits, daily_credits, plan_id, gm_claimed_date, gm_daily_override, gm_override_expires, referral_bonus_requests, referral_bonus_expires, is_activated, claude_activated, preset, preset_enabled, builtin_preset_id, context_boost_expires_at, t_discount_expires_at)")
     .eq("key_hash", keyHash)
     .single();
 
@@ -108,6 +113,8 @@ export async function validateApiKey(key: string): Promise<ApiKeyInfo | null> {
     dailyRequestLimit: result.daily_request_limit ?? null,
     rateLimitSeconds: result.rate_limit_seconds ?? null,
     expiresAt: result.expires_at ?? null,
+    pricingMode: (result as { pricing_mode?: string | null }).pricing_mode ?? "standard",
+    flatCostPerMTokens: (result as { flat_cost_per_m_tokens?: number | null }).flat_cost_per_m_tokens ?? null,
     source: "api",
     preset: profile?.preset ?? null,
     presetEnabled: profile?.preset_enabled ?? false,
@@ -157,6 +164,8 @@ export async function validateSession(): Promise<ApiKeyInfo | null> {
     dailyRequestLimit: null,
     rateLimitSeconds: null,
     expiresAt: null,
+    pricingMode: "standard",
+    flatCostPerMTokens: null,
     source: "chat",
     preset: (profile as unknown as { preset?: UserPreset | null }).preset ?? null,
     presetEnabled: (profile as unknown as { preset_enabled?: boolean | null }).preset_enabled ?? false,

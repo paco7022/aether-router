@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { validateApiKey, validateSession } from "@/lib/auth";
-import { calculateCredits } from "@/lib/credits";
+import { calculateCredits, flatTokenCredits } from "@/lib/credits";
 import { estimateTokens, estimatePromptTokens, floorPromptTokens } from "@/lib/token-estimator";
 import { getProvider } from "@/lib/providers";
 import {
@@ -51,6 +51,11 @@ const DEFAULT_STREAM_RESERVATION_COMPLETION_TOKENS = 4096;
 const MAX_STREAM_RESERVATION_COMPLETION_TOKENS = 32_768;
 // Cost in credits to purchase one extra premium request when the daily limit is hit.
 const PREMIUM_OVERAGE_COST = 100;
+// Enterprise (flat_per_token) keys hard-stop at 0 balance (402). This is an
+// early-warning floor: when a key settles below it, log a warning so the
+// operator can top up before the client is cut off. 1.5M credits ≈ 50M tokens
+// at $3/M. Override with ENTERPRISE_LOW_BALANCE_CREDITS.
+const ENTERPRISE_LOW_BALANCE_CREDITS = Number(process.env.ENTERPRISE_LOW_BALANCE_CREDITS) || 1_500_000;
 // Fair-use guard for plan-"unlimited" providers (e.g. r/ RiftAI on paid plans).
 // AI cost is ~0, but each request still costs infra (Supabase + moderation + CPU),
 // so cap a single account to protect against abuse/resale. Tune freely.
@@ -502,6 +507,16 @@ export async function POST(req: NextRequest) {
 
   const isPremiumProvider = isPremiumProviderName(model.provider);
   const isFlatRateProvider = isFlatRateProviderName(model.provider);
+  // Enterprise per-token billing: a custom key with pricing_mode='flat_per_token'
+  // bills (prompt+completion) tokens at flatCostPerMTokens USD/1M against its
+  // custom_credits pool. Custom keys already skip the premium-pool gate (they
+  // take the keyInfo.isCustom branch), so this only overrides the per-request
+  // flat charge with a token-metered one in the reservation + settlement.
+  const isFlatPerTokenKey =
+    keyInfo.isCustom &&
+    keyInfo.pricingMode === "flat_per_token" &&
+    (keyInfo.flatCostPerMTokens ?? 0) > 0;
+  const flatRatePerM = keyInfo.flatCostPerMTokens ?? 0;
   // Context boost: user purchased 2× context multiplier (temporary or permanent).
   const isContextBoosted =
     !!keyInfo.contextBoostExpires &&
@@ -1230,7 +1245,9 @@ export async function POST(req: NextRequest) {
         margin: model.margin,
       }
     );
-    const reservedCredits = isPremiumProvider ? 1 : isFlatRateProvider ? Number(model.premium_request_cost ?? 0.1) : Math.max(reservedCreditsRaw, 1);
+    const reservedCredits = isFlatPerTokenKey
+      ? flatTokenCredits(estimatedPrompt, reservedCompletionTokens, flatRatePerM).credits
+      : isPremiumProvider ? 1 : isFlatRateProvider ? Number(model.premium_request_cost ?? 0.1) : Math.max(reservedCreditsRaw, 1);
 
     if (keyInfo.isCustom && keyInfo.customCredits !== null) {
       const { data: keyBalance, error: reserveErr } = await supabase.rpc("deduct_custom_key_credits", {
@@ -1615,9 +1632,13 @@ export async function POST(req: NextRequest) {
       cacheTokens
     );
 
+    // Enterprise per-token key: bill all (prompt+completion) tokens at the flat
+    // rate; overrides per-request/per-token model pricing.
+    const flatSettle = isFlatPerTokenKey ? flatTokenCredits(promptTokens, completionTokens, flatRatePerM) : null;
     // Premium-request models (t/, an/, w/) are flat-rate: 1 credit + N premium-request budget.
     // Flat-rate models (op/) charge a fixed per-request fee stored in premium_request_cost.
-    const finalCredits = isFreePool ? 0 : isPremiumProvider ? 1 : isFlatRateProvider ? Number(model.premium_request_cost ?? 0.1) : Math.max(credits, 1);
+    const finalCredits = isFreePool ? 0 : flatSettle ? flatSettle.credits : isPremiumProvider ? 1 : isFlatRateProvider ? Number(model.premium_request_cost ?? 0.1) : Math.max(credits, 1);
+    const loggedCostUsd = flatSettle ? flatSettle.costUsd : costUsd;
 
     // 9. Settle credits — adjust reservation to match actual usage
     let chargedCredits = 0;
@@ -1631,10 +1652,16 @@ export async function POST(req: NextRequest) {
       billingStatus = settlement.status;
     }
 
+    // Enterprise per-token key low-balance early warning (hard-stop is the 402
+    // at reservation; this just flags an imminent cut-off so the operator tops up).
+    if (isFlatPerTokenKey && billingStatus === "success" && newBalance >= 0 && newBalance < ENTERPRISE_LOW_BALANCE_CREDITS) {
+      console.warn(`[enterprise] key ${keyInfo.keyId} low balance: ${newBalance} credits (~${Math.floor((newBalance * 100) / Math.max(flatRatePerM, 0.0001))} tokens) left`);
+    }
+
     // 10. Log usage (always log, even for free-pool — needed for token tracking)
     const durationMs = Date.now() - startTime;
     // Requests served under a free event don't cost premium-request budget.
-    const premiumCost = isPremiumProvider && !activeEventId && !isPlanUnlimited
+    const premiumCost = isPremiumProvider && !activeEventId && !isPlanUnlimited && !isFlatPerTokenKey
       ? (premiumRequestCostForUsage || getContextAdjustedPremiumRequestCost(modelId, model.provider, Number(model.premium_request_cost ?? 1), estimatedPrompt))
       : 0;
     // finish_reason of the upstream response — logged to diagnose cut-offs
@@ -1655,7 +1682,7 @@ export async function POST(req: NextRequest) {
       p_completion_tokens: completionTokens,
       p_total_tokens: totalTokens,
       p_credits_charged: premiumOveragePurchased ? PREMIUM_OVERAGE_COST : (isFreePool ? 0 : chargedCredits),
-      p_cost_usd: costUsd,
+      p_cost_usd: loggedCostUsd,
       p_status: isFreePool ? "success" : billingStatus,
       p_duration_ms: durationMs,
       p_premium_cost: premiumCost,
@@ -1721,7 +1748,7 @@ export async function POST(req: NextRequest) {
 
 async function handleStreamingResponse(
   providerResponse: Response,
-  keyInfo: { userId: string; keyId: string | null; credits: number; dailyCredits: number; isCustom: boolean; customCredits: number | null; planId: string; source: "api" | "chat" },
+  keyInfo: { userId: string; keyId: string | null; credits: number; dailyCredits: number; isCustom: boolean; customCredits: number | null; planId: string; source: "api" | "chat"; pricingMode?: string; flatCostPerMTokens?: number | null },
   model: { id: string; provider: string; cost_per_m_input: number; cost_per_m_output: number; cost_per_m_cache_read?: number; cost_per_m_cache_write?: number; margin: number; premium_request_cost?: number },
   startTime: number,
   estimatedPromptTokens: number = 0,
@@ -1865,7 +1892,16 @@ async function handleStreamingResponse(
 
     const isPremiumModel = isPremiumProviderName(model.provider);
     const isFlatRateModel = isFlatRateProviderName(model.provider);
-    const finalCredits = isFreePool ? 0 : isPremiumModel ? 1 : isFlatRateModel ? Number(model.premium_request_cost ?? 0.1) : Math.max(credits, 1);
+    // Enterprise per-token key: bill all tokens at the flat rate (see main handler).
+    const isFlatPerTokenKey =
+      keyInfo.isCustom &&
+      keyInfo.pricingMode === "flat_per_token" &&
+      (keyInfo.flatCostPerMTokens ?? 0) > 0;
+    const flatSettle = isFlatPerTokenKey
+      ? flatTokenCredits(totalPromptTokens, totalCompletionTokens, keyInfo.flatCostPerMTokens ?? 0)
+      : null;
+    const finalCredits = isFreePool ? 0 : flatSettle ? flatSettle.credits : isPremiumModel ? 1 : isFlatRateModel ? Number(model.premium_request_cost ?? 0.1) : Math.max(credits, 1);
+    const loggedCostUsd = flatSettle ? flatSettle.costUsd : costUsd;
 
     let wasCharged = isFreePool;
     let balanceAfter = reservation?.balanceAfterReserve ?? 0;
@@ -1991,9 +2027,15 @@ async function handleStreamingResponse(
       }
     }
 
+    // Enterprise per-token key low-balance early warning (see non-stream path).
+    if (isFlatPerTokenKey && billingStatus === "success" && balanceAfter >= 0 && balanceAfter < ENTERPRISE_LOW_BALANCE_CREDITS) {
+      const rate = keyInfo.flatCostPerMTokens ?? 0;
+      console.warn(`[enterprise] key ${keyInfo.keyId} low balance: ${balanceAfter} credits (~${Math.floor((balanceAfter * 100) / Math.max(rate, 0.0001))} tokens) left`);
+    }
+
     const durationMs = Date.now() - startTime;
     const isPremium = isPremiumProviderName(model.provider);
-    const streamPremiumCost = isPremium && !activeEventId && !isPlanUnlimited
+    const streamPremiumCost = isPremium && !activeEventId && !isPlanUnlimited && !isFlatPerTokenKey
       ? (premiumRequestCostForUsage || getContextAdjustedPremiumRequestCost(model.id, model.provider, Number(model.premium_request_cost ?? 1), estimatedPromptTokens))
       : 0;
     const writeStreamTx = !isFreePool && chargedCredits > 0;
@@ -2008,7 +2050,7 @@ async function handleStreamingResponse(
       p_completion_tokens: totalCompletionTokens,
       p_total_tokens: totalTokens,
       p_credits_charged: premiumOverageCharged > 0 ? premiumOverageCharged : chargedCredits,
-      p_cost_usd: costUsd,
+      p_cost_usd: loggedCostUsd,
       p_status: isFreePool ? "success" : (reason === "aborted" ? "aborted" : billingStatus),
       p_duration_ms: durationMs,
       p_premium_cost: streamPremiumCost,
