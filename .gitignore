@@ -14,3 +14,15 @@ preset examples/
 # PC deployment runtime artifacts
 logs/
 .sync.lock
+
+# Operator-only moderation records — NEVER commit (PII + CSAM accusations; repo is public)
+BLACKLIST*
+*blacklist*
+moderation-bans*
+CROSSBAN*
+*crossban*
+moderation-evidence/
+*moderation-evidence*
+
+# CF worker build artifact (transient base64 of bundle)
+cf-worker/worker_b64.txt
