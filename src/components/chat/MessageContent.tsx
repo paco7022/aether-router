@@ -57,6 +57,32 @@ function renderMarkdown(text: string): ReactNode[] {
   return nodes;
 }
 
+// Markdown links come from model/user text, so the URL is untrusted. Permit
+// only http(s)/mailto and relative/anchor links; anything with another scheme
+// (javascript:, data:, vbscript:, file: ...) is rejected and the text renders
+// plain. We first drop chars the browser ignores while parsing a scheme so
+// "java\tscript:" style obfuscation can't slip past the scheme check.
+function safeHref(raw: string): string | null {
+  const url = Array.from(raw)
+    .filter((ch) => {
+      const c = ch.charCodeAt(0);
+      return (
+        c > 0x20 &&
+        c !== 0xa0 &&
+        !(c >= 0x200b && c <= 0x200f) &&
+        c !== 0x2028 &&
+        c !== 0x2029 &&
+        c !== 0xfeff
+      );
+    })
+    .join("")
+    .trim();
+  if (!url) return null;
+  if (/^(https?:|mailto:)/i.test(url)) return url;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(url)) return null; // other explicit scheme -> block
+  return url; // no scheme -> relative / anchor / protocol-relative, safe
+}
+
 function renderInline(text: string, keyPrefix: string): ReactNode[] {
   const nodes: ReactNode[] = [];
   // Regex matches: **bold**, *italic*, `code`, [text](url)
@@ -83,12 +109,18 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
         </code>
       );
     } else if (match[5] && match[6]) {
-      // [text](url)
-      nodes.push(
-        <a key={`${keyPrefix}a${idx}`} href={match[6]} target="_blank" rel="noopener noreferrer" className="underline text-cyan-300 hover:text-cyan-200">
-          {match[5]}
-        </a>
-      );
+      // [text](url) — only link out if the URL scheme is safe; otherwise the
+      // label renders as plain text so a malicious href can't execute.
+      const href = safeHref(match[6]);
+      if (href) {
+        nodes.push(
+          <a key={`${keyPrefix}a${idx}`} href={href} target="_blank" rel="noopener noreferrer" className="underline text-cyan-300 hover:text-cyan-200">
+            {match[5]}
+          </a>
+        );
+      } else {
+        nodes.push(match[5]);
+      }
     }
     lastIndex = re.lastIndex;
     idx++;

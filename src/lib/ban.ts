@@ -1,5 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getClientIp } from "@/lib/client-ip";
+import { TtlCache } from "@/lib/db-cache";
 
 type BanSource =
   | "fingerprint"
@@ -134,11 +135,150 @@ async function autoBanFingerprintsLinkedToBannedIp(options: {
   }
 }
 
-export async function evaluateBanStatus(_options: {
+/**
+ * Decide whether the current request should be blocked because the device
+ * fingerprint or client IP (directly supplied, or server-observed for this
+ * userId) appears in `banned_fingerprints`.
+ *
+ * Returns a `BanDecision` when blocked, or `null` to let the request through.
+ *
+ * Fail-open: on any DB error we log and return `null`. A transient Supabase
+ * hiccup must not 503/403 every user at once — bans are an anti-abuse control,
+ * not a hard security boundary, and `banned_fingerprints` is only writable by
+ * service_role anyway. Availability wins over a momentarily-missed ban.
+ */
+// Ban decisions are cached per (userId, ip, fingerprint) for 60s. The check
+// previously cost three DB reads on EVERY completion request; ban-table edits
+// are rare, and a ≤60s propagation delay per node is acceptable for an
+// anti-abuse control that already fails open on DB errors. Only decisions
+// computed from real data are cached — error fail-opens bypass the cache so
+// a transient outage can't pin a stale "allow" (or "block") for the TTL.
+const banDecisionCache = new TtlCache<BanDecision | null>(60_000);
+
+export async function evaluateBanStatus(options: {
   headers: Headers;
   userId?: string | null;
   fingerprint?: string | null;
   adminClient?: ReturnType<typeof createAdminClient>;
 }): Promise<BanDecision | null> {
+  const admin = options.adminClient ?? createAdminClient();
+  const ip = getClientIpFromHeaders(options.headers);
+  const requestFp = cleanFingerprint(options.fingerprint);
+
+  const cacheKey = `${options.userId ?? ""}|${ip}|${requestFp ?? ""}`;
+  const cachedDecision = banDecisionCache.get(cacheKey);
+  if (cachedDecision !== undefined) {
+    return cachedDecision;
+  }
+
+  // Fingerprints / IPs to test: the request-supplied ones plus anything the
+  // server itself recorded for this user in `device_fingerprints`. The request
+  // header is attacker-controlled, but checking it can only ever *add* a match
+  // (an attacker won't volunteer a banned fingerprint), so it's safe to include.
+  const fingerprints = new Set<string>();
+  const userFingerprints = new Set<string>();
+  const ips = new Set<string>();
+  const userIps = new Set<string>();
+
+  if (requestFp) fingerprints.add(requestFp);
+  if (ip && ip !== UNKNOWN_IP) ips.add(ip);
+
+  if (options.userId) {
+    const { data: identities, error } = await admin
+      .from("device_fingerprints")
+      .select("fingerprint, ip_address")
+      .eq("user_id", options.userId)
+      .limit(256);
+
+    if (error) {
+      console.error("evaluateBanStatus: failed to load device fingerprints:", error.message);
+      return null; // fail-open
+    }
+
+    for (const row of identities || []) {
+      const fp = cleanFingerprint(row.fingerprint);
+      if (fp) {
+        fingerprints.add(fp);
+        userFingerprints.add(fp);
+      }
+      const rowIp = row.ip_address?.trim();
+      if (rowIp && rowIp !== UNKNOWN_IP) {
+        ips.add(rowIp);
+        userIps.add(rowIp);
+      }
+    }
+  }
+
+  if (fingerprints.size === 0 && ips.size === 0) {
+    banDecisionCache.set(cacheKey, null);
+    return null;
+  }
+
+  // Two targeted lookups beat one fragile `.or()` string. Fingerprint match
+  // takes precedence over IP (more specific / less collateral).
+  if (fingerprints.size > 0) {
+    const { data, error } = await admin
+      .from("banned_fingerprints")
+      .select("fingerprint, reason")
+      .in("fingerprint", Array.from(fingerprints))
+      .limit(1);
+
+    if (error) {
+      console.error("evaluateBanStatus: fingerprint lookup failed:", error.message);
+      return null; // fail-open
+    }
+    const hit = data?.[0];
+    if (hit) {
+      const isRequestFp = hit.fingerprint === requestFp && !userFingerprints.has(hit.fingerprint);
+      const decision: BanDecision = {
+        blocked: true,
+        statusCode: 403,
+        reason: hit.reason?.trim() || "This device has been banned.",
+        source: isRequestFp ? "fingerprint" : "user_fingerprint",
+      };
+      banDecisionCache.set(cacheKey, decision);
+      return decision;
+    }
+  }
+
+  if (ips.size > 0) {
+    const { data, error } = await admin
+      .from("banned_fingerprints")
+      .select("ip_address, reason")
+      .in("ip_address", Array.from(ips))
+      .limit(1);
+
+    if (error) {
+      console.error("evaluateBanStatus: ip lookup failed:", error.message);
+      return null; // fail-open
+    }
+    const hit = data?.[0];
+    if (hit) {
+      // Propagate the IP ban to fingerprints the server has observed for this
+      // user, so they stay blocked even after rotating IPs. Best-effort; never
+      // blocks the response on it.
+      if (options.userId) {
+        await autoBanFingerprintsLinkedToBannedIp({
+          admin,
+          userId: options.userId,
+          ip,
+          ipBanReason: hit.reason ?? null,
+        }).catch((err) => {
+          console.error("evaluateBanStatus: auto IP-link propagation failed:", err);
+        });
+      }
+      const isRequestIp = hit.ip_address === ip && !userIps.has(hit.ip_address ?? "");
+      const decision: BanDecision = {
+        blocked: true,
+        statusCode: 403,
+        reason: hit.reason?.trim() || "Access from this network has been blocked.",
+        source: isRequestIp ? "ip" : "user_ip",
+      };
+      banDecisionCache.set(cacheKey, decision);
+      return decision;
+    }
+  }
+
+  banDecisionCache.set(cacheKey, null);
   return null;
 }

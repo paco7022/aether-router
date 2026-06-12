@@ -32,7 +32,9 @@ export default async function UsagePage() {
     <div>
       <div className="mb-6">
         <h2 className="text-2xl font-bold text-white/90 tracking-tight">Usage History</h2>
-        <p className="text-sm text-[var(--text-muted)] mt-1">Track your API consumption</p>
+        <p className="text-sm text-[var(--text-muted)] mt-1">
+          Track your API consumption. <span className="text-[var(--aurora-violet)]">Premium</span> is the number of daily premium requests each call uses (varies by model: e.g. Opus 6, Sonnet/Gemini Pro 3–4, GLM 2, fast models 0.5–1).
+        </p>
       </div>
 
       {/* Summary */}
@@ -91,6 +93,7 @@ export default async function UsagePage() {
                 <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider text-right">Completion</th>
                 <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider text-right">Total</th>
                 <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider text-right">Credits</th>
+                <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider text-right">Premium</th>
                 <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider text-right">Latency</th>
                 <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider">Status</th>
               </tr>
@@ -106,6 +109,15 @@ export default async function UsagePage() {
                   <td className="px-5 py-3 text-right text-white/70">{log.completion_tokens.toLocaleString()}</td>
                   <td className="px-5 py-3 text-right font-medium text-white/85">{log.total_tokens.toLocaleString()}</td>
                   <td className="px-5 py-3 text-right text-white/70">{log.credits_charged.toLocaleString()}</td>
+                  <td className="px-5 py-3 text-right">
+                    {Number(log.premium_cost) > 0 ? (
+                      <span className="text-[var(--aurora-violet)] font-medium">
+                        {Number(log.premium_cost).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                      </span>
+                    ) : (
+                      <span className="text-[var(--text-dim)]">-</span>
+                    )}
+                  </td>
                   <td className="px-5 py-3 text-right text-[var(--text-muted)]">
                     {log.duration_ms ? `${(log.duration_ms / 1000).toFixed(1)}s` : "-"}
                   </td>

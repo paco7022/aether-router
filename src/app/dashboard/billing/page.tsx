@@ -22,7 +22,7 @@ export default async function BillingPage() {
     { data: packages },
     { data: transactions },
   ] = await Promise.all([
-    supabase.from("profiles").select("credits, daily_credits, plan_id, gm_claimed_date, context_boost_expires_at, t_discount_expires_at").eq("id", user!.id).single(),
+    supabase.from("profiles").select("credits, daily_credits, plan_id, gm_claimed_date, context_boost_expires_at, t_discount_expires_at, gm_daily_override, gm_override_expires, referral_bonus_requests, referral_bonus_expires").eq("id", user!.id).single(),
     supabase
       .from("subscriptions")
       .select("*, plans(*)")
@@ -73,9 +73,34 @@ export default async function BillingPage() {
   const alreadyClaimed = subscription?.last_grant_date === today;
   const planObj = subscription?.plans as { credits_per_day: number } | null;
   const creditsPerDay = currentPlanId === "free" ? 0 : (planObj?.credits_per_day || 0);
-  const premiumRequestLimit = currentPlanId === "free"
+  // Mirror the cap the API actually enforces in reserve_premium_request:
+  //   baseGmDaily (or grandfathered override) + active referral bonus.
+  // Without this the card showed `used / base` (e.g. 222/15) and ignored an
+  // active +N/day bonus, so users with a bonus looked massively over-limit.
+  type ProfileBonus = {
+    gm_daily_override?: number | null;
+    gm_override_expires?: string | null;
+    referral_bonus_requests?: number | null;
+    referral_bonus_expires?: string | null;
+  };
+  const profileBonus = (profile ?? {}) as ProfileBonus;
+  const now = Date.now();
+  const overrideActive =
+    profileBonus.gm_daily_override != null &&
+    !!profileBonus.gm_override_expires &&
+    new Date(profileBonus.gm_override_expires).getTime() > now;
+  const baseGmDaily = overrideActive
+    ? Number(profileBonus.gm_daily_override)
+    : currentPlanId === "free"
     ? 15
     : (currentPlan?.gm_daily_requests ?? 15);
+  const referralBonusActive =
+    !!profileBonus.referral_bonus_expires &&
+    new Date(profileBonus.referral_bonus_expires).getTime() > now;
+  const referralBonus = referralBonusActive
+    ? Number(profileBonus.referral_bonus_requests ?? 0)
+    : 0;
+  const premiumRequestLimit = baseGmDaily + referralBonus;
 
   return (
     <div>
@@ -136,6 +161,7 @@ export default async function BillingPage() {
         <GmRequestsCard
           used={premiumUsedToday}
           limit={premiumRequestLimit}
+          bonus={referralBonus}
           debt={premiumDebt}
           claimed={gmClaimedToday}
         />

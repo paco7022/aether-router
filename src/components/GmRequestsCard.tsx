@@ -6,11 +6,14 @@ import { useRouter } from "next/navigation";
 export function GmRequestsCard({
   used,
   limit,
+  bonus = 0,
   debt = 0,
   claimed,
 }: {
   used: number;
   limit: number;
+  /** Portion of `limit` that comes from an active bonus (e.g. referrals). */
+  bonus?: number;
   debt?: number;
   claimed: boolean;
 }) {
@@ -94,7 +97,13 @@ export function GmRequestsCard({
                 {isUnlimited ? (
                   <>{used.toLocaleString()} <span className="text-[var(--text-muted)]">/ unlimited</span></>
                 ) : (
-                  <>{effectiveUsed.toLocaleString()} <span className="text-[var(--text-muted)]">/ {limit.toLocaleString()}</span></>
+                  <>
+                    {effectiveUsed.toLocaleString()}{" "}
+                    <span className="text-[var(--text-muted)]">/ {limit.toLocaleString()}</span>
+                    {bonus > 0 && (
+                      <span className="text-[var(--aurora-violet)] font-medium"> (+{bonus.toLocaleString()} bonus)</span>
+                    )}
+                  </>
                 )}
               </span>
             </div>

@@ -37,6 +37,7 @@ const PREMIUM_PROVIDERS = new Set<string>([
   "opencode",
   "trolllm",
   "orbit",
+  "routmy",
 ]);
 
 export function isPremiumProvider(provider: string | null | undefined): boolean {

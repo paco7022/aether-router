@@ -10,6 +10,7 @@ import {
 } from "@/lib/providers/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireCsrf } from "@/lib/csrf";
+import { evaluateBanStatus } from "@/lib/ban";
 import {
   getContextAdjustedPremiumRequestCost,
   getCustomKeyNoCreditsError,
@@ -32,6 +33,8 @@ import {
 import { applyPreset } from "@/lib/preset";
 import { getBuiltinPreset } from "@/lib/builtinPresets";
 import { tryPcFailover } from "@/lib/pc-failover";
+import { TtlCache } from "@/lib/db-cache";
+import { getPlanLimits } from "@/lib/plan-cache";
 
 export const runtime = "nodejs";
 // NOTE: If the platform kills a streaming request mid-flight, the `flush()`
@@ -56,6 +59,15 @@ const FAIRUSE_RATE_LIMIT_SECONDS = 0;
 const FREE_INCLUDED_USAGE_ENABLED =
   process.env.AETHER_FREE_INCLUDED_USAGE_ENABLED === "true";
 const FREE_PROMOS_ENABLED = process.env.AETHER_FREE_PROMOS_ENABLED === "true";
+
+// Hot-path read caches. Models change on admin timescales (toggling
+// is_active, editing costs), so a 60s-stale row is invisible to users but
+// saves one DB read on every completion. Misses are NOT cached — a
+// just-activated model works immediately. Free-event lookups cache only the
+// "no active event" result: a found event carries live token_pool_used
+// state and must always be re-read so pool exhaustion applies in real time.
+const modelRowCache = new TtlCache<Record<string, unknown>>(60_000);
+const noFreeEventCache = new TtlCache<true>(60_000);
 // TEMP (2026-05-26): DLab (db/) free + unlimited promo while a donated 24h
 // key lasts. Deliberately independent of FREE_PROMOS_ENABLED so it does NOT
 // reopen the other paused promos (free events, riftai gemini, deepseek free).
@@ -323,6 +335,23 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Ban gate. Block requests whose client IP — or any fingerprint/IP the server
+  // has recorded for this user in `device_fingerprints` — appears in
+  // `banned_fingerprints`. Fail-open inside evaluateBanStatus on DB errors.
+  // Runs right after auth so a banned user can't spend credits or reach a
+  // provider regardless of activation/plan state.
+  const banDecision = await evaluateBanStatus({
+    headers: req.headers,
+    userId: keyInfo.userId,
+    fingerprint: req.headers.get("x-fingerprint"),
+  });
+  if (banDecision?.blocked) {
+    return NextResponse.json(
+      { error: { message: banDecision.reason, type: "account_banned" } },
+      { status: banDecision.statusCode }
+    );
+  }
+
   // Free-tier API key activation gate.
   //
   // Free users must be flipped to is_activated by an admin (or by paying)
@@ -397,14 +426,22 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // 4. Look up model
+  // 4. Look up model (60s cache; see modelRowCache above).
   const supabase = createAdminClient();
-  const { data: model } = await supabase
-    .from("models")
-    .select("*")
-    .eq("id", modelId)
-    .eq("is_active", true)
-    .single();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let model: any = modelRowCache.get(modelId) ?? null;
+  if (!model) {
+    const { data: modelRow } = await supabase
+      .from("models")
+      .select("*")
+      .eq("id", modelId)
+      .eq("is_active", true)
+      .single();
+    if (modelRow) {
+      model = modelRow;
+      modelRowCache.set(modelId, modelRow);
+    }
+  }
 
   if (!model) {
     return NextResponse.json(
@@ -542,7 +579,15 @@ export async function POST(req: NextRequest) {
   let isFreePool = false;
   let activeEventId: string | null = null;
 
-  if (FREE_PROMOS_ENABLED && !keyInfo.isCustom) {
+  const freeEventCacheKey = `${modelId}|${keyInfo.planId}`;
+  if (
+    FREE_PROMOS_ENABLED &&
+    !keyInfo.isCustom &&
+    // "No active event" is the common case and is safe to cache for 60s
+    // (a newly launched event just takes ≤60s/node to kick in). Found
+    // events are never cached — see noFreeEventCache above.
+    !noFreeEventCache.get(freeEventCacheKey)
+  ) {
     const { data: eventRow, error: eventLookupError } = await supabase.rpc("find_active_free_event", {
       p_model_id: modelId,
       p_plan_id: keyInfo.planId,
@@ -558,6 +603,8 @@ export async function POST(req: NextRequest) {
       // flips to true, credit reservation is skipped, and every request for a
       // non-custom user is effectively free.
       activeEvent = eventRow as unknown as FreeEvent;
+    } else {
+      noFreeEventCache.set(freeEventCacheKey, true);
     }
   }
 
@@ -750,11 +797,10 @@ export async function POST(req: NextRequest) {
     // Skipped entirely when an active event covers this model for the user's plan.
     // Zero-cost premium models (free promos) also skip this entire block.
     if (isPremiumProvider && !isZeroCostPremium) {
-      const { data: premiumPlan, error: premiumPlanErr } = await supabase
-        .from("plans")
-        .select("gm_daily_requests, gm_max_context, allowed_providers, unlimited_providers")
-        .eq("id", keyInfo.planId)
-        .single();
+      const { data: premiumPlan, error: premiumPlanErr } = await getPlanLimits(
+        supabase,
+        keyInfo.planId
+      );
 
       // Fail closed on a real lookup failure. Falling through silently here used
       // to degrade EVERY paid plan to the free defaults (15 req/day, 32768 ctx)
@@ -1069,11 +1115,7 @@ export async function POST(req: NextRequest) {
     // Free providers (e.g. trolllm) still need a context cap so users
     // can't send unbounded prompts. Enforce the plan's gm_max_context.
     if (!keyInfo.isCustom) {
-      const { data: freePlan } = await supabase
-        .from("plans")
-        .select("gm_max_context")
-        .eq("id", keyInfo.planId)
-        .single();
+      const { data: freePlan } = await getPlanLimits(supabase, keyInfo.planId);
 
       const freeMaxContext = (freePlan?.gm_max_context ?? 32768) * (isContextBoosted ? 2 : 1);
       if (freeMaxContext > 0) {
@@ -1095,11 +1137,7 @@ export async function POST(req: NextRequest) {
   // models. Look up the plan's gm_max_context and enforce it.
   if (!activeEventId && (isZeroCostPremium || isZeroCostFlatRate)) {
     if (!keyInfo.isCustom) {
-      const { data: zeroCostPlan } = await supabase
-        .from("plans")
-        .select("gm_max_context")
-        .eq("id", keyInfo.planId)
-        .single();
+      const { data: zeroCostPlan } = await getPlanLimits(supabase, keyInfo.planId);
 
       const zeroCostMaxContext = (zeroCostPlan?.gm_max_context ?? 32768) * (isContextBoosted ? 2 : 1);
       if (zeroCostMaxContext > 0) {

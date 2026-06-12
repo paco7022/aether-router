@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireCsrf } from "@/lib/csrf";
-import { getClientIpFromHeaders } from "@/lib/ban";
+import { getClientIpFromHeaders, evaluateBanStatus } from "@/lib/ban";
 
 // POST /api/v1/fingerprint — store fingerprint + check ban
 export async function POST(req: NextRequest) {
@@ -45,6 +45,18 @@ export async function POST(req: NextRequest) {
   if (upsertErr) {
     console.error("Fingerprint upsert failed:", upsertErr.message);
     return NextResponse.json({ error: "Failed to save fingerprint" }, { status: 500 });
+  }
+
+  // Check ban AFTER upsert so the freshly-recorded device is included in the
+  // userId-linked lookup. Reuses the admin client we already built.
+  const decision = await evaluateBanStatus({
+    headers: req.headers,
+    userId: user.id,
+    fingerprint: cleanFingerprint,
+    adminClient: admin,
+  });
+  if (decision?.blocked) {
+    return NextResponse.json({ banned: true, reason: decision.reason });
   }
 
   return NextResponse.json({ banned: false });
