@@ -75,6 +75,89 @@ export default function TestDashboardPage() {
 
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
+  // Living starfield: distant stars on near-black, with a very gentle forward
+  // drift + soft per-star twinkle. Canvas + rAF so it's cheap; disabled under
+  // prefers-reduced-motion and paused while the tab is hidden.
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    type Star = { x: number; y: number; z: number; tw: number; ph: number };
+    let w = 0, h = 0, cx = 0, cy = 0, spread = 1;
+    let stars: Star[] = [];
+
+    const spawn = (init: boolean): Star => ({
+      x: Math.random() * 2 - 1,        // direction from center
+      y: Math.random() * 2 - 1,
+      z: init ? Math.random() : 1,     // depth: 1 = far, 0 = at the viewer
+      tw: 0.4 + Math.random() * 1.3,   // twinkle speed
+      ph: Math.random() * Math.PI * 2, // twinkle phase
+    });
+
+    const resize = () => {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const r = canvas.getBoundingClientRect();
+      w = r.width; h = r.height; cx = w / 2; cy = h / 2;
+      spread = Math.max(w, h) * 0.5;
+      canvas.width = Math.floor(w * dpr);
+      canvas.height = Math.floor(h * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const count = Math.min(260, Math.max(110, Math.floor((w * h) / 7000)));
+      stars = Array.from({ length: count }, () => spawn(true));
+      if (reduced) draw(performance.now());
+    };
+
+    const speed = 0.016; // forward drift — intentionally very slow
+    let last = performance.now();
+    let raf = 0;
+
+    function draw(now: number) {
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      ctx!.clearRect(0, 0, w, h);
+      for (const s of stars) {
+        if (!reduced) {
+          s.z -= speed * dt;
+          if (s.z <= 0.02) Object.assign(s, spawn(false));
+        }
+        const k = spread / s.z;
+        const sx = cx + s.x * k;
+        const sy = cy + s.y * k;
+        if (sx < -8 || sx > w + 8 || sy < -8 || sy > h + 8) {
+          if (!reduced) Object.assign(s, spawn(false));
+          continue;
+        }
+        const depth = 1 - s.z;                 // 0 far .. 1 near
+        const size = 0.3 + depth * 1.7;
+        const tw = reduced ? 1 : 0.72 + 0.28 * Math.sin((now / 1000) * s.tw + s.ph);
+        const alpha = (0.22 + depth * 0.6) * tw;
+        ctx!.beginPath();
+        ctx!.arc(sx, sy, size, 0, Math.PI * 2);
+        ctx!.fillStyle = `rgba(218,224,255,${alpha.toFixed(3)})`;
+        ctx!.fill();
+      }
+      if (!reduced) raf = requestAnimationFrame(draw);
+    }
+
+    const onVisibility = () => {
+      if (document.hidden) { cancelAnimationFrame(raf); raf = 0; }
+      else if (!reduced && !raf) { last = performance.now(); raf = requestAnimationFrame(draw); }
+    };
+
+    resize();
+    if (!reduced) raf = requestAnimationFrame(draw);
+    window.addEventListener("resize", resize);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", resize);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
+
   function enter(href: string) {
     setFrozen(true);
     if (timer.current) clearTimeout(timer.current);
@@ -87,10 +170,10 @@ export default function TestDashboardPage() {
   }
 
   return (
-    <div className="fixed inset-0 lg:left-64 z-20 overflow-hidden" style={{ pointerEvents: "none" }}>
-      {/* Galaxy backdrop */}
-      <div className="galaxy" aria-hidden />
-      <div className="stars" aria-hidden />
+    <div className="fixed inset-0 lg:left-64 z-20 overflow-hidden" style={{ pointerEvents: "none", background: "#030308" }}>
+      {/* Living starfield backdrop */}
+      <canvas ref={canvasRef} className="starfield" aria-hidden />
+      <div className="vignette" aria-hidden />
 
       <div className="relative z-10 w-full h-full grid place-items-center">
         <div className={`stage ${frozen ? "is-frozen" : ""}`}>
@@ -156,28 +239,13 @@ export default function TestDashboardPage() {
       <p className="hint">Pasa el cursor sobre un planeta para detenerlo · mantenlo 2s para ver a dónde lleva</p>
 
       <style>{`
-        .galaxy {
-          position: absolute; inset: 0;
-          background:
-            radial-gradient(120% 90% at 70% 15%, rgba(139,92,246,0.18), transparent 55%),
-            radial-gradient(100% 80% at 20% 85%, rgba(34,211,238,0.12), transparent 55%),
-            radial-gradient(80% 80% at 50% 50%, rgba(217,70,239,0.08), transparent 60%),
-            #05050f;
+        .starfield {
+          position: absolute; inset: 0; width: 100%; height: 100%; display: block;
         }
-        .stars {
-          position: absolute; inset: 0; opacity: 0.7;
-          background-image:
-            radial-gradient(1px 1px at 12% 22%, #fff, transparent),
-            radial-gradient(1px 1px at 82% 38%, #cbd5ff, transparent),
-            radial-gradient(1px 1px at 47% 71%, #fff, transparent),
-            radial-gradient(1.5px 1.5px at 28% 88%, #a5f3fc, transparent),
-            radial-gradient(1px 1px at 66% 12%, #fff, transparent),
-            radial-gradient(1px 1px at 92% 76%, #e9d5ff, transparent),
-            radial-gradient(1px 1px at 8% 60%, #fff, transparent),
-            radial-gradient(1.5px 1.5px at 58% 48%, #fff, transparent);
-          animation: twinkle 6s ease-in-out infinite alternate;
+        .vignette {
+          position: absolute; inset: 0; pointer-events: none;
+          background: radial-gradient(125% 125% at 50% 50%, transparent 55%, rgba(0,0,0,0.6) 100%);
         }
-        @keyframes twinkle { from { opacity: 0.45 } to { opacity: 0.8 } }
 
         .stage {
           position: relative;
@@ -283,7 +351,7 @@ export default function TestDashboardPage() {
         }
 
         @media (prefers-reduced-motion: reduce) {
-          .orbit, .planet, .hub, .stars { animation: none !important; }
+          .orbit, .planet, .hub { animation: none !important; }
         }
       `}</style>
     </div>
