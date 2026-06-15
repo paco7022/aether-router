@@ -87,17 +87,12 @@ export default function TestDashboardPage() {
   }
 
   return (
-    <div className="relative -m-5 lg:-m-8 min-h-[calc(100vh-3rem)] overflow-hidden rounded-2xl">
+    <div className="fixed inset-0 lg:left-64 z-20 overflow-hidden" style={{ pointerEvents: "none" }}>
       {/* Galaxy backdrop */}
       <div className="galaxy" aria-hidden />
       <div className="stars" aria-hidden />
 
-      <div className="relative z-10 flex flex-col items-center justify-center min-h-[calc(100vh-3rem)] py-10">
-        <div className="text-center mb-2">
-          <p className="text-[11px] uppercase tracking-[0.25em] text-[var(--text-dim)]">experimental</p>
-          <h1 className="aurora-text text-lg font-semibold tracking-tight">Orbital navigation</h1>
-        </div>
-
+      <div className="relative z-10 w-full h-full grid place-items-center">
         <div className={`stage ${frozen ? "is-frozen" : ""}`}>
           {/* Orbit guide rings */}
           {ORBITS.map((o, i) => (
@@ -156,11 +151,9 @@ export default function TestDashboardPage() {
             </div>
           ))}
         </div>
-
-        <p className="text-[11px] text-[var(--text-dim)] mt-4 text-center max-w-sm">
-          Pasa el cursor sobre un planeta para detener el sistema · mantenlo 2s para ver a dónde lleva
-        </p>
       </div>
+
+      <p className="hint">Pasa el cursor sobre un planeta para detenerlo · mantenlo 2s para ver a dónde lleva</p>
 
       <style>{`
         .galaxy {
@@ -188,10 +181,23 @@ export default function TestDashboardPage() {
 
         .stage {
           position: relative;
-          width: min(92vw, 88vmin);
-          height: min(92vw, 88vmin);
+          width: min(96vw, 90vmin);
+          height: min(96vw, 90vmin);
           display: grid;
           place-items: center;
+          pointer-events: none;
+        }
+
+        /* Only the planets + hub are clickable; everything else lets clicks
+           pass through. This also fixes the bug where the largest orbit's box
+           sat on top and swallowed the inner planets' clicks. */
+        .orbit, .orbit-ring, .planet-slot { pointer-events: none; }
+        .planet, .hub { pointer-events: auto; }
+
+        .hint {
+          position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
+          margin: 0; font-size: 11px; color: var(--text-dim);
+          text-align: center; max-width: 90vw; pointer-events: none; z-index: 10;
         }
 
         .orbit-ring {
