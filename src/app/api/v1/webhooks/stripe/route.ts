@@ -84,8 +84,35 @@ export async function POST(req: NextRequest) {
           const userId = session.metadata?.supabase_user_id;
           const credits = Number(session.metadata?.credits);
           const packageId = session.metadata?.package_id;
+          const purchaseType = session.metadata?.purchase_type;
 
-          if (userId && credits > 0) {
+          // Enterprise self-service token top-up: credit the SPECIFIC key's
+          // custom_credits pool (purchase_custom_key_credits is idempotent by
+          // event id and re-verifies the key belongs to the user), not the
+          // user's shared profiles.credits.
+          if (purchaseType === "enterprise_tokens") {
+            const keyId = session.metadata?.key_id;
+            const tokens = Number(session.metadata?.tokens);
+            if (userId && keyId && credits > 0) {
+              const { data: newBalance, error: grantError } = await admin.rpc(
+                "purchase_custom_key_credits",
+                {
+                  p_key_id: keyId,
+                  p_user_id: userId,
+                  p_amount: credits,
+                  p_description: `Enterprise top-up: ${tokens.toLocaleString()} tokens (${credits.toLocaleString()} credits)`,
+                  p_reference: event.id,
+                }
+              );
+              if (grantError || newBalance == null || Number(newBalance) < 0) {
+                throw new Error(
+                  `purchase_custom_key_credits failed for key ${keyId} (event ${event.id}): ${
+                    grantError?.message ?? `unexpected balance ${newBalance}`
+                  }`
+                );
+              }
+            }
+          } else if (userId && credits > 0) {
             // Single atomic, idempotent grant: increments credits, flips the
             // activation gates (paying auto-approves API keys + Claude routes,
             // never auto-reverted), and writes the ledger row with the correct

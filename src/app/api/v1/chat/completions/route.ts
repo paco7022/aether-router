@@ -1634,7 +1634,10 @@ export async function POST(req: NextRequest) {
 
     // Enterprise per-token key: bill all (prompt+completion) tokens at the flat
     // rate; overrides per-request/per-token model pricing.
-    const flatSettle = isFlatPerTokenKey ? flatTokenCredits(promptTokens, completionTokens, flatRatePerM) : null;
+    // Bill the customer-VISIBLE prompt (our local estimate of their submitted
+    // body), NOT the upstream-reported prompt_tokens — or/ (Kiro) injects a
+    // ~11.7k-token system prompt the customer never sent and shouldn't pay for.
+    const flatSettle = isFlatPerTokenKey ? flatTokenCredits(estimatedPrompt, completionTokens, flatRatePerM) : null;
     // Premium-request models (t/, an/, w/) are flat-rate: 1 credit + N premium-request budget.
     // Flat-rate models (op/) charge a fixed per-request fee stored in premium_request_cost.
     const finalCredits = isFreePool ? 0 : flatSettle ? flatSettle.credits : isPremiumProvider ? 1 : isFlatRateProvider ? Number(model.premium_request_cost ?? 0.1) : Math.max(credits, 1);
@@ -1897,8 +1900,10 @@ async function handleStreamingResponse(
       keyInfo.isCustom &&
       keyInfo.pricingMode === "flat_per_token" &&
       (keyInfo.flatCostPerMTokens ?? 0) > 0;
+    // Visible-token billing: use the estimated (customer-submitted) prompt, not
+    // the upstream count inflated by or/'s injected Kiro system prompt.
     const flatSettle = isFlatPerTokenKey
-      ? flatTokenCredits(totalPromptTokens, totalCompletionTokens, keyInfo.flatCostPerMTokens ?? 0)
+      ? flatTokenCredits(estimatedPromptTokens, totalCompletionTokens, keyInfo.flatCostPerMTokens ?? 0)
       : null;
     const finalCredits = isFreePool ? 0 : flatSettle ? flatSettle.credits : isPremiumModel ? 1 : isFlatRateModel ? Number(model.premium_request_cost ?? 0.1) : Math.max(credits, 1);
     const loggedCostUsd = flatSettle ? flatSettle.costUsd : costUsd;
