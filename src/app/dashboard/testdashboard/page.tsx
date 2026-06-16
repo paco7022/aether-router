@@ -85,7 +85,7 @@ export default function TestDashboardPage() {
     if (!canvas || !ctx) return;
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-    type Star = { x: number; y: number; z: number; tw: number; ph: number };
+    type Star = { x: number; y: number; z: number; tw: number; ph: number; mag: number };
     let w = 0, h = 0, cx = 0, cy = 0, spread = 1;
     let stars: Star[] = [];
 
@@ -95,6 +95,7 @@ export default function TestDashboardPage() {
       z: init ? Math.random() : 1,     // depth: 1 = far, 0 = at the viewer
       tw: 0.4 + Math.random() * 1.3,   // twinkle speed
       ph: Math.random() * Math.PI * 2, // twinkle phase
+      mag: 0.45 + Math.random() * 0.55, // intrinsic brightness/size
     });
 
     const resize = () => {
@@ -105,7 +106,7 @@ export default function TestDashboardPage() {
       canvas.width = Math.floor(w * dpr);
       canvas.height = Math.floor(h * dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      const count = Math.min(260, Math.max(110, Math.floor((w * h) / 7000)));
+      const count = Math.min(340, Math.max(150, Math.floor((w * h) / 5500)));
       stars = Array.from({ length: count }, () => spawn(true));
       if (reduced) draw(performance.now());
     };
@@ -131,12 +132,12 @@ export default function TestDashboardPage() {
           continue;
         }
         const depth = 1 - s.z;                 // 0 far .. 1 near
-        const size = 0.3 + depth * 1.7;
-        const tw = reduced ? 1 : 0.72 + 0.28 * Math.sin((now / 1000) * s.tw + s.ph);
-        const alpha = (0.22 + depth * 0.6) * tw;
+        const size = (0.8 + depth * 1.9) * (0.8 + s.mag * 0.5);
+        const tw = reduced ? 1 : 0.78 + 0.22 * Math.sin((now / 1000) * s.tw + s.ph);
+        const alpha = Math.min(1, s.mag * (0.55 + depth * 0.5) * tw);
         ctx!.beginPath();
         ctx!.arc(sx, sy, size, 0, Math.PI * 2);
-        ctx!.fillStyle = `rgba(218,224,255,${alpha.toFixed(3)})`;
+        ctx!.fillStyle = `rgba(220,226,255,${alpha.toFixed(3)})`;
         ctx!.fill();
       }
       if (!reduced) raf = requestAnimationFrame(draw);
