@@ -102,7 +102,23 @@ function openAIToAnthropic(req: ProviderRequest): AnthropicRequestBody {
   for (const m of req.messages || []) {
     const text = stringifyContent(m.content);
     if (m.role === "system") {
-      if (text) systemParts.push(text);
+      if (!text) continue;
+      // Only LEADING system messages (before any user/assistant turn) become
+      // the top-level Anthropic `system` prompt. System messages injected
+      // mid-conversation — e.g. SillyTavern depth injections / jailbreaks /
+      // formatting presets — must stay at their position: hoisting them to the
+      // top makes some Claude variants (notably opus-4-8) ignore them entirely.
+      // Convert those to an inline user turn so the model still honours them.
+      if (out.length === 0) {
+        systemParts.push(text);
+      } else {
+        const last = out[out.length - 1];
+        if (last && last.role === "user") {
+          last.content = stringifyContent(last.content) + "\n\n" + text;
+        } else {
+          out.push({ role: "user", content: text });
+        }
+      }
       continue;
     }
     if (m.role === "user" || m.role === "assistant") {
@@ -476,10 +492,22 @@ export const orbitProvider: Provider = {
       // Non-stream: buffer, translate to OpenAI shape, return JSON.
       const anthJson = (await upstream.json()) as AnthropicNonStreamResponse;
       const openAi = anthropicToOpenAINonStream(anthJson, anthBody.model);
-      return new Response(JSON.stringify(openAi), {
+      // Orbit occasionally returns 200 OK with empty content. Treat an empty
+      // body like a transient failure and retry on the next key before giving
+      // up (kept as the fallback if every attempt comes back empty).
+      const emptyContent = !openAi.choices[0]?.message?.content?.trim();
+      const jsonResponse = new Response(JSON.stringify(openAi), {
         status: 200,
         headers: { "content-type": "application/json" },
       });
+      if (emptyContent && attempt < MAX_RETRIES) {
+        console.warn(
+          `[orbit] key ${keyTag}… attempt ${attempt + 1}/${MAX_RETRIES + 1} → empty content; retrying on next key`
+        );
+        lastResponse = jsonResponse;
+        continue;
+      }
+      return jsonResponse;
     }
 
     return lastResponse!;
