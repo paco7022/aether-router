@@ -1,20 +1,13 @@
 import { createServerSupabase } from "@/lib/supabase/server";
 import { pricePerMTokens, creditsToUsd } from "@/lib/credits";
 import { isPremiumProvider as isPremiumProviderName, isFlatRateProvider as isFlatRateProviderName } from "@/lib/providers/types";
-
-const CAPABILITY_META: Record<string, { label: string; color: string; icon: string }> = {
-  tool_calling:    { label: "Tools",     color: "rgba(59, 130, 246, 0.85)",  icon: "T" },
-  vision:          { label: "Vision",    color: "rgba(168, 85, 247, 0.85)",  icon: "V" },
-  web_search:      { label: "Search",    color: "rgba(34, 197, 94, 0.85)",   icon: "S" },
-  streaming:       { label: "Stream",    color: "rgba(107, 114, 128, 0.60)", icon: "St" },
-  json_mode:       { label: "JSON",      color: "rgba(245, 158, 11, 0.85)",  icon: "J" },
-  system_message:  { label: "System",    color: "rgba(107, 114, 128, 0.60)", icon: "Sy" },
-  reasoning:       { label: "Reasoning", color: "rgba(239, 68, 68, 0.85)",   icon: "R" },
-  pdf_input:       { label: "PDF",       color: "rgba(236, 72, 153, 0.85)",  icon: "P" },
-};
+import ModelsTable, { type ModelRow } from "./models-table";
 
 // Capabilities worth highlighting (skip ubiquitous ones like streaming/system_message)
 const HIGHLIGHTED_CAPABILITIES = ["tool_calling", "vision", "web_search", "json_mode", "reasoning", "pdf_input"];
+
+// Models added within this window get a "New" highlight on the table
+const NEW_MODEL_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 export default async function ModelsPage() {
   const supabase = await createServerSupabase();
@@ -23,6 +16,31 @@ export default async function ModelsPage() {
     .select("*")
     .eq("is_active", true)
     .order("cost_per_m_input", { ascending: true });
+
+  const newThreshold = Date.now() - NEW_MODEL_WINDOW_MS;
+
+  const rows: ModelRow[] = (models || []).map((model) => {
+    const isPremium = isPremiumProviderName(model.provider);
+    const isFlatRate = isFlatRateProviderName(model.provider);
+    const creditsInput = pricePerMTokens(model.cost_per_m_input, model.margin);
+    const creditsOutput = pricePerMTokens(model.cost_per_m_output, model.margin);
+    const caps: string[] = Array.isArray(model.capabilities)
+      ? model.capabilities
+      : ["streaming", "system_message"];
+    const createdAt = model.created_at ? new Date(model.created_at).getTime() : 0;
+    return {
+      id: model.id,
+      displayName: model.display_name,
+      highlightedCaps: caps.filter((c: string) => HIGHLIGHTED_CAPABILITIES.includes(c)),
+      priceInput: creditsToUsd(creditsInput).toFixed(4),
+      priceOutput: creditsToUsd(creditsOutput).toFixed(4),
+      premiumRequestCost: Number(model.premium_request_cost),
+      isPremium,
+      isFlatRate,
+      creditsInputLabel: creditsInput.toLocaleString(),
+      isNew: createdAt >= newThreshold,
+    };
+  });
 
   return (
     <div>
@@ -92,100 +110,7 @@ export default async function ModelsPage() {
         </div>
       </div>
 
-      <div className="glass-card shimmer-line overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm aurora-table">
-            <thead>
-              <tr className="text-[var(--text-muted)] text-left">
-                <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider">Model</th>
-                <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider">Capabilities</th>
-                <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider text-right">Input / 1M tokens</th>
-                <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider text-right">Output / 1M tokens</th>
-                <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider text-right">Premium Cost</th>
-                <th className="px-5 py-3.5 font-medium text-xs uppercase tracking-wider text-right">Credits/M (input)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(models || []).map((model) => {
-                const isPremium = isPremiumProviderName(model.provider);
-                const isFlatRate = isFlatRateProviderName(model.provider);
-                const creditsInput = pricePerMTokens(model.cost_per_m_input, model.margin);
-                const creditsOutput = pricePerMTokens(model.cost_per_m_output, model.margin);
-                const priceInput = creditsToUsd(creditsInput);
-                const priceOutput = creditsToUsd(creditsOutput);
-                const caps: string[] = Array.isArray(model.capabilities)
-                  ? model.capabilities
-                  : ["streaming", "system_message"];
-                const highlightedCaps = caps.filter((c: string) => HIGHLIGHTED_CAPABILITIES.includes(c));
-                return (
-                  <tr key={model.id} className="group">
-                    <td className="px-5 py-3.5">
-                      <div className="flex items-center gap-2.5">
-                        <div>
-                          <p className="font-medium text-white/85">{model.display_name}</p>
-                          <p className="text-[11px] text-cyan-300/50 font-mono mt-0.5">{model.id}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-5 py-3.5">
-                      <div className="flex flex-wrap gap-1">
-                        {highlightedCaps.length > 0 ? highlightedCaps.map((cap: string) => {
-                          const meta = CAPABILITY_META[cap];
-                          if (!meta) return null;
-                          return (
-                            <span
-                              key={cap}
-                              title={meta.label}
-                              className="inline-flex items-center text-[10px] font-medium px-1.5 py-0.5 rounded-md"
-                              style={{
-                                background: meta.color.replace(/[\d.]+\)$/, "0.12)"),
-                                color: meta.color,
-                                border: `1px solid ${meta.color.replace(/[\d.]+\)$/, "0.20)")}`,
-                              }}
-                            >
-                              {meta.label}
-                            </span>
-                          );
-                        }) : (
-                          <span className="text-[10px] text-[var(--text-dim)]">Text only</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-5 py-3.5 text-right text-white/70">
-                      {isPremium || isFlatRate ? <span className="text-[var(--text-dim)]">--</span> : `$${priceInput.toFixed(4)}`}
-                    </td>
-                    <td className="px-5 py-3.5 text-right text-white/70">
-                      {isPremium || isFlatRate ? <span className="text-[var(--text-dim)]">--</span> : `$${priceOutput.toFixed(4)}`}
-                    </td>
-                    <td className="px-5 py-3.5 text-right text-white/70">
-                      {isFlatRate ? (
-                        <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full badge-success">
-                          {Number(model.premium_request_cost).toFixed(1)} cr
-                        </span>
-                      ) : Number(model.premium_request_cost) > 0 ? (
-                        <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${
-                          Number(model.premium_request_cost) >= 2
-                            ? "badge-error"
-                            : Number(model.premium_request_cost) >= 1
-                            ? "badge-amber"
-                            : "badge-success"
-                        }`}>
-                          {Number(model.premium_request_cost) === 1 ? "1 req" : `${Number(model.premium_request_cost)} req`}
-                        </span>
-                      ) : (
-                        <span className="text-[var(--text-dim)]">--</span>
-                      )}
-                    </td>
-                    <td className="px-5 py-3.5 text-right font-semibold aurora-text">
-                      {isPremium ? "1 credit" : isFlatRate ? `${Number(model.premium_request_cost).toFixed(1)} cr` : creditsInput.toLocaleString()}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <ModelsTable models={rows} />
 
       <p className="text-xs text-[var(--text-dim)] mt-4 leading-relaxed">
         We are a routing service. Model availability and quality depend on upstream providers.
