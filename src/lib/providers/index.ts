@@ -10,9 +10,11 @@ import { opencodeProvider } from "./opencode";
 import { trolllmProvider } from "./trolllm";
 import { orbitProvider } from "./orbit";
 import { routmyProvider } from "./routmy";
+import { deepseekProvider } from "./deepseek";
 
 const providers: Record<string, Provider> = {
   nano: nanoProvider,
+  deepseek: deepseekProvider,
   webproxy: webproxyProvider,
   hapuppy: hapuppyProvider,
   gameron: gameronProvider,
