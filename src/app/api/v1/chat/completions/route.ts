@@ -1687,7 +1687,7 @@ export async function POST(req: NextRequest) {
     // 10. Log usage (always log, even for free-pool — needed for token tracking)
     const durationMs = Date.now() - startTime;
     // Requests served under a free event don't cost premium-request budget.
-    const premiumCost = isPremiumProvider && !activeEventId && !isPlanUnlimited && !isFlatPerTokenKey
+    const premiumCost = isPremiumProvider && !activeEventId && !isPlanUnlimited && !isFlatPerTokenKey && !isFreePool
       ? (premiumRequestCostForUsage || getContextAdjustedPremiumRequestCost(modelId, model.provider, Number(model.premium_request_cost ?? 1), estimatedPrompt))
       : 0;
     // finish_reason of the upstream response — logged to diagnose cut-offs
@@ -2063,7 +2063,7 @@ async function handleStreamingResponse(
 
     const durationMs = Date.now() - startTime;
     const isPremium = isPremiumProviderName(model.provider);
-    const streamPremiumCost = isPremium && !activeEventId && !isPlanUnlimited && !isFlatPerTokenKey
+    const streamPremiumCost = isPremium && !activeEventId && !isPlanUnlimited && !isFlatPerTokenKey && !isFreePool
       ? (premiumRequestCostForUsage || getContextAdjustedPremiumRequestCost(model.id, model.provider, Number(model.premium_request_cost ?? 1), estimatedPromptTokens))
       : 0;
     const writeStreamTx = !isFreePool && chargedCredits > 0;
