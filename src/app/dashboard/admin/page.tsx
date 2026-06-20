@@ -14,6 +14,8 @@ interface UserProfile {
   gm_claimed_date: string | null;
   is_activated: boolean;
   claude_activated: boolean;
+  is_booster: boolean;
+  discord_id: string | null;
   created_at: string;
 }
 
@@ -424,6 +426,27 @@ export default function AdminPage() {
     );
   }
 
+  async function handleToggleBooster() {
+    if (!selectedUser) return;
+    const next = !selectedUser.is_booster;
+    const result = await api("POST", undefined, {
+      action: "set_booster",
+      user_id: selectedUser.id,
+      booster: next,
+    });
+    if (result.error) {
+      setError(result.error);
+      return;
+    }
+    setSelectedUser({ ...selectedUser, is_booster: next });
+    setUsers((prev) =>
+      prev.map((u) => (u.id === selectedUser.id ? { ...u, is_booster: next } : u))
+    );
+    if (next && typeof result.granted === "number" && result.granted > 0) {
+      setError("");
+    }
+  }
+
   async function handleToggleModel(modelId: string, active: boolean) {
     await api("POST", undefined, { action: "toggle_model", model_id: modelId, is_active: active });
     setModels((prev) => prev.map((m) => (m.id === modelId ? { ...m, is_active: active } : m)));
@@ -774,6 +797,33 @@ export default function AdminPage() {
                     {selectedUser.is_activated ? "Active â€” click to deactivate" : "Inactive â€” click to activate"}
                   </button>
                 </div>
+
+                {/* Discord booster reward (admin only) */}
+                {!isMod && (
+                <div className="space-y-2 mb-4">
+                  <label className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">
+                    Discord Booster (10k credits/month)
+                  </label>
+                  <button onClick={handleToggleBooster}
+                    className="w-full text-xs font-medium rounded-lg px-3 py-1.5 transition-colors"
+                    style={selectedUser.is_booster ? {
+                      background: "rgba(139, 92, 246, 0.12)",
+                      border: "1px solid rgba(139, 92, 246, 0.30)",
+                      color: "#c4b5fd",
+                    } : {
+                      background: "rgba(148, 163, 184, 0.08)",
+                      border: "1px solid rgba(148, 163, 184, 0.18)",
+                      color: "#94a3b8",
+                    }}>
+                    {selectedUser.is_booster ? "Booster - click to remove" : "Not a booster - click to mark"}
+                  </button>
+                  {selectedUser.discord_id ? (
+                    <p className="text-[10px] text-[var(--text-dim)]">Discord ID: <span className="font-mono text-cyan-300/60">{selectedUser.discord_id}</span></p>
+                  ) : (
+                    <p className="text-[10px] text-amber-400/60">No Discord linked</p>
+                  )}
+                </div>
+                )}
 
                 {/* Claude-route activation gate */}
                 <div className="space-y-2 mb-4">

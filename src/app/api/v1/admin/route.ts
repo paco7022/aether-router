@@ -147,7 +147,7 @@ export async function GET(req: NextRequest) {
       const search = req.nextUrl.searchParams.get("search") || "";
       let query = supabase
         .from("profiles")
-        .select("id, email, display_name, credits, daily_credits, plan_id, gm_claimed_date, is_activated, claude_activated, created_at, updated_at")
+        .select("id, email, display_name, credits, daily_credits, plan_id, gm_claimed_date, is_activated, claude_activated, is_booster, discord_id, created_at, updated_at")
         .order("created_at", { ascending: false })
         .limit(100);
 
@@ -157,13 +157,13 @@ export async function GET(req: NextRequest) {
         const [{ data: byEmail }, { data: byName }] = await Promise.all([
           supabase
             .from("profiles")
-            .select("id, email, display_name, credits, daily_credits, plan_id, gm_claimed_date, is_activated, claude_activated, created_at, updated_at")
+            .select("id, email, display_name, credits, daily_credits, plan_id, gm_claimed_date, is_activated, claude_activated, is_booster, discord_id, created_at, updated_at")
             .ilike("email", `%${safeSearch}%`)
             .order("created_at", { ascending: false })
             .limit(100),
           supabase
             .from("profiles")
-            .select("id, email, display_name, credits, daily_credits, plan_id, gm_claimed_date, is_activated, claude_activated, created_at, updated_at")
+            .select("id, email, display_name, credits, daily_credits, plan_id, gm_claimed_date, is_activated, claude_activated, is_booster, discord_id, created_at, updated_at")
             .ilike("display_name", `%${safeSearch}%`)
             .order("created_at", { ascending: false })
             .limit(100),
@@ -776,6 +776,28 @@ export async function POST(req: NextRequest) {
         .eq("id", user_id);
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
       return NextResponse.json({ ok: true, claude_activated: !!activated });
+    }
+
+    // ── Discord server-booster reward (admin only; not in MOD_POST_ACTIONS) ──
+    // Flagging a user as a booster makes them eligible for 10k credits/month.
+    // When turning it ON we immediately grant this month's reward (idempotent
+    // per calendar month); the daily cron handles subsequent months.
+    case "set_booster": {
+      const { user_id, booster } = body;
+      if (!user_id) return NextResponse.json({ error: "user_id required" }, { status: 400 });
+      const { error } = await supabase
+        .from("profiles")
+        .update({ is_booster: !!booster })
+        .eq("id", user_id);
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+      let granted = 0;
+      if (booster) {
+        const { data: g, error: grantErr } = await supabase.rpc("grant_booster_credits", { p_user_id: user_id });
+        if (grantErr) console.error("Booster grant failed:", grantErr.message);
+        else granted = Number(g) || 0;
+      }
+      return NextResponse.json({ ok: true, booster: !!booster, granted });
     }
 
     // ── Moderation review actions ──

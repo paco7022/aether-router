@@ -79,6 +79,15 @@ const noFreeEventCache = new TtlCache<true>(60_000);
 // Unset this flag (or let the upstream key die) to revert.
 const DLAB_FREE_UNLIMITED = process.env.DLAB_FREE_UNLIMITED === "true";
 
+// or/ (Orbit) free + unlimited for everyone, independent of FREE_PROMOS_ENABLED
+// (same self-contained pattern as DLAB_FREE_UNLIMITED). Routes as zero-cost
+// premium → no credits, no premium pool, no daily cap. The ONLY guard is a
+// context cap: 32k for free plans, 128k for paid. Flip this off to revert
+// or/ back to its normal premium-pool billing.
+const ORBIT_FREE_UNLIMITED = process.env.ORBIT_FREE_UNLIMITED !== "false";
+const ORBIT_FREE_CONTEXT = 32768;   // free plans
+const ORBIT_PAID_CONTEXT = 131072;  // paid plans
+
 type StreamChargeReservation = {
   reservedCredits: number;
   balanceAfterReserve: number;
@@ -537,11 +546,18 @@ export async function POST(req: NextRequest) {
   // stay off.
   const isDlabFreeUnlimited = DLAB_FREE_UNLIMITED && model.provider === "dlab";
 
+  // or/ (Orbit) free + unlimited: routes as zero-cost premium regardless of its
+  // catalog price, so no credits / premium pool / daily cap are consumed — only
+  // the orbit context cap below applies. Catalog cost is left untouched so it
+  // reverts cleanly by flipping ORBIT_FREE_UNLIMITED off.
+  const isOrbitFreeUnlimited = ORBIT_FREE_UNLIMITED && model.provider === "orbit";
+
   // Zero-cost premium models (cost_per_m_input=0 + premium_request_cost=0) route
   // as free — no credits or premium-request budget consumed. Revert by restoring
   // cost/margin values in the models table.
   const isZeroCostPremium =
     isDlabFreeUnlimited ||
+    isOrbitFreeUnlimited ||
     (FREE_PROMOS_ENABLED &&
       isPremiumProvider && (
         (Number(model.cost_per_m_input) === 0 && Number(model.premium_request_cost) === 0) ||
@@ -1152,9 +1168,16 @@ export async function POST(req: NextRequest) {
   // models. Look up the plan's gm_max_context and enforce it.
   if (!activeEventId && (isZeroCostPremium || isZeroCostFlatRate)) {
     if (!keyInfo.isCustom) {
-      const { data: zeroCostPlan } = await getPlanLimits(supabase, keyInfo.planId);
-
-      const zeroCostMaxContext = (zeroCostPlan?.gm_max_context ?? 32768) * (isContextBoosted ? 2 : 1);
+      // or/ free-unlimited uses fixed caps (32k free / 128k paid) instead of
+      // the plan's gm_max_context, so the promo stays isolated to Orbit and
+      // doesn't change context limits for other premium models.
+      let zeroCostMaxContext: number;
+      if (isOrbitFreeUnlimited) {
+        zeroCostMaxContext = keyInfo.planId === "free" ? ORBIT_FREE_CONTEXT : ORBIT_PAID_CONTEXT;
+      } else {
+        const { data: zeroCostPlan } = await getPlanLimits(supabase, keyInfo.planId);
+        zeroCostMaxContext = (zeroCostPlan?.gm_max_context ?? 32768) * (isContextBoosted ? 2 : 1);
+      }
       if (zeroCostMaxContext > 0) {
         const estimatedContext = estimatePromptTokens(body);
         if (estimatedContext > zeroCostMaxContext) {
