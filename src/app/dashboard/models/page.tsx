@@ -1,6 +1,7 @@
 import { createServerSupabase } from "@/lib/supabase/server";
 import { pricePerMTokens, creditsToUsd } from "@/lib/credits";
 import { isPremiumProvider as isPremiumProviderName, isFlatRateProvider as isFlatRateProviderName } from "@/lib/providers/types";
+import { classifyFamily } from "@/lib/model-family";
 import ModelsTable, { type ModelRow } from "./models-table";
 
 // Capabilities worth highlighting (skip ubiquitous ones like streaming/system_message)
@@ -28,9 +29,13 @@ export default async function ModelsPage() {
       ? model.capabilities
       : ["streaming", "system_message"];
     const createdAt = model.created_at ? new Date(model.created_at).getTime() : 0;
+    const family = classifyFamily(model.display_name ?? "", model.id ?? "");
     return {
       id: model.id,
       displayName: model.display_name,
+      familyKey: family.key,
+      familyLabel: family.label,
+      familyColor: family.color,
       highlightedCaps: caps.filter((c: string) => HIGHLIGHTED_CAPABILITIES.includes(c)),
       priceInput: creditsToUsd(creditsInput).toFixed(4),
       priceOutput: creditsToUsd(creditsOutput).toFixed(4),

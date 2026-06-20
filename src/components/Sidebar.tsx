@@ -116,6 +116,7 @@ const nav = [
   { href: "/dashboard/billing", label: "Billing", icon: icons.billing },
   { href: "/dashboard/enterprise", label: "Enterprise", icon: icons.enterprise },
   { href: "/dashboard/referrals", label: "Referrals", icon: icons.referrals },
+  { href: "/dashboard/discord", label: "Discord", icon: icons.discord },
   { href: "/dashboard/docs", label: "Docs", icon: icons.docs },
   { href: "/dashboard/settings", label: "Settings", icon: icons.settings },
   { href: "/policies", label: "Policies", icon: icons.policies },
@@ -292,20 +293,6 @@ export function Sidebar({
               </Link>
             );
           })}
-
-          {/* Discord — external community/support link */}
-          <a
-            href="https://discord.gg/GyV43jg68f"
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={onClose}
-            className="group flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-200 text-[var(--text-muted)] hover:text-white hover:bg-white/[0.03]"
-          >
-            <span className="w-5 flex items-center justify-center text-[var(--text-dim)] group-hover:text-[#7b86f5] transition-colors">
-              {icons.discord}
-            </span>
-            <span className="font-medium">Discord</span>
-          </a>
 
           {isAdmin && (
             <>
