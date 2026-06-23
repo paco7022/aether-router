@@ -4,8 +4,17 @@ import { hashApiKey } from "@/lib/auth";
 import { API_KEY_PREFIX } from "@/lib/constants";
 import { requireCsrf } from "@/lib/csrf";
 import { banUserForViolation } from "@/lib/content-moderation";
+import { banUserAccount } from "@/lib/account-ban";
 import { getAdminRole, type AdminRole } from "@/lib/admin-role";
 import { isAdmin } from "@/lib/admin";
+import { TtlCache } from "@/lib/db-cache";
+
+// Token-consumption totals are a heavy SUM over usage_logs. Admins poll the
+// Stats tab, so cache the result for 15 min to protect the shared compute's
+// Disk IO budget (see the 2026-06-08 outage). Single key — the totals are
+// global, not per-user.
+type TokenTotals = { tokens_7d: number; tokens_30d: number; tokens_all: number };
+const tokenTotalsCache = new TtlCache<TokenTotals>(15 * 60 * 1000, 1);
 
 // Escape LIKE/ILIKE wildcards so user input is treated literally.
 function escapeLike(input: string): string {
@@ -38,6 +47,7 @@ const MOD_POST_ACTIONS = new Set([
   "ban_ip",
   "unban_ip",
   "toggle_key",
+  "ban_multiaccount",
 ]);
 
 async function requireAdmin(
@@ -221,12 +231,36 @@ export async function GET(req: NextRequest) {
           .slice(0, 10);
       }
 
+      // Token totals are admin-only (mods can see basic stats but not the
+      // router's total consumption volume — sensitive business-scale metric).
+      let tokenTotals: TokenTotals | null = null;
+      if (role === "admin") {
+        tokenTotals = tokenTotalsCache.get("global") ?? null;
+        if (!tokenTotals) {
+          // get_token_totals isn't in the generated DB types yet; cast the row.
+          const { data: tt } = await supabase.rpc("get_token_totals").single<{
+            tokens_7d: number | string;
+            tokens_30d: number | string;
+            tokens_all: number | string;
+          }>();
+          if (tt) {
+            tokenTotals = {
+              tokens_7d: Number(tt.tokens_7d) || 0,
+              tokens_30d: Number(tt.tokens_30d) || 0,
+              tokens_all: Number(tt.tokens_all) || 0,
+            };
+            tokenTotalsCache.set("global", tokenTotals);
+          }
+        }
+      }
+
       return NextResponse.json({
         stats: {
           totalUsers: totalUsers || 0,
           totalRequests: totalRequests || 0,
           todayRequests: todayRequests || 0,
           topUsersToday: topUsersData || [],
+          tokenTotals,
         },
       });
     }
@@ -850,6 +884,40 @@ export async function POST(req: NextRequest) {
         .eq("id", review_id);
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
       return NextResponse.json({ ok: true, banned_user: review.user_id });
+    }
+
+    // Ban an account for multi-account abuse / key sharing. Auth ban + key
+    // disable + profile lockdown + Discord cross-ban (via banUserAccount, no
+    // csam_incident). Optionally bans the shared device fingerprint and marks
+    // a queued multiaccount_reviews row actioned.
+    case "ban_multiaccount": {
+      const { user_id, fingerprint, review_id } = body;
+      if (!user_id) return NextResponse.json({ error: "user_id required" }, { status: 400 });
+
+      const guard = await assertModNotProtectedUser(supabase, role, user_id);
+      if (guard) return guard;
+
+      await banUserAccount({ userId: user_id, reason: "Multi-account abuse" });
+
+      if (typeof fingerprint === "string" && fingerprint.trim()) {
+        const fp = fingerprint.trim();
+        const { data: exists } = await supabase
+          .from("banned_fingerprints").select("id").eq("fingerprint", fp).maybeSingle();
+        if (!exists) {
+          await supabase.from("banned_fingerprints").insert({
+            fingerprint: fp, reason: "Multi-account abuse", banned_by: user.email,
+          });
+        }
+      }
+
+      if (review_id) {
+        await supabase
+          .from("multiaccount_reviews")
+          .update({ status: "actioned", reviewed_by: user.email, reviewed_at: new Date().toISOString() })
+          .eq("id", review_id);
+      }
+
+      return NextResponse.json({ ok: true, banned_user: user_id });
     }
 
     default:

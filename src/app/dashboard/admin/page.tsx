@@ -126,6 +126,7 @@ interface Stats {
   totalRequests: number;
   todayRequests: number;
   topUsersToday: { user_id: string; email: string; requests: number }[];
+  tokenTotals: { tokens_7d: number; tokens_30d: number; tokens_all: number } | null;
 }
 
 interface ModerationReview {
@@ -650,6 +651,19 @@ export default function AdminPage() {
             <StatCard label="Total Requests" value={stats.totalRequests} color="blue" />
             <StatCard label="Today Requests" value={stats.todayRequests} color="cyan" />
           </div>
+
+          {/* Token consumption — admin-only. Tracks the router's growth/volume
+              (e.g. for an AWS partner application). Cached server-side ~15 min. */}
+          {stats.tokenTotals && (
+            <div>
+              <h3 className="font-semibold text-sm text-white/85 mb-3">Token Consumption</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                <StatCard label="Tokens (7d)" value={stats.tokenTotals.tokens_7d} color="violet" compact />
+                <StatCard label="Tokens (30d)" value={stats.tokenTotals.tokens_30d} color="blue" compact />
+                <StatCard label="Tokens (All-time)" value={stats.tokenTotals.tokens_all} color="cyan" compact />
+              </div>
+            </div>
+          )}
 
           <div className="glass-card shimmer-line overflow-hidden">
             <div className="p-4 border-b border-white/[0.04]">
@@ -1526,7 +1540,15 @@ export default function AdminPage() {
   );
 }
 
-function StatCard({ label, value, color }: { label: string; value: number; color: "violet" | "blue" | "cyan" }) {
+function formatCompact(n: number): string {
+  if (n >= 1e12) return (n / 1e12).toFixed(2) + "T";
+  if (n >= 1e9) return (n / 1e9).toFixed(2) + "B";
+  if (n >= 1e6) return (n / 1e6).toFixed(2) + "M";
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + "K";
+  return n.toLocaleString();
+}
+
+function StatCard({ label, value, color, compact }: { label: string; value: number; color: "violet" | "blue" | "cyan"; compact?: boolean }) {
   const glowClass = color === "violet" ? "glow-violet" : color === "blue" ? "glow-blue" : "glow-cyan";
   const iconColors: Record<string, string> = {
     violet: "rgba(139, 92, 246, 0.1)",
@@ -1547,7 +1569,9 @@ function StatCard({ label, value, color }: { label: string; value: number; color
           style={{ background: iconColors[color], border: `1px solid ${borderColors[color]}` }}>
         </div>
       </div>
-      <p className="text-3xl font-bold text-white/90">{value.toLocaleString()}</p>
+      <p className="text-3xl font-bold text-white/90" title={compact ? value.toLocaleString() : undefined}>
+        {compact ? formatCompact(value) : value.toLocaleString()}
+      </p>
     </div>
   );
 }
