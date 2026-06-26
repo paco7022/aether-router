@@ -11,6 +11,11 @@ tsconfig.tsbuildinfo
 supabase/.temp/
 preset examples/
 
+# Training datasets / model outputs — contain real user RP content; never commit
+# (the export script writes to ../training-data, outside the repo, but guard anyway)
+training-data/
+*.jsonl
+
 # PC deployment runtime artifacts
 logs/
 .sync.lock
