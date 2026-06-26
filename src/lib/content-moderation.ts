@@ -13,6 +13,7 @@
 
 import { createHash } from "node:crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { banFromDiscordGuild } from "@/lib/discord-bot";
 
 // Primary moderation backend. Defaults to Hapuppy's beta host, which resells
 // OpenAI's omni-moderation model for free and returns the OpenAI-compatible
@@ -38,9 +39,12 @@ const FLAG_CATEGORIES = new Set(["sexual/minors"]);
 
 type CacheEntry = { flagged: boolean; expiresAt: number };
 
-// Process-local. Survives across requests within a warm server isolate
-// container; resets on cold start. Repeated identical prompts within a
-// container short-circuit the moderation call.
+// Process-local L1 cache. Survives across requests within a warm isolate;
+// resets on cold start. On Cloudflare Workers isolates are short-lived, so
+// this only dedupes bursts within a warm container — it is NOT a reliable
+// cross-request cache. The real volume fix is moderating only newly-introduced
+// content per request (extractCurrentTurnText); a persistent KV-backed cache
+// would additionally dedupe repeated cards across cold starts (follow-up).
 const cache = new Map<string, CacheEntry>();
 
 function cachePrune() {
@@ -97,6 +101,30 @@ export function extractUserAuthoredText(messages: ModerationMessage[]): string[]
     if (m.role !== "user" && m.role !== "system") continue;
     const text = extractTextFromContent(m.content).trim();
     if (text) out.push(text);
+  }
+  return out;
+}
+
+// Moderate only the content NEWLY introduced by this request: every `system`
+// message (the card / instructions, which a caller can change each request)
+// plus the single newest `user` turn. Prior user turns were already moderated
+// when they first arrived. Re-checking the whole transcript on every request —
+// while the per-isolate cache stays cold on serverless — multiplied moderation
+// calls ~5x and saturated the rate limit. This keeps card coverage at ~1 call
+// per request instead of one-per-historical-turn.
+export function extractCurrentTurnText(messages: ModerationMessage[]): string[] {
+  const out: string[] = [];
+  for (const m of messages) {
+    if (!m || m.role !== "system") continue;
+    const text = extractTextFromContent(m.content).trim();
+    if (text) out.push(text);
+  }
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (!m || m.role !== "user") continue;
+    const text = extractTextFromContent(m.content).trim();
+    if (text) out.push(text);
+    break;
   }
   return out;
 }
@@ -187,7 +215,10 @@ async function fetchModeration(
 }
 
 export async function moderateMessages(messages: ModerationMessage[]): Promise<ModerationResult> {
-  const texts = extractUserAuthoredText(messages);
+  // Only the newly-introduced content (system card + latest user turn). Prior
+  // turns were moderated when they first arrived; re-moderating the whole
+  // transcript every request saturated the rate limit. See extractCurrentTurnText.
+  const texts = extractCurrentTurnText(messages);
   if (texts.length === 0) {
     return { flagged: false, flaggedItems: [], serviceError: false };
   }
@@ -452,5 +483,27 @@ export async function banUserForViolation(options: {
     .eq("user_id", options.userId);
   if (keyErr) {
     console.error("Failed to disable api_keys after violation:", keyErr.message);
+  }
+
+  // Cross-ban: propagate to the Discord guild so one admin action removes the
+  // violator from both surfaces. Best-effort — the router ban above is
+  // authoritative and must not be undone if Discord is down/unconfigured.
+  const { data: prof } = await supabase
+    .from("profiles")
+    .select("discord_id")
+    .eq("id", options.userId)
+    .single();
+  if (prof?.discord_id) {
+    const result = await banFromDiscordGuild(
+      prof.discord_id,
+      `Aether AUP violation (${options.source})`
+    );
+    if (!result.ok) {
+      console.warn(
+        `Discord cross-ban not applied for ${options.userId}: ${result.skipped}${
+          result.status ? ` (${result.status})` : ""
+        }`
+      );
+    }
   }
 }

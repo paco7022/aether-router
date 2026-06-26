@@ -30,6 +30,7 @@ import {
   moderateMessages,
   recordModerationReview,
 } from "@/lib/content-moderation";
+import { captureTrainingSample } from "@/lib/training-capture";
 import { applyPreset } from "@/lib/preset";
 import { getBuiltinPreset } from "@/lib/builtinPresets";
 import { tryPcFailover } from "@/lib/pc-failover";
@@ -79,14 +80,26 @@ const noFreeEventCache = new TtlCache<true>(60_000);
 // Unset this flag (or let the upstream key die) to revert.
 const DLAB_FREE_UNLIMITED = process.env.DLAB_FREE_UNLIMITED === "true";
 
-// or/ (Orbit) free + unlimited for everyone, independent of FREE_PROMOS_ENABLED
-// (same self-contained pattern as DLAB_FREE_UNLIMITED). Routes as zero-cost
-// premium → no credits, no premium pool, no daily cap. The ONLY guard is a
-// context cap: 32k for free plans, 128k for paid. Flip this off to revert
-// or/ back to its normal premium-pool billing.
+// or/ (Orbit) free + unlimited, independent of FREE_PROMOS_ENABLED (same
+// self-contained pattern as DLAB_FREE_UNLIMITED). Routes as zero-cost premium →
+// no credits, no premium pool, no daily cap; only a context cap applies.
+// 2026-06-24: scoped to the top tiers (ultra/ultimate/max) — see
+// ORBIT_ZENLLM_FREE_PLANS below; cheaper plans now bill 1 premium request.
+// This env flag is the global kill switch (set "false" to disable for everyone).
 const ORBIT_FREE_UNLIMITED = process.env.ORBIT_FREE_UNLIMITED !== "false";
 const ORBIT_FREE_CONTEXT = 32768;   // free plans
 const ORBIT_PAID_CONTEXT = 131072;  // paid plans
+
+// z/ (ZenLLM) free promo: same self-contained zero-cost pattern as or/.
+// Routes as zero-cost premium → no credits, no premium pool, no daily cap.
+// The only guard is a context cap: 32k for free plans, UNLIMITED for paid
+// (ZENLLM_PAID_CONTEXT = 0 → no cap). Default ON.
+// 2026-06-24: scoped to the top tiers (ultra/ultimate/max) — see
+// ORBIT_ZENLLM_FREE_PLANS below; cheaper plans now bill 1 premium request.
+// This env flag is the global kill switch (set "false" to disable for everyone).
+const ZENLLM_FREE_UNLIMITED = process.env.ZENLLM_FREE_UNLIMITED !== "false";
+const ZENLLM_FREE_CONTEXT = 32768;  // free plans
+const ZENLLM_PAID_CONTEXT = 0;      // paid plans = unlimited (0 = no cap)
 
 type StreamChargeReservation = {
   reservedCredits: number;
@@ -391,6 +404,33 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Free-tier Discord verification gate.
+  //
+  // Free accounts must verify ownership via Discord OAuth (one Discord = one
+  // free account) to keep free routing. Existing users get a grace window
+  // (discord_link_required_by); once it lapses without a verified link, free
+  // routing is blocked until they verify. Applies to both API and dashboard
+  // chat — the whole free benefit is what's being abused. Paid plans, custom
+  // keys, and still-in-grace users are exempt.
+  if (
+    !keyInfo.isCustom &&
+    keyInfo.planId === "free" &&
+    !keyInfo.discordVerified &&
+    keyInfo.discordLinkRequiredBy !== null &&
+    new Date(keyInfo.discordLinkRequiredBy) < new Date()
+  ) {
+    return NextResponse.json(
+      {
+        error: {
+          message:
+            "Free plan requires Discord verification. Verify your account at /dashboard/discord to continue.",
+          type: "discord_verification_required",
+        },
+      },
+      { status: 403 }
+    );
+  }
+
   // Extra hardening: if a custom key has exhausted credits, reject before
   // parsing payload or touching upstream selection paths.
   const customKeyNoCreditsError = keyInfo.isCustom
@@ -546,11 +586,29 @@ export async function POST(req: NextRequest) {
   // stay off.
   const isDlabFreeUnlimited = DLAB_FREE_UNLIMITED && model.provider === "dlab";
 
+  // 2026-06-24: or/ + z/ free-unlimited is now restricted to the top consumer
+  // tiers (ultra / ultimate / max) — those plans keep the exact zero-cost +
+  // wide-context behavior they had. Every cheaper plan (free, mod, pro, creator,
+  // master) falls through to normal premium-pool billing (1 premium request per
+  // call, per the flattened catalog cost). Custom/enterprise keys are unaffected
+  // (their own billing path) so the B2B per-token contract keeps working.
+  const ORBIT_ZENLLM_FREE_PLANS = new Set(["ultra", "ultimate", "max"]);
+  const orbitZenllmFreeEligible =
+    keyInfo.isCustom || ORBIT_ZENLLM_FREE_PLANS.has(keyInfo.planId);
+
   // or/ (Orbit) free + unlimited: routes as zero-cost premium regardless of its
   // catalog price, so no credits / premium pool / daily cap are consumed — only
   // the orbit context cap below applies. Catalog cost is left untouched so it
   // reverts cleanly by flipping ORBIT_FREE_UNLIMITED off.
-  const isOrbitFreeUnlimited = ORBIT_FREE_UNLIMITED && model.provider === "orbit";
+  const isOrbitFreeUnlimited =
+    ORBIT_FREE_UNLIMITED && model.provider === "orbit" && orbitZenllmFreeEligible;
+
+  // z/ (ZenLLM) free promo: routes as zero-cost premium regardless of its
+  // catalog price, so no credits / premium pool / daily cap are consumed — only
+  // the zenllm context cap below applies. Catalog cost is left untouched so it
+  // reverts cleanly by flipping ZENLLM_FREE_UNLIMITED off.
+  const isZenllmFreeUnlimited =
+    ZENLLM_FREE_UNLIMITED && model.provider === "zenllm" && orbitZenllmFreeEligible;
 
   // Zero-cost premium models (cost_per_m_input=0 + premium_request_cost=0) route
   // as free — no credits or premium-request budget consumed. Revert by restoring
@@ -558,6 +616,7 @@ export async function POST(req: NextRequest) {
   const isZeroCostPremium =
     isDlabFreeUnlimited ||
     isOrbitFreeUnlimited ||
+    isZenllmFreeUnlimited ||
     (FREE_PROMOS_ENABLED &&
       isPremiumProvider && (
         (Number(model.cost_per_m_input) === 0 && Number(model.premium_request_cost) === 0) ||
@@ -1174,6 +1233,9 @@ export async function POST(req: NextRequest) {
       let zeroCostMaxContext: number;
       if (isOrbitFreeUnlimited) {
         zeroCostMaxContext = keyInfo.planId === "free" ? ORBIT_FREE_CONTEXT : ORBIT_PAID_CONTEXT;
+      } else if (isZenllmFreeUnlimited) {
+        // z/: 32k for free plans, unlimited (0 = no cap) for paid.
+        zeroCostMaxContext = keyInfo.planId === "free" ? ZENLLM_FREE_CONTEXT : ZENLLM_PAID_CONTEXT;
       } else {
         const { data: zeroCostPlan } = await getPlanLimits(supabase, keyInfo.planId);
         zeroCostMaxContext = (zeroCostPlan?.gm_max_context ?? 32768) * (isContextBoosted ? 2 : 1);
@@ -1563,7 +1625,10 @@ export async function POST(req: NextRequest) {
         req.signal,
         premiumOveragePurchased ? PREMIUM_OVERAGE_COST : 0,
         premiumRequestCostForUsage,
-        isPlanUnlimited
+        isPlanUnlimited,
+        keyInfo.trainingConsent,
+        moderation.flagged,
+        messages as { role: string; content: unknown }[]
       );
     }
 
@@ -1761,6 +1826,21 @@ export async function POST(req: NextRequest) {
       console.error("Post-request pool accounting failed:", postAccountingError);
     }
 
+    // Training-data capture (non-streaming). Only for users who consented AND
+    // only when the CSAM gate did NOT flag this request — flagged content must
+    // never enter the corpus. Best-effort; never blocks the response.
+    if (keyInfo.trainingConsent && !moderation.flagged) {
+      await captureTrainingSample({
+        userId: keyInfo.userId,
+        modelId,
+        source: keyInfo.source,
+        messages: messages as { role: string; content: unknown }[],
+        completion: extractCompletionText(data),
+        promptTokens,
+        completionTokens,
+      });
+    }
+
     return NextResponse.json(data);
   } catch (error) {
     await refundReservation();
@@ -1791,6 +1871,12 @@ async function handleStreamingResponse(
   premiumRequestCostForUsage: number = 0,
   // True when served under a plan-"unlimited" provider: log 0 premium cost.
   isPlanUnlimited: boolean = false,
+  // Training-data capture: the user consented, the CSAM gate verdict, and the
+  // input messages to pair with the streamed completion. Capture is gated on
+  // trainingConsent && !moderationFlagged inside finalize().
+  trainingConsent: boolean = false,
+  moderationFlagged: boolean = false,
+  requestMessages: { role: string; content: unknown }[] = [],
 ) {
   const supabase = createAdminClient();
   let totalPromptTokens = 0;
@@ -2098,6 +2184,21 @@ async function handleStreamingResponse(
     });
     if (usageLogError) {
       console.error("Failed to write streaming usage log:", usageLogError.message);
+    }
+
+    // Training-data capture (streaming). Only on a cleanly completed stream for
+    // consented users whose request the CSAM gate did NOT flag — an aborted
+    // stream yields a truncated reply, and flagged content must never be stored.
+    if (trainingConsent && !moderationFlagged && reason === "complete") {
+      await captureTrainingSample({
+        userId: keyInfo.userId,
+        modelId: model.id,
+        source: keyInfo.source,
+        messages: requestMessages,
+        completion: completionText,
+        promptTokens: totalPromptTokens,
+        completionTokens: totalCompletionTokens,
+      });
     }
 
     // Premium-request debt accrual DISABLED for free tier (2026-05-24).

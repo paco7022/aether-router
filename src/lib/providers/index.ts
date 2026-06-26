@@ -11,6 +11,7 @@ import { trolllmProvider } from "./trolllm";
 import { orbitProvider } from "./orbit";
 import { routmyProvider } from "./routmy";
 import { deepseekProvider } from "./deepseek";
+import { zenllmProvider } from "./zenllm";
 
 const providers: Record<string, Provider> = {
   nano: nanoProvider,
@@ -25,6 +26,7 @@ const providers: Record<string, Provider> = {
   trolllm: trolllmProvider,
   orbit: orbitProvider,
   routmy: routmyProvider,
+  zenllm: zenllmProvider,
 };
 
 export function getProvider(name: string): Provider | undefined {

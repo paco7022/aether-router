@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Sidebar } from "@/components/Sidebar";
 import { FingerprintCapture } from "@/components/FingerprintCapture";
+import { DiscordVerifyBanner } from "@/components/DiscordVerifyBanner";
 import { isAdmin as checkAdmin } from "@/lib/admin";
 
 export default function DashboardLayout({
@@ -139,6 +140,9 @@ export default function DashboardLayout({
             <span className="text-sm font-bold text-white/90">Aether Router</span>
           </div>
         </div>
+
+        {/* Free-plan Discord verification countdown (self-hides when N/A) */}
+        <DiscordVerifyBanner />
 
         {/* Proxy/premium model disclaimer */}
         <div

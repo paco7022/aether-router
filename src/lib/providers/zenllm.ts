@@ -1,0 +1,62 @@
+import type { Provider, ProviderRequest } from "./types";
+
+const MAX_RETRIES = 2;
+const RETRY_DELAY_MS = 1000;
+
+// ZenLLM (z/): premium OpenAI-compatible reseller fronting Anthropic Claude
+// (Opus 4.5–4.8, Sonnet 4.5–4.6) via https://api.zenllm.org/v1.
+// Billed as a premium provider — flat 1 credit per request +
+// per-model premium_request_cost against the daily premium pool.
+//
+// ISOLATED KEY: the upstream key is an ENTERPRISE key SHARED with another
+// router, so it lives in its own env var (ZENLLM_API_KEY) and nothing else
+// reuses it. Keep it isolated — do not fold it into any shared key pool.
+//
+// Comma-separated pool is supported (pick one at random per request) in case
+// we ever get a second key; today it's typically a single key. Trailing
+// whitespace/newlines are trimmed — PS-set secrets sometimes carry \r\n.
+function getZenllmKeys(): string[] {
+  return (process.env.ZENLLM_API_KEY || "")
+    .split(",")
+    .map((k) => k.trim())
+    .filter(Boolean);
+}
+
+export const zenllmProvider: Provider = {
+  name: "zenllm",
+  baseUrl: process.env.ZENLLM_BASE_URL || "https://api.zenllm.org/v1",
+
+  async forward(request: ProviderRequest, signal?: AbortSignal): Promise<Response> {
+    const keys = getZenllmKeys();
+    if (keys.length === 0) {
+      throw new Error("ZENLLM_API_KEY not configured");
+    }
+    const apiKey = keys[Math.floor(Math.random() * keys.length)];
+
+    let lastResponse: Response | null = null;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      if (attempt > 0) {
+        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * attempt));
+      }
+
+      const res = await fetch(`${this.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(request),
+        signal,
+      });
+
+      if (res.ok || res.status < 500 || res.status === 503) {
+        return res;
+      }
+
+      lastResponse = res;
+    }
+
+    return lastResponse!;
+  },
+};

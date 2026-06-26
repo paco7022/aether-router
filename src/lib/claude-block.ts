@@ -14,13 +14,13 @@ export const CLAUDE_NOT_ACTIVATED_MESSAGE =
   "Your account is not yet activated for Claude. Message an admin on Discord to request activation.";
 
 // Providers currently approved to route Claude requests.
-const ALLOWED_CLAUDE_PROVIDERS = new Set(["trolllm", "gameron", "dlab", "riftai", "hapuppy", "orbit"]);
+const ALLOWED_CLAUDE_PROVIDERS = new Set(["trolllm", "gameron", "dlab", "riftai", "hapuppy", "orbit", "zenllm"]);
 
 // Providers whose Claude routing bypasses the paid-plan-only rule.
 // trolllm + orbit: free users can use Claude here once admin flips
 // profiles.claude_activated; the per-user gate replaces the
 // paid-plan-only rule for these providers.
-const CLAUDE_PAID_ONLY_BYPASS = new Set(["trolllm", "orbit"]);
+const CLAUDE_PAID_ONLY_BYPASS = new Set(["trolllm", "orbit", "zenllm"]);
 
 // Providers whose Claude routing also bypasses the per-user
 // profiles.claude_activated gate. Use sparingly — this turns Claude
@@ -35,7 +35,11 @@ const CLAUDE_PAID_ONLY_BYPASS = new Set(["trolllm", "orbit"]);
 // free plan included — with no admin activation needed. Still costs the
 // normal premium-request price (Opus = 6, Sonnet = 3) from the user's
 // premium pool + overage; only the per-user activation gate is lifted.
-const CLAUDE_ACTIVATION_BYPASS = new Set(["orbit", "trolllm"]);
+// zenllm (2026-06-23): launched as a free promo open to everyone (paid =
+// unlimited context, free = 32k), same posture as t/ — no paid-plan-only
+// rule and no per-user activation gate. Gated only by ZENLLM_FREE_UNLIMITED
+// + context cap in the route. Tighten both sets when the promo ends.
+const CLAUDE_ACTIVATION_BYPASS = new Set(["orbit", "trolllm", "zenllm"]);
 
 export function claudePaidOnlyApplies(provider: string | null | undefined): boolean {
   return !!provider && !CLAUDE_PAID_ONLY_BYPASS.has(provider);
