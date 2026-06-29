@@ -1,4 +1,5 @@
 import type { Provider, ProviderRequest } from "./types";
+import { guardSseStall, DEFAULT_STREAM_STALL_MS } from "./stream-stall-guard";
 
 // Orbit (or/): premium reseller fronting Amazon Kiro Pro (Claude family +
 // DeepSeek + GLM + Minimax, including "-agentic" variants with the full Kiro
@@ -19,6 +20,12 @@ import type { Provider, ProviderRequest } from "./types";
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 1000;
 const ANTHROPIC_VERSION = "2023-06-01";
+// Stall guard for the translated SSE stream: if the upstream sends
+// message_start (or pings) then stalls without ever producing content / a
+// terminal message_stop, the transform emits nothing and the client hangs.
+// Cap the dead air; tune via ORBIT_STREAM_STALL_MS.
+const STREAM_STALL_MS =
+  Number(process.env.ORBIT_STREAM_STALL_MS) || DEFAULT_STREAM_STALL_MS;
 // CF in front of Orbit blocks python-urllib UAs with error 1010. Use an
 // Anthropic-SDK-shaped UA to look like a normal client.
 const USER_AGENT = "anthropic-sdk-typescript/0.30.0";
@@ -457,9 +464,11 @@ export const orbitProvider: Provider = {
       // Anthropic error JSON to OpenAI shape; the route only inspects
       // status + raw body text on the error path.
       if (!upstream.ok) {
-        // Per-key rate limit (429) or transient 5xx → fail over to the next
-        // key on retry. 503 (global upstream down) and other 4xx return as-is.
-        if (upstream.status === 429 || (upstream.status >= 500 && upstream.status !== 503)) {
+        // Per-key rate limit (429), per-key insufficient balance (402 — a
+        // depleted Kiro key in the pool), or transient 5xx → fail over to the
+        // next key on retry. 503 (global upstream down) and other 4xx return
+        // as-is.
+        if (upstream.status === 429 || upstream.status === 402 || (upstream.status >= 500 && upstream.status !== 503)) {
           console.warn(
             `[orbit] key ${keyTag}… attempt ${attempt + 1}/${MAX_RETRIES + 1} → ${upstream.status}; failing over to next key`
           );
@@ -479,7 +488,7 @@ export const orbitProvider: Provider = {
         const transformed = upstream.body.pipeThrough(
           makeAnthropicToOpenAIStreamTransform(anthBody.model)
         );
-        return new Response(transformed, {
+        return new Response(guardSseStall(transformed, STREAM_STALL_MS), {
           status: 200,
           headers: {
             "content-type": "text/event-stream",

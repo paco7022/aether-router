@@ -1,4 +1,5 @@
 import type { Provider, ProviderRequest } from "./types";
+import { guardSseStall, DEFAULT_STREAM_STALL_MS } from "./stream-stall-guard";
 
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 1000;
@@ -21,6 +22,14 @@ function getZenllmKeys(): string[] {
     .map((k) => k.trim())
     .filter(Boolean);
 }
+
+// Max time a stream may go with NO real content before we give up. ZenLLM
+// pings (": ping") forever when a model is upstream-unavailable (opus-4-8: 503
+// non-stream, ping-only on stream), which used to hang SillyTavern in
+// "streaming…". Generous default (thinking models are slow to the first
+// token); tune via ZENLLM_STREAM_STALL_MS. See guardSseStall for the rest.
+const STREAM_STALL_MS =
+  Number(process.env.ZENLLM_STREAM_STALL_MS) || DEFAULT_STREAM_STALL_MS;
 
 export const zenllmProvider: Provider = {
   name: "zenllm",
@@ -51,6 +60,18 @@ export const zenllmProvider: Provider = {
       });
 
       if (res.ok || res.status < 500 || res.status === 503) {
+        // Guard streaming responses against the ping-only infinite-hang case.
+        if (res.ok && request.stream === true && res.body) {
+          return new Response(guardSseStall(res.body, STREAM_STALL_MS), {
+            status: 200,
+            headers: {
+              "content-type":
+                res.headers.get("content-type") || "text/event-stream",
+              "cache-control": "no-cache",
+              connection: "keep-alive",
+            },
+          });
+        }
         return res;
       }
 
