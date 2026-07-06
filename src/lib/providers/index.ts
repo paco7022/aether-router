@@ -12,6 +12,9 @@ import { orbitProvider } from "./orbit";
 import { routmyProvider } from "./routmy";
 import { deepseekProvider } from "./deepseek";
 import { zenllmProvider } from "./zenllm";
+import { kiroProvider } from "./kiro";
+import { atessaProvider } from "./atessa";
+import { googleaiProvider } from "./googleai";
 
 const providers: Record<string, Provider> = {
   nano: nanoProvider,
@@ -27,6 +30,9 @@ const providers: Record<string, Provider> = {
   orbit: orbitProvider,
   routmy: routmyProvider,
   zenllm: zenllmProvider,
+  kiro: kiroProvider,
+  atessa: atessaProvider,
+  googleai: googleaiProvider,
 };
 
 export function getProvider(name: string): Provider | undefined {

@@ -465,10 +465,10 @@ export const orbitProvider: Provider = {
       // status + raw body text on the error path.
       if (!upstream.ok) {
         // Per-key rate limit (429), per-key insufficient balance (402 — a
-        // depleted Kiro key in the pool), or transient 5xx → fail over to the
-        // next key on retry. 503 (global upstream down) and other 4xx return
-        // as-is.
-        if (upstream.status === 429 || upstream.status === 402 || (upstream.status >= 500 && upstream.status !== 503)) {
+        // depleted Kiro key in the pool), per-key expired trial (403 —
+        // {"type":"trial_expired"}), or transient 5xx → fail over to the next
+        // key on retry. 503 (global upstream down) and other 4xx return as-is.
+        if (upstream.status === 429 || upstream.status === 402 || upstream.status === 403 || (upstream.status >= 500 && upstream.status !== 503)) {
           console.warn(
             `[orbit] key ${keyTag}… attempt ${attempt + 1}/${MAX_RETRIES + 1} → ${upstream.status}; failing over to next key`
           );

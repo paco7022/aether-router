@@ -797,21 +797,14 @@ export async function POST(req: NextRequest) {
   // captured so the overage charge can be written to the transaction ledger.
   let premiumOverageBalance = 0;
 
-  // Validate max_tokens up front — BEFORE any premium / custom-key
-  // reservation. Returning a 400 after a reservation would leak that
-  // reservation (the early-return skips refundReservation). This was bug B.
+  // Resolve the requested completion budget. Oversize requests are CLAMPED to
+  // MAX_STREAM_RESERVATION_COMPLETION_TOKENS at forward time (reservation +
+  // upstream both use the clamped value below) rather than rejected with a 400.
+  // Clients (e.g. SillyTavern) routinely send their entire context window as
+  // max_tokens; a hard reject just surfaces as "something went wrong" in chat.
+  // Clamping is safe: real completions almost never approach 32k tokens, and
+  // the credit reservation is bounded by the same ceiling either way.
   const requestedCompletionTokens = getRequestedCompletionTokens(body);
-  if (requestedCompletionTokens !== null && requestedCompletionTokens > MAX_STREAM_RESERVATION_COMPLETION_TOKENS) {
-    return NextResponse.json(
-      {
-        error: {
-          message: `max_tokens too large. Maximum allowed is ${MAX_STREAM_RESERVATION_COMPLETION_TOKENS}.`,
-          type: "invalid_request",
-        },
-      },
-      { status: 400 }
-    );
-  }
 
   // 5.5b. Custom key checks — custom keys bypass plan restrictions and use their own limits
   if (keyInfo.isCustom) {
@@ -1177,7 +1170,10 @@ export async function POST(req: NextRequest) {
     : "max_tokens";
   delete body.max_tokens;
   delete body.max_completion_tokens;
-  body[completionTokensParam] = requestedCompletionTokens ?? reservedCompletionTokens;
+  // Always forward the clamped ceiling so an oversize request (e.g. a client
+  // sending its whole context window as max_tokens) is capped instead of
+  // rejected upstream. reservedCompletionTokens = min(requested, MAX).
+  body[completionTokensParam] = reservedCompletionTokens;
 
   // Reasoning models reject `tools` + `reasoning_effort` together on
   // /chat/completions ("use /v1/responses instead"). We don't speak the
