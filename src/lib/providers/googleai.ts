@@ -311,16 +311,23 @@ function makeGeminiToOpenAIStreamTransform(model: string): TransformStream<Uint8
     if (cand?.finishReason) finalFinish = mapFinishReason(cand.finishReason);
   }
 
+  // SSE events are separated by a blank line. Google's stream uses CRLF
+  // (\r\n\r\n), not \n\n — match every variant, and keep the buffer RAW so a
+  // separator split across chunk boundaries still resolves once both arrive.
+  const EVENT_SEP = /\r\n\r\n|\n\n|\r\r/;
+  function processBlock(block: string, c: TransformStreamDefaultController<Uint8Array>) {
+    for (const line of block.split(/\r\n|\n|\r/)) {
+      const t = line.trim();
+      if (t.startsWith("data:")) handle(t.slice(5).trim(), c);
+    }
+  }
   function flush(chunkText: string, c: TransformStreamDefaultController<Uint8Array>) {
     buffer += chunkText;
-    let sep: number;
-    while ((sep = buffer.indexOf("\n\n")) >= 0) {
-      const block = buffer.slice(0, sep);
-      buffer = buffer.slice(sep + 2);
-      for (const line of block.split("\n")) {
-        const t = line.trim();
-        if (t.startsWith("data:")) handle(t.slice(5).trim(), c);
-      }
+    let m: RegExpExecArray | null;
+    while ((m = EVENT_SEP.exec(buffer))) {
+      const block = buffer.slice(0, m.index);
+      buffer = buffer.slice(m.index + m[0].length);
+      processBlock(block, c);
     }
   }
 
@@ -331,8 +338,7 @@ function makeGeminiToOpenAIStreamTransform(model: string): TransformStream<Uint8
     flush(controller) {
       flush(decoder.decode(), controller);
       // Handle a trailing block with no blank-line terminator.
-      const rest = buffer.trim();
-      if (rest.startsWith("data:")) handle(rest.slice(5).trim(), controller);
+      if (buffer.trim()) processBlock(buffer, controller);
       buffer = "";
       emitDone(controller);
     },
