@@ -86,6 +86,43 @@ export async function POST(req: NextRequest) {
           const packageId = session.metadata?.package_id;
           const purchaseType = session.metadata?.purchase_type;
 
+          // Gift purchase: credits or a plan bought FOR someone else (or for
+          // yourself, to extend/upgrade). process_gift is idempotent by the
+          // Stripe event id; it applies immediately if the recipient already
+          // has an account, otherwise parks it in pending_gifts to be
+          // auto-claimed on signup. Handled before the buyer-facing branches
+          // below so a credit gift never lands on the buyer's own balance.
+          if (purchaseType === "gift") {
+            const giftType = session.metadata?.gift_type;
+            const senderUserId = session.metadata?.sender_user_id ?? null;
+            const recipientEmail = session.metadata?.recipient_email;
+            const planId = session.metadata?.plan_id ?? null;
+            const planDays = session.metadata?.plan_days
+              ? Number(session.metadata.plan_days)
+              : null;
+            const giftMessage = session.metadata?.gift_message ?? null;
+
+            if (
+              recipientEmail &&
+              (giftType === "credits" || giftType === "plan")
+            ) {
+              const { error: giftError } = await admin.rpc("process_gift", {
+                p_event_id: event.id,
+                p_sender_user_id: senderUserId,
+                p_recipient_email: recipientEmail,
+                p_gift_type: giftType,
+                p_credits: giftType === "credits" && credits > 0 ? credits : null,
+                p_plan_id: giftType === "plan" ? planId : null,
+                p_plan_days: giftType === "plan" ? planDays : null,
+                p_message: giftMessage,
+              });
+              if (giftError) {
+                throw new Error(
+                  `process_gift failed (event ${event.id}): ${giftError.message}`
+                );
+              }
+            }
+          }
           // Enterprise self-service token top-up: credit the SPECIFIC key's
           // custom_credits pool (purchase_custom_key_credits is idempotent by
           // event id and re-verifies the key belongs to the user), not the

@@ -7,6 +7,7 @@ import { ClaimDailyButton } from "@/components/ClaimDailyButton";
 import { GmRequestsCard } from "@/components/GmRequestsCard";
 import { ContextBoostCard } from "@/components/ContextBoostCard";
 import { TDiscountCard } from "@/components/TDiscountCard";
+import { GiftCard } from "@/components/GiftCard";
 import { CheckoutFeedback } from "@/components/CheckoutFeedback";
 
 export default async function BillingPage() {
@@ -235,6 +236,24 @@ export default async function BillingPage() {
         </div>
       </div>
 
+      {/* Gift a friend */}
+      <div className="mb-8">
+        <div className="flex items-center gap-2 mb-1">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--aurora-violet)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="opacity-60">
+            <polyline points="20 12 20 22 4 22 4 12" />
+            <rect x="2" y="7" width="20" height="5" />
+            <line x1="12" y1="22" x2="12" y2="7" />
+            <path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z" />
+            <path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z" />
+          </svg>
+          <h3 className="text-xl font-bold text-white/90">Gift a Friend</h3>
+        </div>
+        <p className="text-sm text-[var(--text-muted)] mb-5">
+          Buy credits or a plan for someone else &mdash; just enter their email. Use your own email to extend or upgrade your plan.
+        </p>
+        <GiftCard packages={packages ?? []} plans={plans ?? []} />
+      </div>
+
       {/* Transaction history */}
       <div className="glass-card shimmer-line overflow-hidden">
         <div className="p-5 border-b border-white/[0.04] flex items-center justify-between">
@@ -270,6 +289,8 @@ export default async function BillingPage() {
                             : tx.type === "daily_grant"
                             ? "badge-teal"
                             : tx.type === "admin_grant"
+                            ? "badge-violet"
+                            : tx.type === "gift_received" || tx.type === "gift_plan"
                             ? "badge-violet"
                             : "text-zinc-400 bg-zinc-400/10 border border-zinc-400/15"
                         }`}
