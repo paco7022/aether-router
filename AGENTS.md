@@ -269,6 +269,7 @@ Adaptadores:
 - `gameron.ts`
 - `webproxy.ts`
 - `nano.ts`
+- `shoot.ts`
 
 Todos deben aceptar `signal?: AbortSignal` y pasarlo a `fetch`.
 
