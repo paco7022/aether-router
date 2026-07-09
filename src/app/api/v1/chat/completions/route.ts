@@ -837,6 +837,46 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Per-key rolling token window (e.g. 6M tokens / 5h). Cheap trailing-sum
+    // read against the dedicated custom_key_token_usage ledger; rejects before
+    // consuming a rate-limit slot or touching the upstream. The window is
+    // recorded at settlement (record_custom_key_tokens) in both stream paths.
+    if (
+      keyInfo.tokenWindowLimit &&
+      keyInfo.tokenWindowLimit > 0 &&
+      keyInfo.tokenWindowSeconds &&
+      keyInfo.tokenWindowSeconds > 0
+    ) {
+      const { data: windowResult, error: windowErr } = await supabase.rpc(
+        "check_custom_key_token_window",
+        {
+          p_key_id: keyInfo.keyId,
+          p_window_seconds: keyInfo.tokenWindowSeconds,
+          p_token_limit: keyInfo.tokenWindowLimit,
+        }
+      );
+      if (windowErr) {
+        return NextResponse.json(
+          { error: { message: "Failed to check token limit", type: "server_error" } },
+          { status: 500 }
+        );
+      }
+      const win = windowResult as { status: string; used?: number; retry_after_seconds?: number };
+      if (win.status === "limited") {
+        const retryAfter = Math.max(win.retry_after_seconds ?? 60, 1);
+        const windowHours = keyInfo.tokenWindowSeconds / 3600;
+        return NextResponse.json(
+          {
+            error: {
+              message: `Token limit reached: ~${win.used ?? keyInfo.tokenWindowLimit} of ${keyInfo.tokenWindowLimit} tokens used in the last ${windowHours}h. Try again in ${retryAfter}s.`,
+              type: "rate_limit",
+            },
+          },
+          { status: 429, headers: { "Retry-After": String(retryAfter) } }
+        );
+      }
+    }
+
     // Per-key rate limit + daily request limit — atomic reservation RPC so
     // concurrent requests can't all pass the check before the first log is
     // written. Defaults: 60s rate-limit for premium providers, no rate-limit
@@ -1787,6 +1827,26 @@ export async function POST(req: NextRequest) {
       console.error("Failed to write usage log:", usageLogError.message);
     }
 
+    // Record real token usage against the per-key rolling window (non-fatal).
+    if (
+      keyInfo.isCustom &&
+      keyInfo.keyId &&
+      keyInfo.tokenWindowLimit &&
+      keyInfo.tokenWindowLimit > 0 &&
+      keyInfo.tokenWindowSeconds &&
+      keyInfo.tokenWindowSeconds > 0 &&
+      totalTokens > 0
+    ) {
+      const { error: windowRecErr } = await supabase.rpc("record_custom_key_tokens", {
+        p_key_id: keyInfo.keyId,
+        p_tokens: totalTokens,
+        p_window_seconds: keyInfo.tokenWindowSeconds,
+      });
+      if (windowRecErr) {
+        console.error("Failed to record custom key token window:", windowRecErr.message);
+      }
+    }
+
     // Premium-request debt accrual DISABLED for free tier (2026-05-24).
     // It was the only path still calling accrue_prompt_cap_debt (paid plans
     // were already exempt). Because debt never resets on day rollover and is
@@ -1850,7 +1910,7 @@ export async function POST(req: NextRequest) {
 
 async function handleStreamingResponse(
   providerResponse: Response,
-  keyInfo: { userId: string; keyId: string | null; credits: number; dailyCredits: number; isCustom: boolean; customCredits: number | null; planId: string; source: "api" | "chat"; pricingMode?: string; flatCostPerMTokens?: number | null },
+  keyInfo: { userId: string; keyId: string | null; credits: number; dailyCredits: number; isCustom: boolean; customCredits: number | null; planId: string; source: "api" | "chat"; pricingMode?: string; flatCostPerMTokens?: number | null; tokenWindowSeconds?: number | null; tokenWindowLimit?: number | null },
   model: { id: string; provider: string; cost_per_m_input: number; cost_per_m_output: number; cost_per_m_cache_read?: number; cost_per_m_cache_write?: number; margin: number; premium_request_cost?: number },
   startTime: number,
   estimatedPromptTokens: number = 0,
@@ -2180,6 +2240,28 @@ async function handleStreamingResponse(
     });
     if (usageLogError) {
       console.error("Failed to write streaming usage log:", usageLogError.message);
+    }
+
+    // Record real token usage against the per-key rolling window (non-fatal).
+    // Runs on both clean completion and abort — an aborted stream still
+    // consumed upstream tokens that should count toward the window.
+    if (
+      keyInfo.isCustom &&
+      keyInfo.keyId &&
+      keyInfo.tokenWindowLimit &&
+      keyInfo.tokenWindowLimit > 0 &&
+      keyInfo.tokenWindowSeconds &&
+      keyInfo.tokenWindowSeconds > 0 &&
+      totalTokens > 0
+    ) {
+      const { error: windowRecErr } = await supabase.rpc("record_custom_key_tokens", {
+        p_key_id: keyInfo.keyId,
+        p_tokens: totalTokens,
+        p_window_seconds: keyInfo.tokenWindowSeconds,
+      });
+      if (windowRecErr) {
+        console.error("Failed to record custom key token window (stream):", windowRecErr.message);
+      }
     }
 
     // Training-data capture (streaming). Only on a cleanly completed stream for

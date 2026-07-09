@@ -44,6 +44,10 @@ export interface ApiKeyInfo {
   allowedProviders: string[] | null;
   dailyRequestLimit: number | null;
   rateLimitSeconds: number | null;
+  // Rolling per-key token cap: at most tokenWindowLimit tokens per
+  // tokenWindowSeconds. NULL/0 disables. Enforced in the chat route.
+  tokenWindowSeconds: number | null;
+  tokenWindowLimit: number | null;
   expiresAt: string | null;
   // Enterprise per-token billing. When pricingMode === "flat_per_token",
   // (prompt+completion) tokens are billed at flatCostPerMTokens USD/1M against
@@ -71,7 +75,7 @@ export async function validateApiKey(key: string): Promise<ApiKeyInfo | null> {
   // Look up key and join with profile for credits
   const { data: result, error } = await supabase
     .from("api_keys")
-    .select("id, user_id, is_active, is_custom, custom_credits, max_context, allowed_providers, daily_request_limit, rate_limit_seconds, expires_at, pricing_mode, flat_cost_per_m_tokens, last_used, profiles(credits, daily_credits, plan_id, gm_claimed_date, gm_daily_override, gm_override_expires, referral_bonus_requests, referral_bonus_expires, is_activated, claude_activated, preset, preset_enabled, builtin_preset_id, context_boost_expires_at, t_discount_expires_at, discord_verified, discord_link_required_by, training_consent)")
+    .select("id, user_id, is_active, is_custom, custom_credits, max_context, allowed_providers, daily_request_limit, rate_limit_seconds, token_window_seconds, token_window_limit, expires_at, pricing_mode, flat_cost_per_m_tokens, last_used, profiles(credits, daily_credits, plan_id, gm_claimed_date, gm_daily_override, gm_override_expires, referral_bonus_requests, referral_bonus_expires, is_activated, claude_activated, preset, preset_enabled, builtin_preset_id, context_boost_expires_at, t_discount_expires_at, discord_verified, discord_link_required_by, training_consent)")
     .eq("key_hash", keyHash)
     .single();
 
@@ -124,6 +128,8 @@ export async function validateApiKey(key: string): Promise<ApiKeyInfo | null> {
     allowedProviders: result.allowed_providers ?? null,
     dailyRequestLimit: result.daily_request_limit ?? null,
     rateLimitSeconds: result.rate_limit_seconds ?? null,
+    tokenWindowSeconds: (result as { token_window_seconds?: number | null }).token_window_seconds ?? null,
+    tokenWindowLimit: (result as { token_window_limit?: number | null }).token_window_limit ?? null,
     expiresAt: result.expires_at ?? null,
     pricingMode: (result as { pricing_mode?: string | null }).pricing_mode ?? "standard",
     flatCostPerMTokens: (result as { flat_cost_per_m_tokens?: number | null }).flat_cost_per_m_tokens ?? null,
@@ -178,6 +184,8 @@ export async function validateSession(): Promise<ApiKeyInfo | null> {
     allowedProviders: null,
     dailyRequestLimit: null,
     rateLimitSeconds: null,
+    tokenWindowSeconds: null,
+    tokenWindowLimit: null,
     expiresAt: null,
     pricingMode: "standard",
     flatCostPerMTokens: null,
