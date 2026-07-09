@@ -91,9 +91,24 @@ function getConfig(env) {
   };
 }
 
+// OpenAI/Anthropic API surface that clients may hit WITHOUT the /v1 prefix
+// (when they set the base URL to the bare host instead of host + "/v1"). These
+// are mapped to /api/v1/* so a misconfigured base URL still works. Only these
+// exact API paths are tolerated — dashboard/auth/asset routes are never
+// rewritten. Keep in sync with the real routes under src/app/api/v1/.
+const BARE_API_PATHS = ["/models", "/chat/completions", "/messages"];
+
 function normalizeAppPath(pathname) {
   if (pathname === "/v1") return "/api/v1";
   if (pathname.startsWith("/v1/")) return `/api${pathname}`;
+  // Tolerate a missing /v1 prefix on the OpenAI-compatible API surface, e.g.
+  // a client whose base URL is "https://api.aether-ai.dev" (no /v1) calling
+  // GET /models or POST /chat/completions. Everything downstream (PC-first
+  // routing, edge cache, CORS) keys off this normalized path, so bare paths
+  // get the same treatment as their /v1 form.
+  for (const p of BARE_API_PATHS) {
+    if (pathname === p || pathname.startsWith(p + "/")) return `/api/v1${pathname}`;
+  }
   return pathname;
 }
 
