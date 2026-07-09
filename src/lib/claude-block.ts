@@ -14,7 +14,11 @@ export const CLAUDE_NOT_ACTIVATED_MESSAGE =
   "Your account is not yet activated for Claude. Message an admin on Discord to request activation.";
 
 // Providers currently approved to route Claude requests.
-const ALLOWED_CLAUDE_PROVIDERS = new Set(["trolllm", "gameron", "dlab", "riftai", "hapuppy", "orbit", "zenllm", "kiro", "atessa"]);
+// shoot (2026-07-09): sh/ reseller serves real Claude (Opus 4.6-4.8). Approved
+// to route Claude. Kept OUT of the paid-only + activation bypass sets, so it
+// behaves like riftai/dlab: paid plans + per-user claude_activated (custom keys
+// bypass activation via their own controls).
+const ALLOWED_CLAUDE_PROVIDERS = new Set(["trolllm", "gameron", "dlab", "riftai", "hapuppy", "orbit", "zenllm", "kiro", "atessa", "shoot"]);
 
 // Providers whose Claude routing bypasses the paid-plan-only rule.
 // trolllm: free users can use Claude here once admin flips
