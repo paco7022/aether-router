@@ -109,7 +109,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         error:
-          "No encontré tu refresh token. Pega el contenido completo de tu kiro-auth-token.json o el refreshToken.",
+          "Couldn't find your refresh token. Paste the full contents of your kiro-auth-token.json, or just the refreshToken.",
       },
       { status: 400 }
     );
@@ -119,7 +119,7 @@ export async function POST(req: NextRequest) {
   const secret = process.env.POOL_ADMIN_SECRET;
   if (!adminBase || !secret) {
     return NextResponse.json(
-      { error: "El pool de Kiro no está configurado en el servidor." },
+      { error: "The Kiro pool is not configured on the server." },
       { status: 503 }
     );
   }
@@ -135,19 +135,19 @@ export async function POST(req: NextRequest) {
   if (reserveErr) {
     console.error("reserve_kiro_pool_slot failed:", reserveErr.message);
     return NextResponse.json(
-      { error: "No se pudo reservar un espacio. Intenta de nuevo." },
+      { error: "Couldn't reserve a slot. Please try again." },
       { status: 500 }
     );
   }
   if (reservation === "duplicate") {
     return NextResponse.json(
-      { error: "Esa cuenta ya está en el pool." },
+      { error: "That account is already in the pool." },
       { status: 409 }
     );
   }
   if (reservation === "full") {
     return NextResponse.json(
-      { error: "Ups, demasiadas cuentas ahora mismo. Intenta más tarde." },
+      { error: "Oops, too many accounts right now. Try again later." },
       { status: 429 }
     );
   }
@@ -171,13 +171,13 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(
           {
             error:
-              "Tu token no es válido o ya expiró. Vuelve a copiarlo desde Kiro (recién logueado) e inténtalo otra vez.",
+              "Your token is invalid or expired. Copy it again from Kiro (freshly logged in) and try once more.",
           },
           { status: 400 }
         );
       }
       return NextResponse.json(
-        { error: "El pool no pudo validar tu cuenta. Intenta más tarde." },
+        { error: "The pool couldn't validate your account. Try again later." },
         { status: 502 }
       );
     }
@@ -192,13 +192,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       message:
-        "¡Cuenta añadida al pool! Recuerda hacer LOGOUT de Kiro Desktop o tu cuenta morirá en ~1h.",
+        "Account added to the pool! Remember to LOG OUT of Kiro Desktop or your account will die within ~1h.",
     });
   } catch (e) {
     await admin.rpc("release_kiro_pool_slot", { p_token_hash: hash });
     console.error("kiro pool add error:", (e as Error).message);
     return NextResponse.json(
-      { error: "No se pudo contactar el pool. Intenta más tarde." },
+      { error: "Couldn't reach the pool. Try again later." },
       { status: 502 }
     );
   }

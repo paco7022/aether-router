@@ -43,7 +43,7 @@ function CommandRow({ os, cmd }: { os: string; cmd: string }) {
           className="text-[10px] px-2 py-0.5 rounded-md text-white/70 hover:text-white transition-colors"
           style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)" }}
         >
-          {copied ? "¡Copiado!" : "Copiar"}
+          {copied ? "Copied!" : "Copy"}
         </button>
       </div>
       <pre className="text-[10px] font-mono text-white/70 overflow-x-auto rounded-lg px-2.5 py-2 whitespace-pre" style={{ background: "rgba(0,0,0,0.25)", border: "1px solid rgba(255,255,255,0.06)" }}>
@@ -80,7 +80,7 @@ export function KiroContributeCard() {
     setOk("");
     const trimmed = value.trim();
     if (trimmed.length < 20) {
-      setError("Pega el contenido de tu kiro-auth-token.json o tu refreshToken.");
+      setError("Paste the contents of your kiro-auth-token.json, or your refreshToken.");
       return;
     }
     setStatus("saving");
@@ -95,15 +95,15 @@ export function KiroContributeCard() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(data?.error || "Algo salió mal. Intenta de nuevo.");
+        setError(data?.error || "Something went wrong. Please try again.");
         setStatus("idle");
         return;
       }
-      setOk(data?.message || "¡Cuenta añadida al pool!");
+      setOk(data?.message || "Account added to the pool!");
       setValue("");
       loadStatus();
     } catch {
-      setError("Error de red. Intenta de nuevo.");
+      setError("Network error. Please try again.");
     } finally {
       setStatus("idle");
     }
@@ -131,7 +131,7 @@ export function KiroContributeCard() {
         </div>
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="font-semibold text-white/85">Aporta tu cuenta Kiro</h3>
+            <h3 className="font-semibold text-white/85">Contribute your Kiro account</h3>
             {pool && (
               <span
                 className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full"
@@ -142,14 +142,14 @@ export function KiroContributeCard() {
                 }}
               >
                 <span className={`w-1.5 h-1.5 rounded-full ${full ? "bg-red-400" : "bg-emerald-400"}`} />
-                {pool.used}/{pool.max} en uso
+                {pool.used}/{pool.max} in use
               </span>
             )}
           </div>
           <p className="text-xs text-[var(--text-muted)] mt-1 leading-relaxed">
-            Pool comunitario: aporta tu cuenta de Kiro y <span className="text-white/80">todos</span> (free
-            incluido) usan Claude real a solo <span className="text-white/80">0.5 request</span>. Cuantas
-            más cuentas, mejor aguanta el pool.
+            Community pool: contribute your Kiro account and <span className="text-white/80">everyone</span>{" "}
+            (free included) gets real Claude for just <span className="text-white/80">0.5 request</span>. The
+            more accounts, the better the pool holds up.
           </p>
         </div>
       </div>
@@ -157,12 +157,13 @@ export function KiroContributeCard() {
       {/* Warnings — the two things a contributor MUST understand */}
       <div className="space-y-2 mb-4">
         <div className="rounded-xl px-3.5 py-2.5 text-[11px] leading-relaxed" style={{ background: "rgba(251,191,36,0.06)", border: "1px solid rgba(251,191,36,0.20)", color: "rgba(253,224,71,0.95)" }}>
-          ⚠️ <span className="font-medium">Haz LOGOUT de Kiro Desktop</span> después de aportar (o usa otra
-          cuenta ahí). Si la sigues usando en Desktop, tu cuenta se desincroniza y <span className="font-medium">muere en ~1 hora</span>.
+          ⚠️ <span className="font-medium">LOG OUT of Kiro Desktop</span> after contributing (or use a
+          different account there). If you keep using it in Desktop, your account desyncs and{" "}
+          <span className="font-medium">dies within ~1 hour</span>.
         </div>
         <div className="rounded-xl px-3.5 py-2.5 text-[11px] leading-relaxed" style={{ background: "rgba(248,113,113,0.06)", border: "1px solid rgba(248,113,113,0.20)", color: "rgba(252,165,165,0.95)" }}>
-          ⚠️ Tu cuenta enruta tráfico de otros usuarios y <span className="font-medium">puede ser baneada</span> por
-          Amazon por el contenido de la plataforma. Aporta solo si lo aceptas.
+          ⚠️ Your account routes other users&apos; traffic and <span className="font-medium">may be banned</span> by
+          Amazon over the platform&apos;s content. Only contribute if you accept that.
         </div>
       </div>
 
@@ -170,7 +171,7 @@ export function KiroContributeCard() {
       <textarea
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        placeholder='Pega aquí el contenido de kiro-auth-token.json (incluye "refreshToken": "...")'
+        placeholder='Paste the contents of kiro-auth-token.json here (includes "refreshToken": "...")'
         rows={4}
         disabled={full}
         className="w-full rounded-xl bg-white/[0.03] border border-white/[0.08] px-3.5 py-2.5 text-xs font-mono text-white/85 placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[#a78bfa]/50 focus:bg-white/[0.05] transition-colors resize-y disabled:opacity-50"
@@ -183,9 +184,9 @@ export function KiroContributeCard() {
           ) : ok ? (
             <p className="text-xs text-emerald-400">{ok}</p>
           ) : full ? (
-            <p className="text-[11px] text-[var(--text-dim)]">Ups, demasiadas cuentas ahora mismo. Intenta más tarde.</p>
+            <p className="text-[11px] text-[var(--text-dim)]">Oops, too many accounts right now. Try again later.</p>
           ) : (
-            <p className="text-[11px] text-[var(--text-dim)]">Tu token nunca se guarda en nuestra base — se manda cifrado al pool.</p>
+            <p className="text-[11px] text-[var(--text-dim)]">Your token is never stored in our database — it&apos;s sent straight to the pool.</p>
           )}
         </div>
         <button
@@ -198,21 +199,21 @@ export function KiroContributeCard() {
             border: "1px solid rgba(167, 139, 250, 0.4)",
           }}
         >
-          {status === "saving" ? "Validando…" : "Aportar cuenta"}
+          {status === "saving" ? "Validating…" : "Contribute account"}
         </button>
       </div>
 
       {/* How to get the token */}
       <div className="mt-4 rounded-xl px-3.5 py-3 text-[11px] leading-relaxed text-[var(--text-muted)]" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)" }}>
-        <span className="font-medium text-white/70">Cómo sacar tu token:</span> primero{" "}
-        <span className="text-white/80">loguéate en Kiro</span> (Google). Luego corre el comando de tu sistema —
-        copia tu refresh token al portapapeles y solo tienes que pegarlo arriba:
+        <span className="font-medium text-white/70">How to get your token:</span> first{" "}
+        <span className="text-white/80">log in to Kiro</span> (Google). Then run the command for your OS — it
+        copies your refresh token to the clipboard, and you just paste it above:
         {EXTRACT_COMMANDS.map((c) => (
           <CommandRow key={c.os} os={c.os} cmd={c.cmd} />
         ))}
         <p className="mt-2 text-[10px] text-[var(--text-dim)]">
-          ¿Prefieres a mano? Abre{" "}
-          <span className="text-white/70 font-mono">~/.aws/sso/cache/kiro-auth-token.json</span> y pega todo su contenido.
+          Prefer to do it by hand? Open{" "}
+          <span className="text-white/70 font-mono">~/.aws/sso/cache/kiro-auth-token.json</span> and paste its full contents.
         </p>
       </div>
     </div>
