@@ -9,6 +9,50 @@ interface PoolStatus {
   mine: number;
 }
 
+// One-liners users run on their own PC to copy their Kiro refresh token to the
+// clipboard, so they only have to paste it below.
+const EXTRACT_COMMANDS: { os: string; cmd: string }[] = [
+  {
+    os: "Windows (PowerShell)",
+    cmd: `(Get-Content "$env:USERPROFILE\\.aws\\sso\\cache\\kiro-auth-token.json" -Raw | ConvertFrom-Json).refreshToken | Set-Clipboard`,
+  },
+  {
+    os: "macOS",
+    cmd: `python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/.aws/sso/cache/kiro-auth-token.json')))['refreshToken'])" | pbcopy`,
+  },
+  {
+    os: "Linux",
+    cmd: `python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/.aws/sso/cache/kiro-auth-token.json')))['refreshToken'])" | xclip -selection clipboard`,
+  },
+];
+
+function CommandRow({ os, cmd }: { os: string; cmd: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="mt-2">
+      <div className="flex items-center justify-between gap-2 mb-1">
+        <span className="text-[10px] font-medium text-white/60 uppercase tracking-wide">{os}</span>
+        <button
+          type="button"
+          onClick={() => {
+            navigator.clipboard.writeText(cmd).then(() => {
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1500);
+            });
+          }}
+          className="text-[10px] px-2 py-0.5 rounded-md text-white/70 hover:text-white transition-colors"
+          style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)" }}
+        >
+          {copied ? "¡Copiado!" : "Copiar"}
+        </button>
+      </div>
+      <pre className="text-[10px] font-mono text-white/70 overflow-x-auto rounded-lg px-2.5 py-2 whitespace-pre" style={{ background: "rgba(0,0,0,0.25)", border: "1px solid rgba(255,255,255,0.06)" }}>
+        {cmd}
+      </pre>
+    </div>
+  );
+}
+
 export function KiroContributeCard() {
   const [value, setValue] = useState("");
   const [status, setStatus] = useState<"idle" | "saving">("idle");
@@ -160,9 +204,16 @@ export function KiroContributeCard() {
 
       {/* How to get the token */}
       <div className="mt-4 rounded-xl px-3.5 py-3 text-[11px] leading-relaxed text-[var(--text-muted)]" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)" }}>
-        <span className="font-medium text-white/70">Cómo sacar tu token:</span> loguéate en Kiro (Google) →
-        abre el archivo <span className="text-white/80 font-mono">kiro-auth-token.json</span> (en Windows:
-        <span className="text-white/80 font-mono"> %USERPROFILE%\.aws\sso\cache\</span>) → copia y pega todo su contenido aquí.
+        <span className="font-medium text-white/70">Cómo sacar tu token:</span> primero{" "}
+        <span className="text-white/80">loguéate en Kiro</span> (Google). Luego corre el comando de tu sistema —
+        copia tu refresh token al portapapeles y solo tienes que pegarlo arriba:
+        {EXTRACT_COMMANDS.map((c) => (
+          <CommandRow key={c.os} os={c.os} cmd={c.cmd} />
+        ))}
+        <p className="mt-2 text-[10px] text-[var(--text-dim)]">
+          ¿Prefieres a mano? Abre{" "}
+          <span className="text-white/70 font-mono">~/.aws/sso/cache/kiro-auth-token.json</span> y pega todo su contenido.
+        </p>
       </div>
     </div>
   );
