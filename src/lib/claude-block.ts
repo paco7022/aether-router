@@ -25,7 +25,11 @@ const ALLOWED_CLAUDE_PROVIDERS = new Set(["trolllm", "gameron", "dlab", "riftai"
 // profiles.claude_activated; the per-user gate replaces the
 // paid-plan-only rule for these providers.
 // orbit removed 2026-07-03: or/ is now paid-users-only (no free access).
-const CLAUDE_PAID_ONLY_BYPASS = new Set(["trolllm", "zenllm"]);
+// kiro (2026-07-10): k/ became a community pool — any user (free included) can
+// contribute a Kiro account and everyone uses the pool. Opened to free at a
+// 0.5 premium-request price; free access is the whole point, so it bypasses
+// both the paid-only rule and the per-user activation gate.
+const CLAUDE_PAID_ONLY_BYPASS = new Set(["trolllm", "zenllm", "kiro"]);
 
 // Providers whose Claude routing also bypasses the per-user
 // profiles.claude_activated gate. Use sparingly — this turns Claude
@@ -47,7 +51,7 @@ const CLAUDE_PAID_ONLY_BYPASS = new Set(["trolllm", "zenllm"]);
 // atessa (2026-07-03): paid-users-only (kept OUT of CLAUDE_PAID_ONLY_BYPASS so
 // free users are blocked); added here so paid users route without needing a
 // per-user claude_activated flip.
-const CLAUDE_ACTIVATION_BYPASS = new Set(["orbit", "trolllm", "zenllm", "atessa"]);
+const CLAUDE_ACTIVATION_BYPASS = new Set(["orbit", "trolllm", "zenllm", "atessa", "kiro"]);
 
 export function claudePaidOnlyApplies(provider: string | null | undefined): boolean {
   return !!provider && !CLAUDE_PAID_ONLY_BYPASS.has(provider);
