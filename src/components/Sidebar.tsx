@@ -6,6 +6,15 @@ import { createClient } from "@/lib/supabase/client";
 
 /* ---- SVG icon components (Lucide-style, 20x20) ---- */
 const icons = {
+  kiro: (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20 12v10H4V12" />
+      <rect x="2" y="7" width="20" height="5" rx="1" />
+      <path d="M12 22V7" />
+      <path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z" />
+      <path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z" />
+    </svg>
+  ),
   overview: (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <rect x="3" y="3" width="7" height="7" rx="1" />
@@ -117,6 +126,7 @@ const nav = [
   { href: "/dashboard/enterprise", label: "Enterprise", icon: icons.enterprise },
   { href: "/dashboard/referrals", label: "Referrals", icon: icons.referrals },
   { href: "/dashboard/discord", label: "Discord", icon: icons.discord },
+  { href: "/dashboard/kiro/contribute", label: "Kiro Pool", icon: icons.kiro },
   { href: "/dashboard/docs", label: "Docs", icon: icons.docs },
   { href: "/dashboard/settings", label: "Settings", icon: icons.settings },
   { href: "/policies", label: "Policies", icon: icons.policies },
