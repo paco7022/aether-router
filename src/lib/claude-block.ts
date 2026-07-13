@@ -18,7 +18,11 @@ export const CLAUDE_NOT_ACTIVATED_MESSAGE =
 // to route Claude. Kept OUT of the paid-only + activation bypass sets, so it
 // behaves like riftai/dlab: paid plans + per-user claude_activated (custom keys
 // bypass activation via their own controls).
-const ALLOWED_CLAUDE_PROVIDERS = new Set(["trolllm", "gameron", "dlab", "riftai", "hapuppy", "orbit", "zenllm", "kiro", "atessa", "shoot"]);
+// blaze (2026-07-13): bl/ reseller serves real Claude (Opus 4.5-4.8 + Sonnet
+// 4.6/5, incl. -thinking variants). Approved to route Claude. Kept OUT of the
+// paid-only + activation bypass sets, so it behaves like shoot/riftai/dlab:
+// paid plans + per-user claude_activated (custom keys bypass via their own).
+const ALLOWED_CLAUDE_PROVIDERS = new Set(["trolllm", "gameron", "dlab", "riftai", "hapuppy", "orbit", "zenllm", "kiro", "atessa", "shoot", "blaze"]);
 
 // Providers whose Claude routing bypasses the paid-plan-only rule.
 // trolllm: free users can use Claude here once admin flips

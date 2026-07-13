@@ -16,6 +16,7 @@ import { kiroProvider } from "./kiro";
 import { atessaProvider } from "./atessa";
 import { googleaiProvider } from "./googleai";
 import { shootProvider } from "./shoot";
+import { blazeProvider } from "./blaze";
 
 const providers: Record<string, Provider> = {
   nano: nanoProvider,
@@ -35,6 +36,7 @@ const providers: Record<string, Provider> = {
   atessa: atessaProvider,
   googleai: googleaiProvider,
   shoot: shootProvider,
+  blaze: blazeProvider,
 };
 
 export function getProvider(name: string): Provider | undefined {
