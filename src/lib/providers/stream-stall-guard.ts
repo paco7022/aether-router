@@ -20,6 +20,78 @@
 
 export const DEFAULT_STREAM_STALL_MS = 120_000;
 
+// Default gap between injected keepalive comments (see injectSseKeepalive).
+export const DEFAULT_KEEPALIVE_MS = 10_000;
+
+// Keep a streaming connection warm while the upstream is silent.
+//
+// Some resellers (e.g. blazeapi.org) do NOT stream incrementally: they generate
+// the whole completion server-side and only then replay it as chunks. That
+// leaves the socket byte-silent for the entire generation window (tens of
+// seconds, minutes for "thinking" models), during which any idle-sensitive hop
+// — the client's HTTP stack, an intermediary proxy — can drop the connection
+// and surface as a timeout even though the model is still working.
+//
+// injectSseKeepalive pipes the source through untouched and, in parallel, emits
+// an SSE comment line (`: keepalive`) every `intervalMs`. Comments are ignored
+// by SSE parsers, so they never corrupt the OpenAI-shaped `data:` stream — they
+// just produce traffic so the connection is not judged idle. This does NOT make
+// the model respond any sooner; it only prevents the silent window from being
+// mistaken for a dead connection.
+//
+// Pair it with guardSseStall for the real-content ceiling: apply keepalive
+// FIRST (closest to the upstream), then guardSseStall on top. guardSseStall
+// only counts `data:` lines as progress, so the injected comments do not reset
+// its stall clock — a genuinely dead upstream is still cut off after stallMs.
+export function injectSseKeepalive(
+  source: ReadableStream<Uint8Array>,
+  intervalMs: number = DEFAULT_KEEPALIVE_MS
+): ReadableStream<Uint8Array> {
+  const reader = source.getReader();
+  const encoder = new TextEncoder();
+  let heartbeat: ReturnType<typeof setInterval> | null = null;
+  const clear = () => {
+    if (heartbeat) {
+      clearInterval(heartbeat);
+      heartbeat = null;
+    }
+  };
+
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      heartbeat = setInterval(() => {
+        try {
+          controller.enqueue(encoder.encode(": keepalive\n\n"));
+        } catch {
+          clear();
+        }
+      }, intervalMs);
+    },
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          clear();
+          controller.close();
+          return;
+        }
+        controller.enqueue(value);
+      } catch {
+        clear();
+        try {
+          controller.close();
+        } catch {
+          /* already closed */
+        }
+      }
+    },
+    cancel(reason) {
+      clear();
+      reader.cancel(reason).catch(() => {});
+    },
+  });
+}
+
 export function guardSseStall(
   source: ReadableStream<Uint8Array>,
   stallMs: number = DEFAULT_STREAM_STALL_MS

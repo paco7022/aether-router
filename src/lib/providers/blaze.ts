@@ -1,5 +1,9 @@
 import type { Provider, ProviderRequest } from "./types";
-import { guardSseStall, DEFAULT_STREAM_STALL_MS } from "./stream-stall-guard";
+import {
+  guardSseStall,
+  injectSseKeepalive,
+  DEFAULT_KEEPALIVE_MS,
+} from "./stream-stall-guard";
 
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 1000;
@@ -150,9 +154,16 @@ export function flattenClaudeRequest(request: ProviderRequest): ProviderRequest 
 }
 
 
-// Max time a stream may go with NO real content before we give up.
-const STREAM_STALL_MS =
-  Number(process.env.BLAZE_STREAM_STALL_MS) || DEFAULT_STREAM_STALL_MS;
+// Max time a stream may go with NO real content before we give up. blaze
+// pseudo-streams (generates the whole completion server-side, then replays it),
+// so the socket is legitimately byte-silent for the ENTIRE generation window —
+// tens of seconds normally, minutes for "-thinking" models on large contexts.
+// The default 120s ceiling would kill those valid long runs, so blaze gets a
+// wider 300s window; env-overridable.
+const STREAM_STALL_MS = Number(process.env.BLAZE_STREAM_STALL_MS) || 300_000;
+
+// Gap between injected keepalive comments during the silent generation window.
+const KEEPALIVE_MS = Number(process.env.BLAZE_KEEPALIVE_MS) || DEFAULT_KEEPALIVE_MS;
 
 export const blazeProvider: Provider = {
   name: "blaze",
@@ -192,7 +203,15 @@ export const blazeProvider: Provider = {
 
       if (res.ok) {
         if (request.stream === true && res.body) {
-          return new Response(guardSseStall(res.body, STREAM_STALL_MS), {
+          // Keepalive first (nearest the upstream) so the silent generation
+          // window keeps the socket warm, then the stall guard on top as the
+          // real-content ceiling — comments don't reset its clock.
+          return new Response(
+            guardSseStall(
+              injectSseKeepalive(res.body, KEEPALIVE_MS),
+              STREAM_STALL_MS
+            ),
+            {
             status: 200,
             headers: {
               "content-type":
