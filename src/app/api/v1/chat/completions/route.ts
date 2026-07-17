@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { validateApiKey, validateSession } from "@/lib/auth";
-import { calculateCredits, flatTokenCredits } from "@/lib/credits";
+import { calculateCredits, flatTokenCredits, paygCredits, isPaygPriced } from "@/lib/credits";
 import { estimateTokens, estimatePromptTokens, floorPromptTokens } from "@/lib/token-estimator";
 import { getProvider } from "@/lib/providers";
 import {
@@ -650,6 +650,27 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Pay-as-you-go (profiles.billing_mode = 'payg'). The account opted into
+  // per-token billing for premium models: charge credits per token instead of
+  // drawing the daily premium pool, and lift the plan context cap — that cap
+  // exists to ration the pool, and a PAYG user pays for every token they send.
+  //
+  // Deliberately excluded:
+  //   - non-premium (na/, ds/): genuine per-token upstreams already billed at
+  //     their real cost + margin. Pricing them off the PAYG table would sell
+  //     below cost, so they keep the standard path regardless of the toggle.
+  //   - zero-cost promos and free pools/events: free stays free (isFreePool
+  //     short-circuits the reservation and settlement below).
+  //   - custom/enterprise keys: they carry their own contract billing
+  //     (flat_per_token / custom_credits).
+  //   - models with no PAYG rates seeded (payg_credits_per_m_* = 0).
+  const isPaygRequest =
+    keyInfo.billingMode === "payg" &&
+    isPremiumProvider &&
+    !isZeroCostPremium &&
+    !keyInfo.isCustom &&
+    isPaygPriced(model);
+
   // 5.4. Active free event lookup (admin-created pools that make a model
   // prefix free for a set of plans, with their own per-user limits).
   // Custom keys have their own quotas and are not eligible for events.
@@ -919,7 +940,10 @@ export async function POST(req: NextRequest) {
     // 5.5b-normal. Premium plan limits (requests/day + context cap) — applies to trolllm, webproxy, hapuppy, gameron, dlab, riftai.
     // Skipped entirely when an active event covers this model for the user's plan.
     // Zero-cost premium models (free promos) also skip this entire block.
-    if (isPremiumProvider && !isZeroCostPremium) {
+    // PAYG accounts skip it too: they draw no premium pool (so no daily limit
+    // or reservation applies) and pay per token instead, which is what lifts
+    // the context cap enforced further down this branch.
+    if (isPremiumProvider && !isZeroCostPremium && !isPaygRequest) {
       const { data: premiumPlan, error: premiumPlanErr } = await getPlanLimits(
         supabase,
         keyInfo.planId
@@ -1366,8 +1390,13 @@ export async function POST(req: NextRequest) {
         margin: model.margin,
       }
     );
+    // PAYG reserves the worst case up front — the prompt we are about to send
+    // plus the full completion ceiling — so a user can never stream a response
+    // they cannot pay for. The unused part is refunded at settlement.
     const reservedCredits = isFlatPerTokenKey
       ? flatTokenCredits(estimatedPrompt, reservedCompletionTokens, flatRatePerM).credits
+      : isPaygRequest
+      ? paygCredits(estimatedPrompt, reservedCompletionTokens, model).credits
       : isPremiumProvider ? 1 : isFlatRateProvider ? Number(model.premium_request_cost ?? 0.1) : Math.max(reservedCreditsRaw, 1);
 
     if (keyInfo.isCustom && keyInfo.customCredits !== null) {
@@ -1664,7 +1693,8 @@ export async function POST(req: NextRequest) {
         isPlanUnlimited,
         keyInfo.trainingConsent,
         moderation.flagged,
-        messages as { role: string; content: unknown }[]
+        messages as { role: string; content: unknown }[],
+        isPaygRequest
       );
     }
 
@@ -1762,10 +1792,15 @@ export async function POST(req: NextRequest) {
     // body), NOT the upstream-reported prompt_tokens — or/ (Kiro) injects a
     // ~11.7k-token system prompt the customer never sent and shouldn't pay for.
     const flatSettle = isFlatPerTokenKey ? flatTokenCredits(estimatedPrompt, completionTokens, flatRatePerM) : null;
+    // PAYG settles on the same visible-token basis as the enterprise flat rate:
+    // our own estimate of the prompt the customer submitted, never the
+    // upstream-reported prompt_tokens (premium resellers inflate it with their
+    // own injected system prompt — blaze reports ~1.3k for a trivial "2+2").
+    const paygSettle = isPaygRequest ? paygCredits(estimatedPrompt, completionTokens, model) : null;
     // Premium-request models (t/, an/, w/) are flat-rate: 1 credit + N premium-request budget.
     // Flat-rate models (op/) charge a fixed per-request fee stored in premium_request_cost.
-    const finalCredits = isFreePool ? 0 : flatSettle ? flatSettle.credits : isPremiumProvider ? 1 : isFlatRateProvider ? Number(model.premium_request_cost ?? 0.1) : Math.max(credits, 1);
-    const loggedCostUsd = flatSettle ? flatSettle.costUsd : costUsd;
+    const finalCredits = isFreePool ? 0 : flatSettle ? flatSettle.credits : paygSettle ? paygSettle.credits : isPremiumProvider ? 1 : isFlatRateProvider ? Number(model.premium_request_cost ?? 0.1) : Math.max(credits, 1);
+    const loggedCostUsd = flatSettle ? flatSettle.costUsd : paygSettle ? paygSettle.costUsd : costUsd;
 
     // 9. Settle credits — adjust reservation to match actual usage
     let chargedCredits = 0;
@@ -1911,7 +1946,7 @@ export async function POST(req: NextRequest) {
 async function handleStreamingResponse(
   providerResponse: Response,
   keyInfo: { userId: string; keyId: string | null; credits: number; dailyCredits: number; isCustom: boolean; customCredits: number | null; planId: string; source: "api" | "chat"; pricingMode?: string; flatCostPerMTokens?: number | null; tokenWindowSeconds?: number | null; tokenWindowLimit?: number | null },
-  model: { id: string; provider: string; cost_per_m_input: number; cost_per_m_output: number; cost_per_m_cache_read?: number; cost_per_m_cache_write?: number; margin: number; premium_request_cost?: number },
+  model: { id: string; provider: string; cost_per_m_input: number; cost_per_m_output: number; cost_per_m_cache_read?: number; cost_per_m_cache_write?: number; margin: number; premium_request_cost?: number; payg_credits_per_m_input?: number; payg_credits_per_m_output?: number },
   startTime: number,
   estimatedPromptTokens: number = 0,
   isFreePool: boolean = false,
@@ -1933,6 +1968,10 @@ async function handleStreamingResponse(
   trainingConsent: boolean = false,
   moderationFlagged: boolean = false,
   requestMessages: { role: string; content: unknown }[] = [],
+  // True when the account is on pay-as-you-go and this premium model is billed
+  // per token instead of the flat 1 credit + pool draw. Decided in the main
+  // handler (it needs the promo/free-pool context this function doesn't see).
+  isPayg: boolean = false,
 ) {
   const supabase = createAdminClient();
   let totalPromptTokens = 0;
@@ -2070,8 +2109,18 @@ async function handleStreamingResponse(
     const flatSettle = isFlatPerTokenKey
       ? flatTokenCredits(estimatedPromptTokens, totalCompletionTokens, keyInfo.flatCostPerMTokens ?? 0)
       : null;
-    const finalCredits = isFreePool ? 0 : flatSettle ? flatSettle.credits : isPremiumModel ? 1 : isFlatRateModel ? Number(model.premium_request_cost ?? 0.1) : Math.max(credits, 1);
-    const loggedCostUsd = flatSettle ? flatSettle.costUsd : costUsd;
+    // PAYG bills on the same visible-token basis: our estimate of the submitted
+    // prompt (never the inflated upstream count) and the completion total,
+    // which already carries the observed-token floor applied above.
+    const paygSettle =
+      isPayg && !isFreePool
+        ? paygCredits(estimatedPromptTokens, totalCompletionTokens, {
+            payg_credits_per_m_input: model.payg_credits_per_m_input ?? 0,
+            payg_credits_per_m_output: model.payg_credits_per_m_output ?? 0,
+          })
+        : null;
+    const finalCredits = isFreePool ? 0 : flatSettle ? flatSettle.credits : paygSettle ? paygSettle.credits : isPremiumModel ? 1 : isFlatRateModel ? Number(model.premium_request_cost ?? 0.1) : Math.max(credits, 1);
+    const loggedCostUsd = flatSettle ? flatSettle.costUsd : paygSettle ? paygSettle.costUsd : costUsd;
 
     let wasCharged = isFreePool;
     let balanceAfter = reservation?.balanceAfterReserve ?? 0;

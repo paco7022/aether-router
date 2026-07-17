@@ -126,10 +126,10 @@ function ModelDataRow({ model }: { model: ModelRow }) {
         </div>
       </td>
       <td className="px-5 py-3.5 text-right text-white/70">
-        {model.isPremium || model.isFlatRate ? <span className="text-[var(--text-dim)]">--</span> : `$${model.priceInput}`}
+        {model.isFlatRate ? <span className="text-[var(--text-dim)]">--</span> : `$${model.priceInput}`}
       </td>
       <td className="px-5 py-3.5 text-right text-white/70">
-        {model.isPremium || model.isFlatRate ? <span className="text-[var(--text-dim)]">--</span> : `$${model.priceOutput}`}
+        {model.isFlatRate ? <span className="text-[var(--text-dim)]">--</span> : `$${model.priceOutput}`}
       </td>
       <td className="px-5 py-3.5 text-right text-white/70">
         {model.isFlatRate ? (

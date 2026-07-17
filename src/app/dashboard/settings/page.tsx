@@ -1,6 +1,7 @@
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { DeleteAccountButton } from "@/components/DeleteAccountButton";
+import { BillingModeCard } from "@/components/BillingModeCard";
 import { PresetCard } from "@/components/PresetCard";
 import { listPublicBuiltinPresets } from "@/lib/builtinPresets";
 import type { UserPresetRow } from "@/lib/preset";
@@ -13,7 +14,7 @@ export default async function SettingsPage() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("display_name, created_at, preset_enabled, builtin_preset_id, active_preset_id")
+    .select("display_name, created_at, preset_enabled, builtin_preset_id, active_preset_id, billing_mode")
     .eq("id", user!.id)
     .single();
 
@@ -76,6 +77,12 @@ export default async function SettingsPage() {
             </div>
           </div>
         </div>
+      </div>
+
+      <div className="mt-6">
+        <BillingModeCard
+          initialMode={profile?.billing_mode === "payg" ? "payg" : "request"}
+        />
       </div>
 
       <PresetCard

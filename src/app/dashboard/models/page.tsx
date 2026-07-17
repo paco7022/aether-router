@@ -23,8 +23,17 @@ export default async function ModelsPage() {
   const rows: ModelRow[] = (models || []).map((model) => {
     const isPremium = isPremiumProviderName(model.provider);
     const isFlatRate = isFlatRateProviderName(model.provider);
-    const creditsInput = pricePerMTokens(model.cost_per_m_input, model.margin);
-    const creditsOutput = pricePerMTokens(model.cost_per_m_output, model.margin);
+    // Premium models bill a flat 1 credit + a premium request in "request"
+    // mode, so their per-token columns are the PAYG rate — what the account is
+    // charged once it switches billing_mode to 'payg'. Those rates are stored
+    // as credits directly (margin already baked in), unlike cost_per_m which is
+    // our raw upstream cost and still needs margin applied.
+    const paygIn = Number(model.payg_credits_per_m_input) || 0;
+    const paygOut = Number(model.payg_credits_per_m_output) || 0;
+    const creditsInput =
+      isPremium && paygIn > 0 ? paygIn : pricePerMTokens(model.cost_per_m_input, model.margin);
+    const creditsOutput =
+      isPremium && paygOut > 0 ? paygOut : pricePerMTokens(model.cost_per_m_output, model.margin);
     const caps: string[] = Array.isArray(model.capabilities)
       ? model.capabilities
       : ["streaming", "system_message"];
@@ -53,6 +62,11 @@ export default async function ModelsPage() {
         <h2 className="text-2xl font-bold text-white/90 tracking-tight">Available Models</h2>
         <p className="text-sm text-[var(--text-muted)] mt-1">
           10,000 credits = $1.00 USD. All models include a 25% discount over official API pricing.
+          Per-token prices on premium models apply when your account is on{" "}
+          <a href="/dashboard/settings" className="text-[var(--aurora-violet)] hover:underline">
+            Pay as you go
+          </a>
+          ; on the default per-request mode they cost 1 credit plus the premium requests shown.
         </p>
       </div>
 

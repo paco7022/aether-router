@@ -55,6 +55,53 @@ export function flatTokenCredits(
   return { credits: Math.ceil(costUsd * CREDITS_PER_USD), costUsd };
 }
 
+// Pay-as-you-go pricing for a premium model (profiles.billing_mode = 'payg').
+//
+// The two rates are stored on the model row as CREDITS per 1M tokens and are a
+// SELLING price — the margin is already baked in by whoever set them. So there
+// is deliberately no margin multiplier and no CREDITS_PER_USD conversion here:
+// the number in the column is the number of credits charged.
+//
+// Cached tokens get no discount: premium upstreams are flat-quota resellers, so
+// a cache read costs us the same as a fresh one.
+//
+// IMPORTANT — pass OUR OWN token counts, never the upstream's reported usage.
+// Premium resellers inflate the input side by injecting their own system prompt
+// (blaze reports ~1.3k prompt_tokens for a trivial "2+2"; orbit omits its ~4k
+// Kiro preamble). Billing PAYG off that would charge users for tokens they
+// never sent. Mirrors the visible-token rule already used for enterprise
+// flat_per_token keys.
+export interface PaygPricing {
+  payg_credits_per_m_input: number;
+  payg_credits_per_m_output: number;
+}
+
+export function paygCredits(
+  promptTokens: number,
+  completionTokens: number,
+  pricing: PaygPricing
+): { credits: number; costUsd: number } {
+  const prompt = Math.max(promptTokens, 0);
+  const completion = Math.max(completionTokens, 0);
+
+  const credits =
+    (prompt / 1_000_000) * (pricing.payg_credits_per_m_input || 0) +
+    (completion / 1_000_000) * (pricing.payg_credits_per_m_output || 0);
+
+  // Never settle a served request at 0 credits.
+  const billed = Math.max(Math.ceil(credits), 1);
+  return { credits: billed, costUsd: creditsToUsd(billed) };
+}
+
+// True when a model is offered on pay-as-you-go at all (both rates seeded).
+export function isPaygPriced(pricing: Partial<PaygPricing> | null | undefined): boolean {
+  return (
+    !!pricing &&
+    Number(pricing.payg_credits_per_m_input) > 0 &&
+    Number(pricing.payg_credits_per_m_output) > 0
+  );
+}
+
 export function creditsToUsd(credits: number): number {
   return credits / CREDITS_PER_USD;
 }
