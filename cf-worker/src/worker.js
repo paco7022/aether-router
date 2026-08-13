@@ -96,7 +96,19 @@ function getConfig(env) {
 // are mapped to /api/v1/* so a misconfigured base URL still works. Only these
 // exact API paths are tolerated — dashboard/auth/asset routes are never
 // rewritten. Keep in sync with the real routes under src/app/api/v1/.
-const BARE_API_PATHS = ["/models", "/chat/completions", "/messages"];
+const BARE_API_PATHS = [
+  "/models",
+  "/chat/completions",
+  "/messages",
+  "/images/generations",
+  "/media",
+];
+
+// Rutas de API que un cliente puede llamar con Bearer desde un navegador
+// (origen no listado en ALLOWED_ORIGINS). Sin CORS abierto acá, un front
+// propio del usuario no puede generar imágenes.
+const BEARER_CORS_PATHS = ["/api/v1/chat/completions", "/api/v1/images/generations"];
+const BEARER_CORS_PREFIXES = ["/api/v1/media/"];
 
 function normalizeAppPath(pathname) {
   if (pathname === "/v1") return "/api/v1";
@@ -179,9 +191,10 @@ function getCorsHeaders(request, config) {
     .toLowerCase()
     .includes("authorization");
 
-  const isModelsRoute = pathname === "/api/v1/models";
+  const isModelsRoute = pathname === "/api/v1/models" || pathname === "/api/v1/media/models";
   const isBearerRoute =
-    pathname === "/api/v1/chat/completions" &&
+    (BEARER_CORS_PATHS.includes(pathname) ||
+      BEARER_CORS_PREFIXES.some((p) => pathname.startsWith(p))) &&
     (hasBearer || preflightAuthRequested);
 
   if (origin && config.allowedOrigins.includes(origin)) {
@@ -199,7 +212,8 @@ function getCorsHeaders(request, config) {
   if (isBearerRoute || isModelsRoute) {
     return {
       "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      // DELETE: cancelar un job de media (/api/v1/media/jobs/{id}).
+      "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
       "Access-Control-Allow-Headers":
         "Content-Type, Authorization, x-api-key, X-Device-Fingerprint",
       "Access-Control-Max-Age": "86400",

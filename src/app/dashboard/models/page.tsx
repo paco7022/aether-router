@@ -20,7 +20,13 @@ export default async function ModelsPage() {
 
   const newThreshold = Date.now() - NEW_MODEL_WINDOW_MS;
 
-  const rows: ModelRow[] = (models || []).map((model) => {
+  // Los modelos de imagen/video viven en la misma tabla pero no se cobran por
+  // token: en esta tabla saldrían con precio $0.0000, que se lee como "gratis".
+  // Tienen su propia página con su propio precio por generación.
+  const chatModels = (models || []).filter((m) => (m.modality ?? "text") === "text");
+  const hasMediaModels = (models || []).length > chatModels.length;
+
+  const rows: ModelRow[] = chatModels.map((model) => {
     const isPremium = isPremiumProviderName(model.provider);
     const isFlatRate = isFlatRateProviderName(model.provider);
     // Premium models bill a flat 1 credit + a premium request in "request"
@@ -130,6 +136,18 @@ export default async function ModelsPage() {
       </div>
 
       <ModelsTable models={rows} />
+
+      {hasMediaModels && (
+        <p className="text-xs text-[var(--text-muted)] mt-4 leading-relaxed">
+          Image and video models (<code className="font-mono text-[11px] px-1 py-0.5 rounded bg-white/[0.04]">img/</code>,{" "}
+          <code className="font-mono text-[11px] px-1 py-0.5 rounded bg-white/[0.04]">vid/</code>) are billed per
+          generation instead of per token — see{" "}
+          <a href="/dashboard/images" className="text-[var(--aurora-violet)] hover:underline">
+            Image Studio
+          </a>
+          .
+        </p>
+      )}
 
       <p className="text-xs text-[var(--text-dim)] mt-4 leading-relaxed">
         We are a routing service. Model availability and quality depend on upstream providers.

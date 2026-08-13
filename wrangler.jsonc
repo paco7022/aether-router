@@ -24,7 +24,11 @@
     // db/ (DLab) deprecated 2026-06-07 (models hidden as fake). Promo off.
     "DLAB_FREE_UNLIMITED": "false",
     // or/ (Orbit) 2026-07-03: paid-users-only, not free/unlimited.
-    "ORBIT_FREE_UNLIMITED": "false"
+    "ORBIT_FREE_UNLIMITED": "false",
+    // Generación de imagen/video (provider comfy, GPU propia). La URL del
+    // bridge y su secreto van como secrets, no acá.
+    "MEDIA_MAX_OPEN_JOBS": "3",
+    "AETHER_MEDIA_FREE_ENABLED": "false"
   },
   "assets": {
     "directory": ".open-next/assets",

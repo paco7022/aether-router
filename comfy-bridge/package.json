@@ -1,0 +1,15 @@
+{
+  "name": "aether-comfy-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Puente entre Aether Router y el ComfyUI local (RTX 5090). Sin dependencias: solo Node >= 20.",
+  "main": "src/server.mjs",
+  "scripts": {
+    "start": "node src/server.mjs",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

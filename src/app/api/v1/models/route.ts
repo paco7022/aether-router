@@ -19,11 +19,25 @@ export async function GET() {
 
   const supabase = createAdminClient();
 
-  const { data: models, error } = await supabase
+  // `modality` es una columna nueva (migración de media). Si el deploy de
+  // código va por delante del de la DB, pedirla haría fallar TODO /v1/models,
+  // que es el endpoint más crítico del router. Se reintenta sin ella.
+  type ModelRow = { id: string; capabilities?: unknown; modality?: string | null };
+  let { data: models, error } = await supabase
     .from("models")
-    .select("id, capabilities")
+    .select("id, capabilities, modality")
     .eq("is_active", true)
-    .order("id");
+    .order("id")
+    .overrideTypes<ModelRow[]>();
+
+  if (error) {
+    ({ data: models, error } = await supabase
+      .from("models")
+      .select("id, capabilities")
+      .eq("is_active", true)
+      .order("id")
+      .overrideTypes<ModelRow[]>());
+  }
 
   if (error) {
     return NextResponse.json(
@@ -39,6 +53,9 @@ export async function GET() {
     created: 0,
     owned_by: "aether-router",
     capabilities: m.capabilities ?? ["streaming", "system_message"],
+    // "image"/"video" no sirven en /v1/chat/completions; se exponen acá para
+    // que un cliente pueda filtrarlos en vez de descubrirlo con un 400.
+    modality: m.modality ?? "text",
   }));
 
   const body = { object: "list", data };

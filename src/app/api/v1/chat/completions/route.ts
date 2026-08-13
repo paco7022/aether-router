@@ -504,6 +504,21 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Los modelos de imagen/video viven en la misma tabla pero no tienen
+  // adaptador de chat: sin este corte, getProvider("comfy") devolvería
+  // undefined y el usuario vería un 503 genérico en vez del endpoint correcto.
+  if (model.modality && model.modality !== "text") {
+    return NextResponse.json(
+      {
+        error: {
+          message: `${model.id} is an ${model.modality} generation model. Use POST /v1/images/generations or /v1/media/jobs instead.`,
+          type: "invalid_request",
+        },
+      },
+      { status: 400 }
+    );
+  }
+
   // 5. Get provider
   const provider = getProvider(model.provider);
   if (!provider) {

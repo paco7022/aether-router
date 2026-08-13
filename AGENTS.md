@@ -273,6 +273,41 @@ Adaptadores:
 
 Todos deben aceptar `signal?: AbortSignal` y pasarlo a `fetch`.
 
+### Generacion de imagen/video (provider `comfy`)
+
+Motor propio: ComfyUI sobre la RTX 5090 de la PC, detras de `comfy-bridge/`
+(servicio Node sin dependencias, puerto 8189, publicado por cloudflared en
+`comfy.aether-ai.dev`). No es un Provider del registro: no hay chat, hay jobs.
+
+- `comfy-bridge/` — cola concurrencia 1, plantillas de workflow, auth por
+  secreto y catalogo DINAMICO (se arma leyendo los checkpoints de ComfyUI).
+  Ver `comfy-bridge/README.md`.
+- `scripts/generate-media-models-sql.mjs` — genera la migracion de filas de
+  `models` desde el catalogo vivo del bridge. Un checkpoint nuevo en la PC =
+  correr esto y aplicar la migracion; no se editan las filas a mano.
+- `src/lib/comfy-bridge.ts` — cliente HTTP del bridge.
+- `src/lib/media-jobs.ts` — creacion, cobro, reconciliacion, refunds, subida a
+  Storage. Es el equivalente de `chat/completions` para media.
+- `src/lib/media-credits.ts` — precio por generacion (tiene tests).
+- `src/lib/media-auth.ts` — mismos gates que chat (ban, activacion, Discord).
+- Rutas: `api/v1/media/models`, `api/v1/media/jobs`, `api/v1/media/jobs/[id]`,
+  `api/v1/images/generations` (wrapper OpenAI-compatible sincrono).
+- UI: `src/app/dashboard/images/`.
+- DB: columnas `modality` + `media_*` en `models`, tabla `media_jobs`, bucket
+  privado `media` (migracion `20260802120000_media_generation.sql`).
+
+Reglas:
+
+- Los modelos de media viven en la misma tabla `models`; `chat/completions`
+  corta con 400 si `modality <> 'text'`. No quitar ese corte.
+- El avance de un job lo empuja el poll (no hay worker): en Cloudflare no hay
+  proceso persistente. Toda finalizacion es idempotente (upsert a rutas
+  deterministicas + UPDATE condicional por estado).
+- Los creditos se reservan al encolar y se refundan en cualquier fallo. Si
+  tocas `media-jobs.ts`, verifica que todo camino de error pase por `failJob`.
+- La moderacion CSAM aca BLOQUEA (a diferencia del chat, que solo encola
+  revision): generar la imagen seria producir el material, no enrutarlo.
+
 ### Billing
 
 `src/app/api/v1/billing/subscribe/route.ts`

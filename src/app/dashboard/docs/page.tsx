@@ -77,6 +77,88 @@ print(response.choices[0].message.content)`}
         </div>
       </section>
 
+      {/* Image & video generation */}
+      <section className="mb-10">
+        <h3 className="text-xl font-bold text-white/85 mb-4">Image &amp; Video Generation</h3>
+        <div className="glass-card shimmer-line p-5 space-y-4">
+          <p className="text-sm text-[var(--text-muted)]">
+            Models with the <code className="text-violet-400 font-mono text-xs">img/</code> and{" "}
+            <code className="text-cyan-400 font-mono text-xs">vid/</code> prefixes run on our own GPU.
+            They are billed <strong className="text-white/80">per generation</strong>, not per token:
+            the price scales with resolution, steps and (for video) frames. Available on paid plans.
+          </p>
+
+          <div>
+            <p className="text-[10px] text-[var(--text-dim)] uppercase tracking-[0.15em] mb-2">
+              OpenAI-compatible (images, waits for the result)
+            </p>
+            <pre className="bg-[var(--bg-input)] border border-white/[0.04] rounded-xl px-4 py-3 text-sm font-mono overflow-x-auto whitespace-pre text-white/60">
+{`curl ${PUBLIC_API_BASE_URL}/images/generations \\
+  -H "Authorization: Bearer YOUR_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "img/flux-dev",
+    "prompt": "a vintage motorcycle on a neon-lit street",
+    "size": "1024x1024",
+    "response_format": "url"
+  }'`}
+            </pre>
+          </div>
+
+          <div>
+            <p className="text-[10px] text-[var(--text-dim)] uppercase tracking-[0.15em] mb-2">
+              Async jobs (required for video, recommended for batches)
+            </p>
+            <pre className="bg-[var(--bg-input)] border border-white/[0.04] rounded-xl px-4 py-3 text-sm font-mono overflow-x-auto whitespace-pre text-white/60">
+{`# 1. enqueue -> 202 {"id": "...", "status": "queued"}
+curl ${PUBLIC_API_BASE_URL}/media/jobs \\
+  -H "Authorization: Bearer YOUR_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"model": "vid/wan-2.2-5b", "prompt": "a fox running in the snow", "length": 49}'
+
+# 2. poll until status is "succeeded"
+curl ${PUBLIC_API_BASE_URL}/media/jobs/JOB_ID \\
+  -H "Authorization: Bearer YOUR_API_KEY"`}
+            </pre>
+          </div>
+
+          <ul className="text-sm space-y-2 ml-4 list-disc text-[var(--text-muted)]">
+            <li>
+              <code className="text-violet-400 font-mono text-xs">GET /media/models</code> lists the
+              models with their defaults, limits and price per generation.
+            </li>
+            <li>
+              Optional fields: <code className="font-mono text-xs">negative_prompt</code>,{" "}
+              <code className="font-mono text-xs">steps</code>,{" "}
+              <code className="font-mono text-xs">seed</code>,{" "}
+              <code className="font-mono text-xs">batch</code>,{" "}
+              <code className="font-mono text-xs">init_image</code> (base64, for img2img and
+              image-to-video), <code className="font-mono text-xs">length</code> and{" "}
+              <code className="font-mono text-xs">fps</code> for video.
+            </li>
+            <li>
+              LoRAs: pass up to 4 as{" "}
+              <code className="font-mono text-xs">{`"loras": [{"name": "file.safetensors", "strength": 0.8}]`}</code>.
+              The installed list comes back in{" "}
+              <code className="font-mono text-xs">GET /media/models</code> under{" "}
+              <code className="font-mono text-xs">loras</code>; names must match exactly.
+            </li>
+            <li>
+              Result files are served as <strong className="text-white/80">signed URLs valid for 1 hour</strong>.
+              Download what you want to keep.
+            </li>
+            <li>
+              Credits are reserved when the job is queued and{" "}
+              <strong className="text-white/80">refunded automatically</strong> if the generation fails.
+            </li>
+            <li>
+              A failed video job can take minutes to detect — poll the job instead of holding an
+              HTTP connection open.
+            </li>
+          </ul>
+        </div>
+      </section>
+
       {/* Authentication */}
       <section className="mb-10">
         <h3 className="text-xl font-bold text-white/85 mb-4">Authentication</h3>
