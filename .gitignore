@@ -3,6 +3,11 @@ node_modules/
 .open-next/
 .env.local
 .env*.local
+# Copias de seguridad del .env antes de cada cambio de provider: llevan TODAS
+# las keys en claro y el patrón .env*.local NO las matchea (no terminan en
+# .local). El repo es público — jamás deben entrar.
+.env.local.bak*
+.env.local.backup*
 out/
 
 .vercel
