@@ -24,6 +24,7 @@ import {
 } from "@/lib/comfy-bridge";
 import { moderateMessages, recordModerationReview } from "@/lib/content-moderation";
 import type { ApiKeyInfo } from "@/lib/auth";
+import { isPaidAccount } from "@/lib/free-tier";
 
 const MEDIA_PROVIDER = "comfy";
 const BUCKET = "media";
@@ -283,11 +284,11 @@ export async function createMediaJob(
   const model = await getMediaModel(modelId);
   if (!model) throw new MediaError("Model not found or unavailable", 404, "model_not_found");
 
-  // Plan de pago (o promo abierta). Las claves custom traen su propio
-  // presupuesto, así que no se les aplica la regla de plan.
-  if (!MEDIA_FREE_ENABLED && !keyInfo.isCustom && keyInfo.planId === "free") {
+  // Cuenta de pago (plan o créditos comprados) o promo abierta. Las claves
+  // custom traen su propio presupuesto, así que no se les aplica la regla.
+  if (!MEDIA_FREE_ENABLED && !isPaidAccount(keyInfo)) {
     throw new MediaError(
-      "Image and video generation require a paid plan.",
+      "Image and video generation require a paid plan or purchased credits.",
       402,
       "paid_plan_required",
     );

@@ -9,7 +9,8 @@ import { requireCsrf } from "@/lib/csrf";
 //   "request" (default) — flat 1 credit + a premium-pool draw per call, under
 //       the plan's context cap.
 //   "payg"              — billed per token against credits, no pool draw and no
-//       context cap, but more expensive per call.
+//       context cap, but more expensive per call. It is also the ONLY mode for
+//       accounts without a plan (access bought with credits, profiles.is_paid).
 //
 // Per account, not per key: the router reads profiles.billing_mode on every
 // request (see validateApiKey / validateSession). Only premium providers honour
@@ -52,6 +53,27 @@ export async function POST(req: NextRequest) {
 
   // Admin client: profiles is not writable by the user's own session.
   const admin = createAdminClient();
+
+  // Pay-as-you-go accounts (no plan, access bought with credits) cannot leave
+  // 'payg': per-request billing draws a daily premium pool that the free row
+  // does not have, so the switch would silently brick their access.
+  if (mode === "request") {
+    const { data: profile } = await admin
+      .from("profiles")
+      .select("plan_id")
+      .eq("id", user.id)
+      .single();
+    if ((profile?.plan_id ?? "free") === "free") {
+      return NextResponse.json(
+        {
+          error:
+            "Pay-as-you-go is the only billing mode without a plan. Subscribe to switch to per-request billing.",
+        },
+        { status: 400 }
+      );
+    }
+  }
+
   const { error } = await admin
     .from("profiles")
     .update({ billing_mode: mode })

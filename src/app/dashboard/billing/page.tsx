@@ -9,6 +9,7 @@ import { ContextBoostCard } from "@/components/ContextBoostCard";
 import { TDiscountCard } from "@/components/TDiscountCard";
 import { GiftCard } from "@/components/GiftCard";
 import { CheckoutFeedback } from "@/components/CheckoutFeedback";
+import { MIN_PAID_CREDITS } from "@/lib/free-tier";
 
 export default async function BillingPage() {
   const supabase = await createServerSupabase();
@@ -23,7 +24,7 @@ export default async function BillingPage() {
     { data: packages },
     { data: transactions },
   ] = await Promise.all([
-    supabase.from("profiles").select("credits, daily_credits, plan_id, gm_claimed_date, context_boost_expires_at, t_discount_expires_at, gm_daily_override, gm_override_expires, referral_bonus_requests, referral_bonus_expires").eq("id", user!.id).single(),
+    supabase.from("profiles").select("credits, daily_credits, plan_id, is_paid, billing_mode, gm_claimed_date, context_boost_expires_at, t_discount_expires_at, gm_daily_override, gm_override_expires, referral_bonus_requests, referral_bonus_expires").eq("id", user!.id).single(),
     supabase
       .from("subscriptions")
       .select("*, plans(*)")
@@ -66,6 +67,12 @@ export default async function BillingPage() {
   const premiumDebt = Number(premiumCounters?.premium_request_debt ?? 0);
 
   const currentPlanId = profile?.plan_id || "free";
+  // No plan = pay-as-you-go territory: access comes from purchased credits
+  // (profiles.is_paid + the MIN_PAID_CREDITS floor), and the premium pool /
+  // context-cap cards below simply don't apply.
+  const noPlan = currentPlanId === "free";
+  const isPayg = (profile as unknown as { is_paid?: boolean | null })?.is_paid === true;
+  const paygActive = noPlan && isPayg;
   const permanentCredits = profile?.credits || 0;
   const dailyCredits = currentPlanId === "free" ? 0 : (profile?.daily_credits || 0);
   const totalCredits = permanentCredits + dailyCredits;
@@ -159,7 +166,8 @@ export default async function BillingPage() {
         )}
       </div>
 
-      {/* GM Requests */}
+      {/* GM Requests — premium pool only exists inside a plan */}
+      {!noPlan && (
       <div className="mb-8">
         <GmRequestsCard
           used={premiumUsedToday}
@@ -169,8 +177,10 @@ export default async function BillingPage() {
           claimed={gmClaimedToday}
         />
       </div>
+      )}
 
-      {/* Context Boost */}
+      {/* Context Boost — caps the premium pool, irrelevant on pay-as-you-go */}
+      {!noPlan && (
       <div className="mb-8">
         <div className="flex items-center gap-2 mb-1">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--aurora-teal)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="opacity-60">
@@ -194,6 +204,41 @@ export default async function BillingPage() {
           />
         </div>
       </div>
+      )}
+
+      {/* Pay-as-you-go status (accounts without a plan) */}
+      {noPlan && (
+        <div
+          className="mb-8 rounded-xl px-5 py-4 text-sm"
+          style={{
+            background: paygActive
+              ? "linear-gradient(135deg, rgba(52,211,153,0.08), rgba(34,211,238,0.04))"
+              : "linear-gradient(135deg, rgba(239,68,68,0.10), rgba(251,191,36,0.05))",
+            border: paygActive ? "1px solid rgba(52,211,153,0.22)" : "1px solid rgba(239,68,68,0.25)",
+            color: paygActive ? "rgba(167,243,208,0.95)" : "rgba(252,165,165,0.95)",
+          }}
+        >
+          <p className="font-semibold mb-1">
+            {paygActive ? "Pay as you go — active" : "No plan: routing is off"}
+          </p>
+          <p className="text-xs leading-relaxed opacity-90">
+            {paygActive ? (
+              <>
+                You are billed per token against your permanent credits, with no daily premium pool
+                and no context cap. Routing stops if your balance falls below{" "}
+                {MIN_PAID_CREDITS.toLocaleString()} credits &mdash; you have{" "}
+                <span className="font-semibold">{permanentCredits.toLocaleString()}</span>.
+              </>
+            ) : (
+              <>
+                The free tier was discontinued. Buy at least {MIN_PAID_CREDITS.toLocaleString()}{" "}
+                credits to route pay-as-you-go (billed per token, no daily limits), or subscribe to a
+                plan below for daily credits and a premium-request pool.
+              </>
+            )}
+          </p>
+        </div>
+      )}
 
       {/* Plans */}
       <div className="mb-8">

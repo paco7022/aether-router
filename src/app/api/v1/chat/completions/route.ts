@@ -36,7 +36,12 @@ import { getBuiltinPreset } from "@/lib/builtinPresets";
 import { tryPcFailover } from "@/lib/pc-failover";
 import { TtlCache } from "@/lib/db-cache";
 import { getPlanLimits } from "@/lib/plan-cache";
-import { isFreeTierBlocked, freeTierBlockedResponse } from "@/lib/free-tier";
+import {
+  isFreeTierBlocked,
+  isPaidAccount,
+  FREE_TIER_BLOCKED_PAYLOAD,
+  FREE_TIER_BLOCKED_STATUS,
+} from "@/lib/free-tier";
 
 export const runtime = "nodejs";
 // NOTE: If the platform kills a streaming request mid-flight, the `flush()`
@@ -393,7 +398,7 @@ export async function POST(req: NextRequest) {
   // now unreachable for non-custom keys; it is left in place so flipping this
   // gate off restores the old behaviour intact.
   if (isFreeTierBlocked(keyInfo)) {
-    return freeTierBlockedResponse();
+    return NextResponse.json(FREE_TIER_BLOCKED_PAYLOAD, { status: FREE_TIER_BLOCKED_STATUS });
   }
 
   // Extra hardening: if a custom key has exhausted credits, reject before
@@ -508,7 +513,9 @@ export async function POST(req: NextRequest) {
     // rule and the per-user claude_activated gate for db/ while the flag is on.
     const dlabFreePromo = DLAB_FREE_UNLIMITED && model.provider === "dlab";
     if (!dlabFreePromo) {
-      if (keyInfo.planId === "free" && claudePaidOnlyApplies(model.provider)) {
+      // "Paid" now includes pay-as-you-go accounts (purchased credits), not
+      // just subscribers — see isPaidAccount in src/lib/free-tier.ts.
+      if (!isPaidAccount(keyInfo) && claudePaidOnlyApplies(model.provider)) {
         return NextResponse.json(
           { error: { message: CLAUDE_PAID_ONLY_MESSAGE, type: "plan_restricted" } },
           { status: 403 }

@@ -43,6 +43,11 @@ export interface ApiKeyInfo {
   // draw and no context cap, but more expensive. Only affects premium
   // providers; na/ + ds/ are already per-token and ignore it.
   billingMode: "request" | "payg";
+  // profiles.is_paid — the account bought credits and still holds the floor
+  // (MIN_PAID_CREDITS). It is what lets a plan_id='free' account route at all
+  // now that the free tier is gone; see src/lib/free-tier.ts. Maintained by DB
+  // triggers, never written from the app.
+  isPaid: boolean;
   // Per-key overrides (custom/event keys)
   isCustom: boolean;
   customCredits: number | null;
@@ -81,7 +86,7 @@ export async function validateApiKey(key: string): Promise<ApiKeyInfo | null> {
   // Look up key and join with profile for credits
   const { data: result, error } = await supabase
     .from("api_keys")
-    .select("id, user_id, is_active, is_custom, custom_credits, max_context, allowed_providers, daily_request_limit, rate_limit_seconds, token_window_seconds, token_window_limit, expires_at, pricing_mode, flat_cost_per_m_tokens, last_used, profiles(credits, daily_credits, plan_id, gm_claimed_date, gm_daily_override, gm_override_expires, referral_bonus_requests, referral_bonus_expires, is_activated, claude_activated, preset, preset_enabled, builtin_preset_id, context_boost_expires_at, t_discount_expires_at, discord_verified, discord_link_required_by, training_consent, billing_mode)")
+    .select("id, user_id, is_active, is_custom, custom_credits, max_context, allowed_providers, daily_request_limit, rate_limit_seconds, token_window_seconds, token_window_limit, expires_at, pricing_mode, flat_cost_per_m_tokens, last_used, profiles(credits, daily_credits, plan_id, gm_claimed_date, gm_daily_override, gm_override_expires, referral_bonus_requests, referral_bonus_expires, is_activated, claude_activated, preset, preset_enabled, builtin_preset_id, context_boost_expires_at, t_discount_expires_at, discord_verified, discord_link_required_by, training_consent, billing_mode, is_paid)")
     .eq("key_hash", keyHash)
     .single();
 
@@ -108,7 +113,7 @@ export async function validateApiKey(key: string): Promise<ApiKeyInfo | null> {
       });
   }
 
-  const profile = result.profiles as unknown as { credits: number; daily_credits: number; plan_id: string; gm_claimed_date: string | null; gm_daily_override: number | null; gm_override_expires: string | null; referral_bonus_requests: number | null; referral_bonus_expires: string | null; is_activated: boolean | null; claude_activated: boolean | null; preset: UserPreset | null; preset_enabled: boolean | null; builtin_preset_id: string | null; context_boost_expires_at: string | null; t_discount_expires_at: string | null; discord_verified: boolean | null; discord_link_required_by: string | null; training_consent: boolean | null; billing_mode: string | null };
+  const profile = result.profiles as unknown as { credits: number; daily_credits: number; plan_id: string; gm_claimed_date: string | null; gm_daily_override: number | null; gm_override_expires: string | null; referral_bonus_requests: number | null; referral_bonus_expires: string | null; is_activated: boolean | null; claude_activated: boolean | null; preset: UserPreset | null; preset_enabled: boolean | null; builtin_preset_id: string | null; context_boost_expires_at: string | null; t_discount_expires_at: string | null; discord_verified: boolean | null; discord_link_required_by: string | null; training_consent: boolean | null; billing_mode: string | null; is_paid: boolean | null };
 
   return {
     keyId: result.id,
@@ -129,6 +134,7 @@ export async function validateApiKey(key: string): Promise<ApiKeyInfo | null> {
     discordLinkRequiredBy: profile?.discord_link_required_by ?? null,
     trainingConsent: profile?.training_consent ?? false,
     billingMode: profile?.billing_mode === "payg" ? "payg" : "request",
+    isPaid: profile?.is_paid ?? false,
     isCustom: result.is_custom ?? false,
     customCredits: result.custom_credits ?? null,
     maxContext: result.max_context ?? null,
@@ -161,7 +167,7 @@ export async function validateSession(): Promise<ApiKeyInfo | null> {
   const admin = createAdminClient();
   const { data: profile } = await admin
     .from("profiles")
-    .select("credits, daily_credits, plan_id, gm_claimed_date, gm_daily_override, gm_override_expires, referral_bonus_requests, referral_bonus_expires, is_activated, claude_activated, preset, preset_enabled, builtin_preset_id, context_boost_expires_at, t_discount_expires_at, discord_verified, discord_link_required_by, training_consent, billing_mode")
+    .select("credits, daily_credits, plan_id, gm_claimed_date, gm_daily_override, gm_override_expires, referral_bonus_requests, referral_bonus_expires, is_activated, claude_activated, preset, preset_enabled, builtin_preset_id, context_boost_expires_at, t_discount_expires_at, discord_verified, discord_link_required_by, training_consent, billing_mode, is_paid")
     .eq("id", user.id)
     .single();
 
@@ -189,6 +195,7 @@ export async function validateSession(): Promise<ApiKeyInfo | null> {
       (profile as unknown as { billing_mode?: string | null }).billing_mode === "payg"
         ? "payg"
         : "request",
+    isPaid: (profile as unknown as { is_paid?: boolean | null }).is_paid ?? false,
     isCustom: false,
     customCredits: null,
     maxContext: null,

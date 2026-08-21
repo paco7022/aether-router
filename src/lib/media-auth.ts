@@ -7,7 +7,11 @@ import { validateApiKey, validateSession, type ApiKeyInfo } from "@/lib/auth";
 import { isApiKeyAuthHeader, getRequestFingerprint } from "@/lib/chat-preflight";
 import { evaluateBanStatus } from "@/lib/ban";
 import { requireCsrf } from "@/lib/csrf";
-import { isFreeTierBlocked, freeTierBlockedResponse } from "@/lib/free-tier";
+import {
+  isFreeTierBlocked,
+  FREE_TIER_BLOCKED_PAYLOAD,
+  FREE_TIER_BLOCKED_STATUS,
+} from "@/lib/free-tier";
 
 export async function authenticateMediaRequest(
   req: NextRequest,
@@ -57,11 +61,14 @@ export async function authenticateMediaRequest(
     };
   }
 
-  // Free tier removed (2026-08-21): mismo corte que /v1/chat/completions.
-  // Sustituye a los gates de activacion + verificacion Discord, que solo
-  // existian para sostener el free. Las custom keys quedan exentas.
+  // Free tier removed (2026-08-21): mismo corte que /v1/chat/completions —
+  // pasa el plan de pago o los créditos comprados (isPaidAccount). Sustituye a
+  // los gates de activacion + verificacion Discord, que solo existian para
+  // sostener el free. Las custom keys quedan exentas.
   if (isFreeTierBlocked(keyInfo)) {
-    return { response: freeTierBlockedResponse() };
+    return {
+      response: NextResponse.json(FREE_TIER_BLOCKED_PAYLOAD, { status: FREE_TIER_BLOCKED_STATUS }),
+    };
   }
 
   return { keyInfo };
