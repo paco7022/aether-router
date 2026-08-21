@@ -76,7 +76,7 @@ export default async function ModelsPage() {
         </p>
       </div>
 
-      {/* Free plan allowance notice */}
+      {/* Paid-plan allowance notice (free tier removed 2026-08-21) */}
       <div
         className="mb-5 rounded-xl px-4 py-3 text-xs flex items-start gap-3"
         style={{
@@ -90,9 +90,11 @@ export default async function ModelsPage() {
         </svg>
         <div className="leading-relaxed space-y-1">
           <p>
-            <span className="font-semibold text-emerald-200/95">Free plan allowance:</span>{" "}
-            free accounts include <span className="font-semibold">15 premium-request units per day</span>.
-            There are no free daily credits or promotional token pools enabled.
+            <span className="font-semibold text-emerald-200/95">Paid plans only:</span>{" "}
+            the free tier has been discontinued &mdash; routing requires an active plan. Each plan
+            includes its own <span className="font-semibold">daily premium-request allowance</span>{" "}
+            plus daily credits; see{" "}
+            <a href="/dashboard/billing" className="underline">Billing</a>.
           </p>
           <p>
             Premium-model calls consume the amount shown in the &quot;Premium Cost&quot; column.

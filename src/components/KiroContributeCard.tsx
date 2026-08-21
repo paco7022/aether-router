@@ -109,7 +109,10 @@ export function KiroContributeCard() {
     }
   }
 
-  const full = pool ? pool.slots_free <= 0 : false;
+  // Contributors with an account already in the pool are re-syncing it, not
+  // taking a new slot — a full pool must not lock them out of the box.
+  const mine = pool?.mine ?? 0;
+  const full = pool ? pool.slots_free <= 0 && mine === 0 : false;
 
   return (
     <div className="glass-card shimmer-line p-6">
@@ -147,9 +150,10 @@ export function KiroContributeCard() {
             )}
           </div>
           <p className="text-xs text-[var(--text-muted)] mt-1 leading-relaxed">
-            Community pool: contribute your Kiro account and <span className="text-white/80">everyone</span>{" "}
-            (free included) gets real Claude for just <span className="text-white/80">0.5 request</span>. The
-            more accounts, the better the pool holds up.
+            Community pool: contribute your Kiro account and every{" "}
+            <span className="text-white/80">paid plan</span> gets real Claude through{" "}
+            <span className="text-white/80">k/</span> at the standard premium price (Opus 6, Sonnet 3
+            requests). The more accounts, the better the pool holds up.
           </p>
         </div>
       </div>
@@ -165,6 +169,13 @@ export function KiroContributeCard() {
           ⚠️ Your account routes other users&apos; traffic and <span className="font-medium">may be banned</span> by
           Amazon over the platform&apos;s content. Only contribute if you accept that.
         </div>
+        {mine > 0 && (
+          <div className="rounded-xl px-3.5 py-2.5 text-[11px] leading-relaxed" style={{ background: "rgba(96,165,250,0.06)", border: "1px solid rgba(96,165,250,0.20)", color: "rgba(147,197,253,0.95)" }}>
+            You already have an account in the pool. Pasting a token again{" "}
+            <span className="font-medium">re-syncs that same account</span> (it never creates a second
+            one), which is how you revive it if Kiro Desktop rotated your token.
+          </div>
+        )}
       </div>
 
       {/* Paste box */}

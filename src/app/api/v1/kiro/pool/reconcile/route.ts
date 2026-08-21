@@ -25,6 +25,35 @@ interface GatewayAccount {
   initialized: boolean;
 }
 
+interface GatewayHealth {
+  filename: string;
+  alive: boolean;
+  error: string | null;
+}
+
+// Reservations abandoned mid-capture (see the contribute route) never get
+// released and are skipped by the eviction pass below, so they'd hold a slot
+// forever. Clear them on every cycle.
+const PENDING_TTL_MS = 10 * 60 * 1000;
+
+async function sweepStalePending(
+  admin: ReturnType<typeof createAdminClient>
+): Promise<number> {
+  const cutoff = new Date(Date.now() - PENDING_TTL_MS).toISOString();
+  const { data, error } = await admin
+    .from("kiro_pool_accounts")
+    .delete()
+    .eq("status", "active")
+    .eq("filename", "pending")
+    .lt("created_at", cutoff)
+    .select("id");
+  if (error) {
+    console.error("kiro reconcile: pending sweep failed:", error.message);
+    return 0;
+  }
+  return data?.length ?? 0;
+}
+
 export async function POST(req: NextRequest) {
   const secret = process.env.POOL_ADMIN_SECRET;
   const auth = req.headers.get("authorization");
@@ -62,7 +91,26 @@ export async function POST(req: NextRequest) {
   const health = new Map<string, GatewayAccount>();
   for (const a of gwAccounts) health.set(a.filename, a);
 
+  // `failures` is a circuit-breaker counter and stays at 0 for the failure mode
+  // that actually kills the pool: a desynced/revoked token that 401s on
+  // refresh. Ask the gateway for real liveness instead; older gateways don't
+  // serve this endpoint, so treat a failure here as "no extra signal".
+  const liveness = new Map<string, boolean>();
+  try {
+    const res = await fetch(`${adminBase}/admin/pool/health`, {
+      headers: { Authorization: `Bearer ${secret}` },
+      signal: AbortSignal.timeout(60000),
+    });
+    if (res.ok) {
+      const data = (await res.json()) as { accounts?: GatewayHealth[] };
+      for (const a of data.accounts ?? []) liveness.set(a.filename, a.alive);
+    }
+  } catch {
+    // Probe unavailable — fall back to the failure counter alone.
+  }
+
   const admin = createAdminClient();
+  const pendingSwept = await sweepStalePending(admin);
   const { data: rows, error } = await admin
     .from("kiro_pool_accounts")
     .select("id, filename")
@@ -73,11 +121,15 @@ export async function POST(req: NextRequest) {
   }
 
   const evicted: string[] = [];
+  const tracked = new Set<string>();
   for (const row of rows ?? []) {
+    tracked.add(row.filename);
     const h = health.get(row.filename);
     let dead: string | null = null;
     if (!h) {
       dead = "missing_from_gateway";
+    } else if (liveness.get(row.filename) === false) {
+      dead = "refresh_401";
     } else if (h.failures >= DEAD_THRESHOLD) {
       dead = `failures_${h.failures}`;
     }
@@ -105,10 +157,38 @@ export async function POST(req: NextRequest) {
     evicted.push(row.filename);
   }
 
+  // Accounts added straight through the gateway (the owner's own, or anything
+  // captured with POOL_ADMIN_SECRET) have no row here, so the loop above can
+  // never retire them. A dead one is not harmless: the gateway scans accounts
+  // in filename order and does not fail over on a refresh 401, so whichever
+  // dead account sorts first returns 500 for every k/ request. Retire the ones
+  // the liveness probe says are gone.
+  const orphansRetired: string[] = [];
+  for (const [filename, alive] of liveness) {
+    if (alive || tracked.has(filename)) continue;
+    try {
+      const res = await fetch(`${adminBase}/admin/pool/remove`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${secret}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ filename }),
+        signal: AbortSignal.timeout(20000),
+      });
+      if (res.ok) orphansRetired.push(filename);
+    } catch {
+      // Retry next cycle.
+    }
+  }
+
   return NextResponse.json({
     ok: true,
     checked: rows?.length ?? 0,
     evicted,
+    orphans_retired: orphansRetired,
+    pending_swept: pendingSwept,
+    probe: liveness.size > 0,
     threshold: DEAD_THRESHOLD,
   });
 }

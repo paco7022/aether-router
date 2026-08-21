@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Sidebar } from "@/components/Sidebar";
 import { FingerprintCapture } from "@/components/FingerprintCapture";
-import { DiscordVerifyBanner } from "@/components/DiscordVerifyBanner";
+import { FreeTierEndedBanner } from "@/components/FreeTierEndedBanner";
 import { isAdmin as checkAdmin } from "@/lib/admin";
 
 export default function DashboardLayout({
@@ -141,8 +141,8 @@ export default function DashboardLayout({
           </div>
         </div>
 
-        {/* Free-plan Discord verification countdown (self-hides when N/A) */}
-        <DiscordVerifyBanner />
+        {/* Free tier removed: tells legacy free accounts why nothing routes */}
+        <FreeTierEndedBanner />
 
         {/* Proxy/premium model disclaimer */}
         <div

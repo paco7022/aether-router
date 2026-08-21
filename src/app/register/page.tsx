@@ -126,7 +126,7 @@ export default function RegisterPage() {
           </div>
 
           <div className="mb-6 hidden lg:block">
-            <p className="text-[10px] text-[var(--text-dim)] uppercase tracking-[0.2em] mb-2">Start for free</p>
+            <p className="text-[10px] text-[var(--text-dim)] uppercase tracking-[0.2em] mb-2">Create your account</p>
             <h2 className="text-3xl font-bold text-white/95 tracking-tight">Create your account</h2>
             <p className="text-sm text-[var(--text-muted)] mt-2">
               15 premium requests per day. No card required.

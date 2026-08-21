@@ -6,7 +6,7 @@ const ERR_MESSAGES: Record<string, string> = {
   token: "Couldn't reach Discord. Please try again.",
   identity: "Couldn't read your Discord account. Please try again.",
   verify_email: "Your Discord email isn't verified. Verify it in Discord, then try again.",
-  dupe: "That Discord account is already linked to another free account.",
+  dupe: "That Discord account is already linked to another account.",
   server: "Something went wrong on our side. Please try again.",
   config: "Discord verification is temporarily unavailable.",
   unknown: "Verification didn't complete. Please try again.",
@@ -43,7 +43,7 @@ export default async function DiscordPage({
       <div className="mb-6">
         <h2 className="text-2xl font-bold text-white/90 tracking-tight">Discord</h2>
         <p className="text-sm text-[var(--text-muted)] mt-1">
-          Verify with Discord to keep your free plan active.
+          Link Discord for giveaways, booster credits and support.
         </p>
       </div>
 

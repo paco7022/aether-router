@@ -24,8 +24,10 @@ export function PlanCard({
 }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const dailyCreditLimit = plan.id === "free" ? 0 : plan.credits_per_day;
-  const premiumRequestLimit = plan.id === "free" ? 15 : plan.gm_daily_requests;
+  // Free tier removed (2026-08-21): the `free` row is inactive, so every card
+  // rendered here is a paid plan and reads its limits straight from the row.
+  const dailyCreditLimit = plan.credits_per_day;
+  const premiumRequestLimit = plan.gm_daily_requests;
 
 
   async function handleSubscribe() {
@@ -114,49 +116,24 @@ export function PlanCard({
 
       {/* Premium model limits */}
       <div className="mb-4 pt-3 border-t border-white/[0.04]">
-        {plan.id === "free" ? (
-          <>
-            <p className="text-xs font-semibold text-cyan-400/80 mb-1.5 flex items-center gap-1.5">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-              Free Premium Pool
-            </p>
-            <div className="space-y-0.5 text-xs text-[var(--text-muted)] ml-5">
-              <p>
-                {premiumRequestLimit > 0
-                  ? `${premiumRequestLimit} requests/day`
-                  : "Unlimited requests"}
-              </p>
-              <p>
-                {plan.gm_max_context > 0
-                  ? `${(plan.gm_max_context / 1024).toFixed(0)}k context`
-                  : "Unlimited context"}
-              </p>
-            </div>
-          </>
-        ) : (
-          <>
-            <p className="text-xs font-semibold text-violet-400/80 mb-1.5 flex items-center gap-1.5">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-              Premium Models (t/, w/, an/)
-            </p>
-            <div className="space-y-0.5 text-xs text-[var(--text-muted)] ml-5">
-              <p>
-                {premiumRequestLimit > 0
-                  ? `${premiumRequestLimit} requests/day`
-                  : "Unlimited requests"}
-              </p>
-              <p>
-                {plan.gm_max_context > 0
-                  ? `${(plan.gm_max_context / 1024).toFixed(0)}k context`
-                  : "Unlimited context"}
-              </p>
-            </div>
-          </>
-        )}
+        <p className="text-xs font-semibold text-violet-400/80 mb-1.5 flex items-center gap-1.5">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+          Premium Models
+        </p>
+        <div className="space-y-0.5 text-xs text-[var(--text-muted)] ml-5">
+          <p>
+            {premiumRequestLimit > 0
+              ? `${premiumRequestLimit} requests/day`
+              : "Unlimited requests"}
+          </p>
+          <p>
+            {plan.gm_max_context > 0
+              ? `${(plan.gm_max_context / 1024).toFixed(0)}k context`
+              : "Unlimited context"}
+          </p>
+        </div>
       </div>
 
       {error && (
@@ -178,7 +155,7 @@ export function PlanCard({
           </button>
         ) : (
           <div className="w-full py-2.5 px-4 rounded-xl text-center text-sm text-[var(--text-dim)] btn-ghost">
-            Free Tier
+            Unavailable
           </div>
         )}
       </div>

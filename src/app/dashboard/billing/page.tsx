@@ -90,10 +90,12 @@ export default async function BillingPage() {
     profileBonus.gm_daily_override != null &&
     !!profileBonus.gm_override_expires &&
     new Date(profileBonus.gm_override_expires).getTime() > now;
+  // Free tier removed (2026-08-21): a legacy free account has no daily
+  // premium allowance at all, so the bar reads 0 instead of the old 15.
   const baseGmDaily = overrideActive
     ? Number(profileBonus.gm_daily_override)
     : currentPlanId === "free"
-    ? 15
+    ? 0
     : (currentPlan?.gm_daily_requests ?? 15);
   const referralBonusActive =
     !!profileBonus.referral_bonus_expires &&

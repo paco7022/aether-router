@@ -1,5 +1,5 @@
 // Auth compartida por las rutas de media. Mismos gates que
-// /v1/chat/completions (Bearer o sesión + CSRF, ban, activación, Discord),
+// /v1/chat/completions (Bearer o sesión + CSRF, ban, plan de pago),
 // solo que sin nada de lo específico de chat.
 
 import { NextRequest, NextResponse } from "next/server";
@@ -7,6 +7,7 @@ import { validateApiKey, validateSession, type ApiKeyInfo } from "@/lib/auth";
 import { isApiKeyAuthHeader, getRequestFingerprint } from "@/lib/chat-preflight";
 import { evaluateBanStatus } from "@/lib/ban";
 import { requireCsrf } from "@/lib/csrf";
+import { isFreeTierBlocked, freeTierBlockedResponse } from "@/lib/free-tier";
 
 export async function authenticateMediaRequest(
   req: NextRequest,
@@ -56,45 +57,11 @@ export async function authenticateMediaRequest(
     };
   }
 
-  if (
-    keyInfo.source === "api" &&
-    !keyInfo.isCustom &&
-    keyInfo.planId === "free" &&
-    !keyInfo.isActivated
-  ) {
-    return {
-      response: NextResponse.json(
-        {
-          error: {
-            message:
-              "This account is not yet activated for API key usage. Message an admin on Discord to request activation.",
-            type: "account_not_activated",
-          },
-        },
-        { status: 403 },
-      ),
-    };
-  }
-
-  if (
-    !keyInfo.isCustom &&
-    keyInfo.planId === "free" &&
-    !keyInfo.discordVerified &&
-    keyInfo.discordLinkRequiredBy !== null &&
-    new Date(keyInfo.discordLinkRequiredBy) < new Date()
-  ) {
-    return {
-      response: NextResponse.json(
-        {
-          error: {
-            message:
-              "Free plan requires Discord verification. Verify your account at /dashboard/discord to continue.",
-            type: "discord_verification_required",
-          },
-        },
-        { status: 403 },
-      ),
-    };
+  // Free tier removed (2026-08-21): mismo corte que /v1/chat/completions.
+  // Sustituye a los gates de activacion + verificacion Discord, que solo
+  // existian para sostener el free. Las custom keys quedan exentas.
+  if (isFreeTierBlocked(keyInfo)) {
+    return { response: freeTierBlockedResponse() };
   }
 
   return { keyInfo };

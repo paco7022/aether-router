@@ -36,6 +36,7 @@ import { getBuiltinPreset } from "@/lib/builtinPresets";
 import { tryPcFailover } from "@/lib/pc-failover";
 import { TtlCache } from "@/lib/db-cache";
 import { getPlanLimits } from "@/lib/plan-cache";
+import { isFreeTierBlocked, freeTierBlockedResponse } from "@/lib/free-tier";
 
 export const runtime = "nodejs";
 // NOTE: If the platform kills a streaming request mid-flight, the `flush()`
@@ -379,56 +380,20 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Free-tier API key activation gate.
+  // Free tier removed (2026-08-21).
   //
-  // Free users must be flipped to is_activated by an admin (or by paying)
-  // before their API keys can route. The chat dashboard (source="chat")
-  // is exempt — users can still browse the app, just not use Bearer
-  // tokens. Custom keys bypass this entirely; they have their own
-  // per-key controls and are only minted by an admin.
-  if (
-    keyInfo.source === "api" &&
-    !keyInfo.isCustom &&
-    keyInfo.planId === "free" &&
-    !keyInfo.isActivated
-  ) {
-    return NextResponse.json(
-      {
-        error: {
-          message:
-            "This account is not yet activated for API key usage. Message an admin on Discord to request activation.",
-          type: "account_not_activated",
-        },
-      },
-      { status: 403 }
-    );
-  }
-
-  // Free-tier Discord verification gate.
+  // The `free` plan no longer routes: not through API keys, not through the
+  // dashboard chat. This replaces the two gates that used to police free
+  // routing (admin `is_activated` flip + Discord ownership verification) —
+  // both existed to make free access sustainable, and there is no free access
+  // left to police. Custom keys are exempt (admin-minted, own credit pool).
   //
-  // Free accounts must verify ownership via Discord OAuth (one Discord = one
-  // free account) to keep free routing. Existing users get a grace window
-  // (discord_link_required_by); once it lapses without a verified link, free
-  // routing is blocked until they verify. Applies to both API and dashboard
-  // chat — the whole free benefit is what's being abused. Paid plans, custom
-  // keys, and still-in-grace users are exempt.
-  if (
-    !keyInfo.isCustom &&
-    keyInfo.planId === "free" &&
-    !keyInfo.discordVerified &&
-    keyInfo.discordLinkRequiredBy !== null &&
-    new Date(keyInfo.discordLinkRequiredBy) < new Date()
-  ) {
-    return NextResponse.json(
-      {
-        error: {
-          message:
-            "Free plan requires Discord verification. Verify your account at /dashboard/discord to continue.",
-          type: "discord_verification_required",
-        },
-      },
-      { status: 403 }
-    );
+  // Everything downstream that still branches on `planId === "free"`
+  // (included premium pool, paid-only credits, or/ + z/ free context caps) is
+  // now unreachable for non-custom keys; it is left in place so flipping this
+  // gate off restores the old behaviour intact.
+  if (isFreeTierBlocked(keyInfo)) {
+    return freeTierBlockedResponse();
   }
 
   // Extra hardening: if a custom key has exhausted credits, reject before
