@@ -31,6 +31,14 @@ function getZenllmKeys(): string[] {
 const STREAM_STALL_MS =
   Number(process.env.ZENLLM_STREAM_STALL_MS) || DEFAULT_STREAM_STALL_MS;
 
+// Some z/ models reject a tiny completion budget outright rather than clamping
+// it: gpt-6-astra answers 400 "Invalid 'max_output_tokens': integer below
+// minimum value. Expected a value >= 16" for max_tokens=8. A client asking for
+// a very short answer should get a short answer, not an error, so raise an
+// explicitly-low budget to the upstream minimum. Requests that set no
+// max_tokens are left untouched. Same shape as the dlab floor.
+const ZENLLM_MIN_MAX_TOKENS = 16;
+
 export const zenllmProvider: Provider = {
   name: "zenllm",
   baseUrl: process.env.ZENLLM_BASE_URL || "https://api.zenllm.org/v1",
@@ -41,6 +49,11 @@ export const zenllmProvider: Provider = {
       throw new Error("ZENLLM_API_KEY not configured");
     }
     const apiKey = keys[Math.floor(Math.random() * keys.length)];
+
+    const upstreamRequest =
+      typeof request.max_tokens === "number" && request.max_tokens < ZENLLM_MIN_MAX_TOKENS
+        ? { ...request, max_tokens: ZENLLM_MIN_MAX_TOKENS }
+        : request;
 
     let lastResponse: Response | null = null;
 
@@ -55,7 +68,7 @@ export const zenllmProvider: Provider = {
           "Authorization": `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(request),
+        body: JSON.stringify(upstreamRequest),
         signal,
       });
 
