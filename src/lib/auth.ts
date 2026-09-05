@@ -1,6 +1,7 @@
 import { createAdminClient } from "./supabase/admin";
 import { createServerSupabase } from "./supabase/server";
 import type { UserPreset } from "./preset";
+import type { Lorebook } from "./lorebook";
 
 export interface ApiKeyInfo {
   // keyId is null when the caller authenticated with a Supabase session
@@ -71,6 +72,8 @@ export interface ApiKeyInfo {
   preset: UserPreset | null;
   presetEnabled: boolean;
   builtinPresetId: string | null;
+  lorebook: Lorebook | null;
+  lorebookEnabled: boolean;
 }
 
 export async function validateApiKey(key: string): Promise<ApiKeyInfo | null> {
@@ -86,7 +89,7 @@ export async function validateApiKey(key: string): Promise<ApiKeyInfo | null> {
   // Look up key and join with profile for credits
   const { data: result, error } = await supabase
     .from("api_keys")
-    .select("id, user_id, is_active, is_custom, custom_credits, max_context, allowed_providers, daily_request_limit, rate_limit_seconds, token_window_seconds, token_window_limit, expires_at, pricing_mode, flat_cost_per_m_tokens, last_used, profiles(credits, daily_credits, plan_id, gm_claimed_date, gm_daily_override, gm_override_expires, referral_bonus_requests, referral_bonus_expires, is_activated, claude_activated, preset, preset_enabled, builtin_preset_id, context_boost_expires_at, t_discount_expires_at, discord_verified, discord_link_required_by, training_consent, billing_mode, is_paid)")
+    .select("id, user_id, is_active, is_custom, custom_credits, max_context, allowed_providers, daily_request_limit, rate_limit_seconds, token_window_seconds, token_window_limit, expires_at, pricing_mode, flat_cost_per_m_tokens, last_used, profiles(credits, daily_credits, plan_id, gm_claimed_date, gm_daily_override, gm_override_expires, referral_bonus_requests, referral_bonus_expires, is_activated, claude_activated, preset, preset_enabled, builtin_preset_id, lorebook, lorebook_enabled, context_boost_expires_at, t_discount_expires_at, discord_verified, discord_link_required_by, training_consent, billing_mode, is_paid)")
     .eq("key_hash", keyHash)
     .single();
 
@@ -113,7 +116,7 @@ export async function validateApiKey(key: string): Promise<ApiKeyInfo | null> {
       });
   }
 
-  const profile = result.profiles as unknown as { credits: number; daily_credits: number; plan_id: string; gm_claimed_date: string | null; gm_daily_override: number | null; gm_override_expires: string | null; referral_bonus_requests: number | null; referral_bonus_expires: string | null; is_activated: boolean | null; claude_activated: boolean | null; preset: UserPreset | null; preset_enabled: boolean | null; builtin_preset_id: string | null; context_boost_expires_at: string | null; t_discount_expires_at: string | null; discord_verified: boolean | null; discord_link_required_by: string | null; training_consent: boolean | null; billing_mode: string | null; is_paid: boolean | null };
+  const profile = result.profiles as unknown as { credits: number; daily_credits: number; plan_id: string; gm_claimed_date: string | null; gm_daily_override: number | null; gm_override_expires: string | null; referral_bonus_requests: number | null; referral_bonus_expires: string | null; is_activated: boolean | null; claude_activated: boolean | null; preset: UserPreset | null; preset_enabled: boolean | null; builtin_preset_id: string | null; lorebook: Lorebook | null; lorebook_enabled: boolean | null; context_boost_expires_at: string | null; t_discount_expires_at: string | null; discord_verified: boolean | null; discord_link_required_by: string | null; training_consent: boolean | null; billing_mode: string | null; is_paid: boolean | null };
 
   return {
     keyId: result.id,
@@ -150,6 +153,8 @@ export async function validateApiKey(key: string): Promise<ApiKeyInfo | null> {
     preset: profile?.preset ?? null,
     presetEnabled: profile?.preset_enabled ?? false,
     builtinPresetId: profile?.builtin_preset_id ?? null,
+    lorebook: profile?.lorebook ?? null,
+    lorebookEnabled: profile?.lorebook_enabled ?? false,
   };
 }
 
@@ -167,7 +172,7 @@ export async function validateSession(): Promise<ApiKeyInfo | null> {
   const admin = createAdminClient();
   const { data: profile } = await admin
     .from("profiles")
-    .select("credits, daily_credits, plan_id, gm_claimed_date, gm_daily_override, gm_override_expires, referral_bonus_requests, referral_bonus_expires, is_activated, claude_activated, preset, preset_enabled, builtin_preset_id, context_boost_expires_at, t_discount_expires_at, discord_verified, discord_link_required_by, training_consent, billing_mode, is_paid")
+    .select("credits, daily_credits, plan_id, gm_claimed_date, gm_daily_override, gm_override_expires, referral_bonus_requests, referral_bonus_expires, is_activated, claude_activated, preset, preset_enabled, builtin_preset_id, lorebook, lorebook_enabled, context_boost_expires_at, t_discount_expires_at, discord_verified, discord_link_required_by, training_consent, billing_mode, is_paid")
     .eq("id", user.id)
     .single();
 
@@ -211,6 +216,8 @@ export async function validateSession(): Promise<ApiKeyInfo | null> {
     preset: (profile as unknown as { preset?: UserPreset | null }).preset ?? null,
     presetEnabled: (profile as unknown as { preset_enabled?: boolean | null }).preset_enabled ?? false,
     builtinPresetId: (profile as unknown as { builtin_preset_id?: string | null }).builtin_preset_id ?? null,
+    lorebook: (profile as unknown as { lorebook?: Lorebook | null }).lorebook ?? null,
+    lorebookEnabled: (profile as unknown as { lorebook_enabled?: boolean | null }).lorebook_enabled ?? false,
   };
 }
 

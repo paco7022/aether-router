@@ -3,8 +3,10 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { DeleteAccountButton } from "@/components/DeleteAccountButton";
 import { BillingModeCard } from "@/components/BillingModeCard";
 import { PresetCard } from "@/components/PresetCard";
+import { LorebookCard } from "@/components/LorebookCard";
 import { listPublicBuiltinPresets } from "@/lib/builtinPresets";
 import type { UserPresetRow } from "@/lib/preset";
+import type { LorebookRow } from "@/lib/lorebook";
 
 export default async function SettingsPage() {
   const supabase = await createServerSupabase();
@@ -14,7 +16,7 @@ export default async function SettingsPage() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("display_name, created_at, preset_enabled, builtin_preset_id, active_preset_id, billing_mode")
+    .select("display_name, created_at, preset_enabled, builtin_preset_id, active_preset_id, billing_mode, lorebook_enabled")
     .eq("id", user!.id)
     .single();
 
@@ -22,6 +24,12 @@ export default async function SettingsPage() {
   const { data: presetRows } = await admin
     .from("user_presets")
     .select("id, name, preset, updated_at")
+    .eq("user_id", user!.id)
+    .order("updated_at", { ascending: false });
+
+  const { data: lorebookRows } = await admin
+    .from("user_lorebooks")
+    .select("id, name, book, is_active, updated_at")
     .eq("user_id", user!.id)
     .order("updated_at", { ascending: false });
 
@@ -91,6 +99,11 @@ export default async function SettingsPage() {
         initialEnabled={profile?.preset_enabled ?? false}
         builtinPresets={builtinPresets}
         initialBuiltinId={profile?.builtin_preset_id ?? null}
+      />
+
+      <LorebookCard
+        initialLorebooks={(lorebookRows ?? []) as LorebookRow[]}
+        initialEnabled={profile?.lorebook_enabled ?? false}
       />
 
       {/* Danger Zone */}

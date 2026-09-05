@@ -31,7 +31,7 @@ import {
   recordModerationReview,
 } from "@/lib/content-moderation";
 import { captureTrainingSample } from "@/lib/training-capture";
-import { applyPreset } from "@/lib/preset";
+import { applyPreset, applyLorebook } from "@/lib/preset";
 import { getBuiltinPreset } from "@/lib/builtinPresets";
 import { tryPcFailover } from "@/lib/pc-failover";
 import { TtlCache } from "@/lib/db-cache";
@@ -1668,6 +1668,12 @@ export async function POST(req: NextRequest) {
       (forwardBody as Record<string, unknown>).stream_options = { include_usage: true };
     }
 
+    // Lorebook injection is independent of presets: a user can run one, the
+    // other, or both. When both are on, the preset assembly places the
+    // activated lore entries around its own prompts in a single pass.
+    const activeLorebook =
+      keyInfo.lorebookEnabled && keyInfo.lorebook?.entries?.length ? keyInfo.lorebook : null;
+
     if (keyInfo.presetEnabled) {
       // Built-in preset takes precedence over the user's custom JSONB preset.
       // Its prompt content is server-only and never exposed to the client.
@@ -1675,8 +1681,12 @@ export async function POST(req: NextRequest) {
         ? getBuiltinPreset(keyInfo.builtinPresetId)
         : keyInfo.preset;
       if (activePreset) {
-        applyPreset(forwardBody as Record<string, unknown>, activePreset);
+        applyPreset(forwardBody as Record<string, unknown>, activePreset, activeLorebook);
+      } else if (activeLorebook) {
+        applyLorebook(forwardBody as Record<string, unknown>, activeLorebook);
       }
+    } else if (activeLorebook) {
+      applyLorebook(forwardBody as Record<string, unknown>, activeLorebook);
     }
 
     const providerResponse = await provider.forward(forwardBody as any, req.signal);
