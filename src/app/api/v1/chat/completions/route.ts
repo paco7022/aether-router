@@ -1850,6 +1850,14 @@ export async function POST(req: NextRequest) {
     // Flat-rate models (op/) charge a fixed per-request fee stored in premium_request_cost.
     const finalCredits = isFreePool ? 0 : flatSettle ? flatSettle.credits : paygSettle ? paygSettle.credits : isPremiumProvider ? 1 : isFlatRateProvider ? Number(model.premium_request_cost ?? 0.1) : Math.max(credits, 1);
     const loggedCostUsd = flatSettle ? flatSettle.costUsd : paygSettle ? paygSettle.costUsd : costUsd;
+    // What the request cost US upstream, logged separately because
+    // `loggedCostUsd` above is overwritten with the amount CHARGED under PAYG
+    // and enterprise flat-rate keys. `costUsd` is priced off the tokens the
+    // upstream REPORTED (its own count, inflated or not — that is what it
+    // invoices) at the model's current cost_per_m_*, so it stays comparable
+    // with the provider's dashboard. Written on every path, free pools and
+    // zero-cost promos included: the customer pays nothing there, we still do.
+    const upstreamCostUsd = costUsd;
 
     // 9. Settle credits — adjust reservation to match actual usage
     let chargedCredits = 0;
@@ -1899,6 +1907,7 @@ export async function POST(req: NextRequest) {
       p_total_tokens: totalTokens,
       p_credits_charged: premiumOveragePurchased ? PREMIUM_OVERAGE_COST : (isFreePool ? 0 : chargedCredits),
       p_cost_usd: loggedCostUsd,
+      p_upstream_cost_usd: upstreamCostUsd,
       p_status: isFreePool ? "success" : billingStatus,
       p_duration_ms: durationMs,
       p_premium_cost: premiumCost,
@@ -2175,6 +2184,9 @@ async function handleStreamingResponse(
         : null;
     const finalCredits = isFreePool ? 0 : flatSettle ? flatSettle.credits : paygSettle ? paygSettle.credits : isPremiumModel ? 1 : isFlatRateModel ? Number(model.premium_request_cost ?? 0.1) : Math.max(credits, 1);
     const loggedCostUsd = flatSettle ? flatSettle.costUsd : paygSettle ? paygSettle.costUsd : costUsd;
+    // See the non-streaming settlement: our real upstream cost, kept separate
+    // from what the customer was charged.
+    const upstreamCostUsd = costUsd;
 
     let wasCharged = isFreePool;
     let balanceAfter = reservation?.balanceAfterReserve ?? 0;
@@ -2324,6 +2336,7 @@ async function handleStreamingResponse(
       p_total_tokens: totalTokens,
       p_credits_charged: premiumOverageCharged > 0 ? premiumOverageCharged : chargedCredits,
       p_cost_usd: loggedCostUsd,
+      p_upstream_cost_usd: upstreamCostUsd,
       p_status: isFreePool ? "success" : (reason === "aborted" ? "aborted" : billingStatus),
       p_duration_ms: durationMs,
       p_premium_cost: streamPremiumCost,
