@@ -1184,12 +1184,27 @@ export async function POST(req: NextRequest) {
             { status: 429 }
           );
         }
-        // Offer overage: spend PREMIUM_OVERAGE_COST credits for one extra request.
+        // Offer overage: spend credits for one extra request past the daily cap.
+        //
+        // The flat PREMIUM_OVERAGE_COST assumes a flat-quota upstream, where one
+        // more request costs us ~nothing. That holds for k/, t/, or/, rt/, oc/,
+        // bl/, sh/ — and they keep paying exactly 100 credits.
+        //
+        // It does NOT hold for an upstream that bills us PER TOKEN (marked by
+        // context_surcharge_per_10k > 0): there a 32k call on z/claude-sonnet-5
+        // costs us $0.0214 while the flat fee collects $0.01, and at a 128k
+        // context cap the loss is 5x that. For those models the fee scales with
+        // the same context-adjusted premium cost the pool would have charged, so
+        // the overage price tracks what the request actually costs us.
+        const isPerTokenUpstream = Number(model.context_surcharge_per_10k ?? 0) > 0;
+        const overageCost = isPerTokenUpstream
+          ? Math.max(Math.ceil(PREMIUM_OVERAGE_COST * premiumCost), PREMIUM_OVERAGE_COST)
+          : PREMIUM_OVERAGE_COST;
         const availableCredits = getAvailableBillableCredits(keyInfo);
-        if (availableCredits >= PREMIUM_OVERAGE_COST) {
+        if (availableCredits >= overageCost) {
           const { data: overageBalance, error: overageErr } = await supabase.rpc("deduct_credits", {
             p_user_id: keyInfo.userId,
-            p_amount: PREMIUM_OVERAGE_COST,
+            p_amount: overageCost,
           });
           if (!overageErr && overageBalance !== -1) {
             premiumOveragePurchased = true;
@@ -1201,7 +1216,7 @@ export async function POST(req: NextRequest) {
             // matching entry in their history (this was bug A).
             const { error: overageTxErr } = await supabase.from("transactions").insert({
               user_id: keyInfo.userId,
-              amount: -PREMIUM_OVERAGE_COST,
+              amount: -overageCost,
               balance: premiumOverageBalance,
               type: "premium_overage",
               description: `${model.id} - extra premium request (daily cap reached)`,
@@ -1217,7 +1232,7 @@ export async function POST(req: NextRequest) {
           }
         } else {
           return NextResponse.json(
-            { error: { message: `Daily premium limit reached (${gmDailyRequests}/day). You can purchase extra requests for ${PREMIUM_OVERAGE_COST} credits each (you have ${availableCredits}).`, type: "rate_limit" } },
+            { error: { message: `Daily premium limit reached (${gmDailyRequests}/day). One extra request on this model costs ${overageCost} credits (you have ${availableCredits}).`, type: "rate_limit" } },
             { status: 429 }
           );
         }
@@ -1847,7 +1862,12 @@ export async function POST(req: NextRequest) {
     // 10. Log usage (always log, even for free-pool — needed for token tracking)
     const durationMs = Date.now() - startTime;
     // Requests served under a free event don't cost premium-request budget.
-    const premiumCost = isPremiumProvider && !activeEventId && !isPlanUnlimited && !isFlatPerTokenKey && !isFreePool
+    // PAYG requests draw no premium pool (they skipped the reservation and paid
+    // per token), so they must log 0 — otherwise the fallback below invents a
+    // cost the user never spent and the Usage page reports phantom premium
+    // requests. The live counter (profiles.premium_requests_today) was always
+    // correct; only this log column was wrong.
+    const premiumCost = isPremiumProvider && !isPaygRequest && !activeEventId && !isPlanUnlimited && !isFlatPerTokenKey && !isFreePool
       ? (premiumRequestCostForUsage || getContextAdjustedPremiumRequestCost(modelId, model.provider, Number(model.premium_request_cost ?? 1), estimatedPrompt, model.context_surcharge_per_10k))
       : 0;
     // finish_reason of the upstream response — logged to diagnose cut-offs
@@ -2278,7 +2298,7 @@ async function handleStreamingResponse(
 
     const durationMs = Date.now() - startTime;
     const isPremium = isPremiumProviderName(model.provider);
-    const streamPremiumCost = isPremium && !activeEventId && !isPlanUnlimited && !isFlatPerTokenKey && !isFreePool
+    const streamPremiumCost = isPremium && !isPayg && !activeEventId && !isPlanUnlimited && !isFlatPerTokenKey && !isFreePool
       ? (premiumRequestCostForUsage || getContextAdjustedPremiumRequestCost(model.id, model.provider, Number(model.premium_request_cost ?? 1), estimatedPromptTokens, model.context_surcharge_per_10k))
       : 0;
     const writeStreamTx = !isFreePool && chargedCredits > 0;
