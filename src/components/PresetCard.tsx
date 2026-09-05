@@ -1,9 +1,14 @@
 "use client";
 
-import { useMemo, useRef, useState, useCallback } from "react";
-import { parseSillyTavernPreset, validatePreset, type UserPreset, type UserPresetRow } from "@/lib/preset";
-
-const MAX_PRESET_BYTES = 256 * 1024;
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  MAX_PRESET_BYTES,
+  MAX_PROMPT_CONTENT,
+  parseSillyTavernPreset,
+  validatePreset,
+  type UserPreset,
+  type UserPresetRow,
+} from "@/lib/preset";
 
 const JSON_HEADERS = {
   "Content-Type": "application/json",
@@ -136,7 +141,67 @@ function SectionHeader({
 
 type PromptItem = UserPreset["prompts"][number];
 
-function PromptCard({
+/** Numeric input that keeps its own text buffer, so the field can be cleared
+ *  and retyped instead of snapping back to the last valid value mid-edit. */
+function NumberField({
+  value,
+  onCommit,
+  min,
+  max,
+  step,
+  disabled,
+  className,
+  style,
+}: {
+  value: number | undefined;
+  onCommit: (v: number) => void;
+  min?: number;
+  max?: number;
+  step?: number;
+  disabled?: boolean;
+  className?: string;
+  style?: React.CSSProperties;
+}) {
+  const [text, setText] = useState(value === undefined ? "" : String(value));
+  const [focused, setFocused] = useState(false);
+
+  // Re-sync when the value changes from the outside (preset switch, import),
+  // but never while the user is typing into it.
+  useEffect(() => {
+    if (!focused) setText(value === undefined ? "" : String(value));
+  }, [value, focused]);
+
+  return (
+    <input
+      type="number"
+      inputMode="decimal"
+      min={min}
+      max={max}
+      step={step}
+      disabled={disabled}
+      value={text}
+      onFocus={() => setFocused(true)}
+      onChange={(e) => {
+        const raw = e.target.value;
+        setText(raw);
+        if (raw.trim() === "") return; // let the field sit empty while retyping
+        const v = parseFloat(raw);
+        if (!isNaN(v)) onCommit(v);
+      }}
+      onBlur={() => {
+        setFocused(false);
+        setText(value === undefined ? "" : String(value));
+      }}
+      className={className}
+      style={style}
+    />
+  );
+}
+
+// Memoized: a big imported preset can hold 100+ prompts, and without this
+// every keystroke in one textarea re-renders the whole list. Handlers take the
+// prompt id / index so the parent can pass stable useCallback references.
+const PromptCard = memo(function PromptCard({
   prompt,
   index,
   total,
@@ -147,7 +212,6 @@ function PromptCard({
   onMove,
   draggable,
   onDragStart,
-  onDragOver,
   onDrop,
   dragging,
 }: {
@@ -155,22 +219,22 @@ function PromptCard({
   index: number;
   total: number;
   expanded: boolean;
-  onToggleExpand: () => void;
-  onChange: (p: PromptItem) => void;
-  onDelete: () => void;
-  onMove: (dir: -1 | 1) => void;
+  onToggleExpand: (id: string) => void;
+  onChange: (id: string, p: PromptItem) => void;
+  onDelete: (id: string) => void;
+  onMove: (index: number, dir: -1 | 1) => void;
   draggable: boolean;
-  onDragStart: () => void;
-  onDragOver: (e: React.DragEvent) => void;
-  onDrop: () => void;
+  onDragStart: (index: number) => void;
+  onDrop: (index: number) => void;
   dragging: boolean;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [truncated, setTruncated] = useState(false);
 
   return (
     <div
-      onDragOver={draggable ? onDragOver : undefined}
-      onDrop={draggable ? onDrop : undefined}
+      onDragOver={draggable ? (e) => e.preventDefault() : undefined}
+      onDrop={draggable ? () => onDrop(index) : undefined}
       className="rounded-xl p-3 transition-colors"
       style={{
         background: prompt.enabled ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.015)",
@@ -178,12 +242,12 @@ function PromptCard({
         opacity: dragging ? 0.4 : 1,
       }}
     >
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         {draggable && (
           <span
             draggable
-            onDragStart={onDragStart}
-            onDragEnd={onDrop}
+            onDragStart={() => onDragStart(index)}
+            onDragEnd={() => onDrop(index)}
             className="cursor-grab active:cursor-grabbing text-[var(--text-dim)] hover:text-white/50 transition-colors shrink-0 px-0.5"
             title="Drag to reorder"
           >
@@ -195,7 +259,7 @@ function PromptCard({
           </span>
         )}
 
-        <SmallToggle value={prompt.enabled} onChange={(v) => onChange({ ...prompt, enabled: v })} />
+        <SmallToggle value={prompt.enabled} onChange={(v) => onChange(prompt.id, { ...prompt, enabled: v })} />
 
         {prompt.position === "depth" && (
           <span
@@ -213,14 +277,14 @@ function PromptCard({
 
         <input
           value={prompt.name}
-          onChange={(e) => onChange({ ...prompt, name: e.target.value })}
+          onChange={(e) => onChange(prompt.id, { ...prompt, name: e.target.value })}
           placeholder="Prompt name"
-          className="flex-1 min-w-0 bg-transparent text-sm text-white/80 placeholder:text-white/20 focus:outline-none"
+          className="flex-1 min-w-[8rem] bg-transparent text-sm text-white/80 placeholder:text-white/20 focus:outline-none"
         />
 
         <select
           value={prompt.role}
-          onChange={(e) => onChange({ ...prompt, role: e.target.value as PromptItem["role"] })}
+          onChange={(e) => onChange(prompt.id, { ...prompt, role: e.target.value as PromptItem["role"] })}
           className="text-xs rounded-lg px-2 py-1 cursor-pointer focus:outline-none"
           style={{
             background: "rgba(255,255,255,0.05)",
@@ -240,7 +304,7 @@ function PromptCard({
 
         <button
           type="button"
-          onClick={onToggleExpand}
+          onClick={() => onToggleExpand(prompt.id)}
           className="p-1 rounded-lg text-[var(--text-dim)] hover:text-white/60 transition-colors cursor-pointer"
           title={expanded ? "Collapse" : "Expand"}
         >
@@ -261,7 +325,7 @@ function PromptCard({
 
         <button
           type="button"
-          onClick={() => onMove(-1)}
+          onClick={() => onMove(index, -1)}
           disabled={index === 0}
           className="p-1 rounded-lg text-[var(--text-dim)] hover:text-white/60 transition-colors cursor-pointer disabled:opacity-20"
           title="Move up"
@@ -273,7 +337,7 @@ function PromptCard({
 
         <button
           type="button"
-          onClick={() => onMove(1)}
+          onClick={() => onMove(index, 1)}
           disabled={index === total - 1}
           className="p-1 rounded-lg text-[var(--text-dim)] hover:text-white/60 transition-colors cursor-pointer disabled:opacity-20"
           title="Move down"
@@ -287,7 +351,7 @@ function PromptCard({
           <>
             <button
               type="button"
-              onClick={onDelete}
+              onClick={() => onDelete(prompt.id)}
               className="text-xs text-red-400/80 hover:text-red-400 transition-colors cursor-pointer px-1"
             >
               Confirm
@@ -324,9 +388,9 @@ function PromptCard({
               onChange={(e) => {
                 const pos = e.target.value as "relative" | "depth";
                 if (pos === "depth") {
-                  onChange({ ...prompt, position: "depth", relative_to: undefined, depth: prompt.depth ?? 0, order: prompt.order ?? 100 });
+                  onChange(prompt.id, { ...prompt, position: "depth", relative_to: undefined, depth: prompt.depth ?? 0, order: prompt.order ?? 100 });
                 } else {
-                  onChange({ ...prompt, position: "relative", relative_to: prompt.relative_to ?? "before_history", depth: undefined, order: undefined });
+                  onChange(prompt.id, { ...prompt, position: "relative", relative_to: prompt.relative_to ?? "before_history", depth: undefined, order: undefined });
                 }
               }}
               className="rounded-lg px-2 py-1 cursor-pointer focus:outline-none"
@@ -339,7 +403,7 @@ function PromptCard({
             {(prompt.position ?? "relative") === "relative" ? (
               <select
                 value={prompt.relative_to ?? "before_history"}
-                onChange={(e) => onChange({ ...prompt, relative_to: e.target.value as "before_history" | "after_history" })}
+                onChange={(e) => onChange(prompt.id, { ...prompt, relative_to: e.target.value as "before_history" | "after_history" })}
                 className="rounded-lg px-2 py-1 cursor-pointer focus:outline-none"
                 style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.7)" }}
               >
@@ -350,24 +414,22 @@ function PromptCard({
               <>
                 <label className="flex items-center gap-1 text-[var(--text-dim)]">
                   Depth
-                  <input
-                    type="number"
+                  <NumberField
                     min={0}
                     max={999}
                     step={1}
                     value={prompt.depth ?? 0}
-                    onChange={(e) => onChange({ ...prompt, depth: Math.max(0, parseInt(e.target.value, 10) || 0) })}
+                    onCommit={(v) => onChange(prompt.id, { ...prompt, depth: Math.max(0, Math.floor(v)) })}
                     className="w-16 rounded-lg px-2 py-1 text-white/80 focus:outline-none"
                     style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}
                   />
                 </label>
                 <label className="flex items-center gap-1 text-[var(--text-dim)]">
                   Order
-                  <input
-                    type="number"
+                  <NumberField
                     step={1}
                     value={prompt.order ?? 100}
-                    onChange={(e) => onChange({ ...prompt, order: parseInt(e.target.value, 10) || 0 })}
+                    onCommit={(v) => onChange(prompt.id, { ...prompt, order: Math.floor(v) })}
                     className="w-16 rounded-lg px-2 py-1 text-white/80 focus:outline-none"
                     style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}
                   />
@@ -378,7 +440,12 @@ function PromptCard({
 
           <textarea
             value={prompt.content}
-            onChange={(e) => onChange({ ...prompt, content: e.target.value.slice(0, 32 * 1024) })}
+            onChange={(e) => {
+              const raw = e.target.value;
+              const clipped = raw.slice(0, MAX_PROMPT_CONTENT);
+              setTruncated(clipped.length < raw.length);
+              onChange(prompt.id, { ...prompt, content: clipped });
+            }}
             placeholder="Prompt content…"
             rows={6}
             className="w-full rounded-lg text-sm text-white/75 resize-y placeholder:text-white/20 focus:outline-none transition-colors"
@@ -389,11 +456,18 @@ function PromptCard({
               fontFamily: "inherit",
             }}
           />
+
+          {truncated && (
+            <p className="text-[10px] leading-relaxed" style={{ color: "rgba(251,191,36,0.85)" }}>
+              A single prompt is capped at {Math.round(MAX_PROMPT_CONTENT / 1024)} KB — the text past
+              that limit was not kept. Split it into two prompts.
+            </p>
+          )}
         </div>
       )}
     </div>
   );
-}
+});
 
 function emptyPreset(name = "My Preset"): UserPreset {
   return {
@@ -429,6 +503,8 @@ const SAMPLING_FIELDS: Array<{
   { key: "temperature", label: "Temperature", min: 0, max: 5, step: 0.01 },
   { key: "top_p", label: "Top P", min: 0, max: 1, step: 0.01 },
   { key: "top_k", label: "Top K", min: 0, max: 200, step: 1 },
+  { key: "top_a", label: "Top A", min: 0, max: 1, step: 0.01 },
+  { key: "min_p", label: "Min P", min: 0, max: 1, step: 0.01 },
   { key: "frequency_penalty", label: "Frequency Penalty", min: -2, max: 2, step: 0.01 },
   { key: "presence_penalty", label: "Presence Penalty", min: -2, max: 2, step: 0.01 },
   { key: "repetition_penalty", label: "Repetition Penalty", min: 0, max: 3, step: 0.01 },
@@ -465,13 +541,22 @@ export function PresetCard({
   const [promptSearch, setPromptSearch] = useState("");
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const dragIndexRef = useRef<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const builtinActive = activeBuiltinId !== null;
   const selectedRow = presets.find((p) => p.id === selectedId) ?? null;
-  const dirty = selectedRow
-    ? JSON.stringify(selectedRow.preset) !== JSON.stringify(preset)
-    : preset.prompts.length > 0 || Object.keys(preset.sampling).length > 0;
+
+  // Serializing a 256KB preset three times per render made typing lag on big
+  // imported presets — do it once and derive both the dirty flag and the size.
+  const serialized = useMemo(() => JSON.stringify(preset), [preset]);
+  const dirty = useMemo(
+    () =>
+      selectedRow
+        ? JSON.stringify(selectedRow.preset) !== serialized
+        : preset.prompts.length > 0 || Object.keys(preset.sampling).length > 0,
+    [selectedRow, serialized, preset]
+  );
 
   async function setBuiltin(id: string | null) {
     setBuiltinStatus("saving");
@@ -507,7 +592,7 @@ export function PresetCard({
     }
   }
 
-  const serializedSize = JSON.stringify(preset).length;
+  const serializedSize = serialized.length;
   const nearLimit = serializedSize > MAX_PRESET_BYTES * 0.85;
   const overLimit = serializedSize > MAX_PRESET_BYTES;
 
@@ -561,6 +646,21 @@ export function PresetCard({
     setPreset((p) => ({ ...p, prompts: p.prompts.map((pr) => ({ ...pr, enabled: v })) }));
   }, []);
 
+  const handleDragStart = useCallback((index: number) => {
+    dragIndexRef.current = index;
+    setDragIndex(index);
+  }, []);
+
+  const handleDrop = useCallback(
+    (index: number) => {
+      const from = dragIndexRef.current;
+      if (from !== null && from !== index) reorderPrompt(from, index);
+      dragIndexRef.current = null;
+      setDragIndex(null);
+    },
+    [reorderPrompt]
+  );
+
   const toggleExpand = useCallback((id: string) => {
     setExpandedIds((s) => {
       const next = new Set(s);
@@ -585,9 +685,24 @@ export function PresetCard({
     loadRow(presets.find((p) => p.id === id) ?? null);
   }
 
+  // Give an imported preset a name that doesn't collide with the library.
+  function uniquePresetName(base: string): string {
+    const taken = new Set(presets.map((row) => row.name));
+    if (!taken.has(base)) return base;
+    for (let i = 2; i < 100; i++) {
+      const candidate = `${base} (${i})`.slice(0, 120);
+      if (!taken.has(candidate)) return candidate;
+    }
+    return base;
+  }
+
   function importFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (dirty && !confirm("Discard the unsaved changes in the editor and load this file?")) {
+      if (fileRef.current) fileRef.current.value = "";
+      return;
+    }
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {
@@ -595,15 +710,24 @@ export function PresetCard({
         // Round-trip: our own export validates directly; otherwise treat as a
         // SillyTavern Chat Completion preset and convert.
         const parsed = validatePreset(json) ? (json as UserPreset) : parseSillyTavernPreset(json);
-        setPreset(parsed);
+        if (parsed.prompts.length === 0) {
+          throw new Error("That file has no usable prompts — nothing was imported.");
+        }
+        // An import always lands as a NEW preset: otherwise the next Save would
+        // silently overwrite whichever saved preset happened to be open.
+        const name = uniquePresetName(parsed.name);
+        setSelectedId(null);
+        setPreset({ ...parsed, name });
         setExpandedIds(new Set());
         setPromptSearch("");
+        setStatus("idle");
+        setErrorMsg("");
         const depthCount = parsed.prompts.filter((p) => p.position === "depth").length;
         const depthNote = depthCount > 0 ? `, ${depthCount} depth-injected` : "";
         setImportMsg(
-          `Imported ${parsed.prompts.length} prompt${parsed.prompts.length !== 1 ? "s" : ""}${depthNote} from "${parsed.name}" — Save or Save as to keep it`
+          `Imported ${parsed.prompts.length} prompt${parsed.prompts.length !== 1 ? "s" : ""}${depthNote} from "${parsed.name}" — loaded as the new preset "${name}", hit Save to keep it`
         );
-        setTimeout(() => setImportMsg(""), 6000);
+        setTimeout(() => setImportMsg(""), 8000);
       } catch (err) {
         setErrorMsg(err instanceof Error ? err.message : "Could not parse JSON file.");
         setStatus("error");
@@ -746,6 +870,38 @@ export function PresetCard({
       setStatus("error");
     }
   }
+
+  // Unsaved edits used to vanish on reload or on any sidebar navigation.
+  useEffect(() => {
+    if (!dirty) return;
+
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    // App Router client navigations never hit beforeunload, so also intercept
+    // in-app link clicks while there is something unsaved.
+    const onClick = (e: MouseEvent) => {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;
+      const anchor = (e.target as HTMLElement | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+      if (!anchor || anchor.target === "_blank" || anchor.hasAttribute("download")) return;
+      const href = anchor.getAttribute("href") ?? "";
+      if (!href || href.startsWith("#")) return;
+      if (anchor.origin !== window.location.origin) return;
+      if (anchor.pathname === window.location.pathname) return;
+      if (!confirm("You have unsaved preset changes. Leave this page and discard them?")) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+
+    window.addEventListener("beforeunload", onBeforeUnload);
+    document.addEventListener("click", onClick, true);
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      document.removeEventListener("click", onClick, true);
+    };
+  }, [dirty]);
 
   const filteredPrompts = useMemo(() => {
     const q = promptSearch.trim().toLowerCase();
@@ -954,25 +1110,22 @@ export function PresetCard({
                       if (!v) updateSampling(key, undefined);
                       else {
                         const defaults: UserPreset["sampling"] = {
-                          temperature: 1, top_p: 1, top_k: 0, frequency_penalty: 0,
-                          presence_penalty: 0, repetition_penalty: 1, max_tokens: 2048,
+                          temperature: 1, top_p: 1, top_k: 0, top_a: 0, min_p: 0,
+                          frequency_penalty: 0, presence_penalty: 0,
+                          repetition_penalty: 1, max_tokens: 2048,
                         };
                         updateSampling(key, defaults[key]);
                       }
                     }}
                   />
                   <span className="text-xs w-36 shrink-0" style={{ color: active ? "rgba(255,255,255,0.65)" : "var(--text-dim)" }}>{label}</span>
-                  <input
-                    type="number"
+                  <NumberField
                     min={min}
                     max={max}
                     step={step}
                     disabled={!active}
-                    value={preset.sampling[key] ?? ""}
-                    onChange={(e) => {
-                      const v = parseFloat(e.target.value);
-                      if (!isNaN(v)) updateSampling(key, v);
-                    }}
+                    value={preset.sampling[key]}
+                    onCommit={(v) => updateSampling(key, v)}
                     className="w-24 rounded-lg text-sm text-white/80 focus:outline-none transition-colors disabled:opacity-30"
                     style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", padding: "0.35rem 0.6rem" }}
                   />
@@ -1062,18 +1215,14 @@ export function PresetCard({
                 index={realIndex}
                 total={preset.prompts.length}
                 expanded={expandedIds.has(prompt.id)}
-                onToggleExpand={() => toggleExpand(prompt.id)}
-                onChange={(updated) => updatePrompt(prompt.id, updated)}
-                onDelete={() => deletePrompt(prompt.id)}
-                onMove={(dir) => movePrompt(realIndex, dir)}
+                onToggleExpand={toggleExpand}
+                onChange={updatePrompt}
+                onDelete={deletePrompt}
+                onMove={movePrompt}
                 draggable={canDrag}
                 dragging={dragIndex === realIndex}
-                onDragStart={() => setDragIndex(realIndex)}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={() => {
-                  if (dragIndex !== null && dragIndex !== realIndex) reorderPrompt(dragIndex, realIndex);
-                  setDragIndex(null);
-                }}
+                onDragStart={handleDragStart}
+                onDrop={handleDrop}
               />
             ))}
 

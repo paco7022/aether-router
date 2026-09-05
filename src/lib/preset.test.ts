@@ -158,3 +158,68 @@ describe("applyPreset — assembly", () => {
     expect(msgs[1]).toEqual({ role: "user", content: "x" });
   });
 });
+
+describe("prompt post-processing", () => {
+  const withMode = (mode: UserPreset["post_processing"]): UserPreset => ({
+    version: 2,
+    name: "pp",
+    sampling: {},
+    prompts: [
+      { id: "s1", name: "sys", role: "system", content: "SYS", enabled: true },
+      {
+        id: "s2",
+        name: "jb",
+        role: "system",
+        content: "JB",
+        enabled: true,
+        position: "relative",
+        relative_to: "after_history",
+      },
+    ],
+    assistant_prefill: "",
+    prefill_enabled: false,
+    squash_system_messages: false,
+    post_processing: mode,
+  });
+
+  const history = () => [
+    { role: "assistant", content: "greeting" },
+    { role: "user", content: "hi" },
+  ];
+
+  it("merge leaves the role sequence alone", () => {
+    const body: Record<string, unknown> = { messages: history() };
+    applyPreset(body, withMode("merge"));
+    const roles = (body.messages as Array<{ role: string }>).map((m) => m.role);
+    expect(roles).toEqual(["system", "assistant", "user", "system"]);
+  });
+
+  it("semi_strict makes the dialogue open with a user turn", () => {
+    const body: Record<string, unknown> = { messages: history() };
+    applyPreset(body, withMode("semi_strict"));
+    const roles = (body.messages as Array<{ role: string }>).map((m) => m.role);
+    expect(roles).toEqual(["system", "user", "assistant", "user", "system"]);
+  });
+
+  it("strict keeps system only at the top and alternates the rest", () => {
+    const body: Record<string, unknown> = { messages: history() };
+    applyPreset(body, withMode("strict"));
+    const roles = (body.messages as Array<{ role: string }>).map((m) => m.role);
+    expect(roles).toEqual(["system", "user", "assistant", "user", "assistant", "user"]);
+    // The post-history jailbreak survived, demoted to a user turn.
+    const last = (body.messages as Array<{ content: string }>).at(-1);
+    expect(last?.content).toBe("JB");
+  });
+});
+
+describe("import guard", () => {
+  it("rejects a file that yields no usable prompts", () => {
+    expect(() => parseSillyTavernPreset({ prompts: [], prompt_order: [] })).toThrow(/no prompts found/i);
+    expect(() =>
+      parseSillyTavernPreset({
+        prompts: [{ identifier: "chatHistory", marker: true, name: "Chat History" }],
+        prompt_order: [{ character_id: 100001, order: [{ identifier: "chatHistory", enabled: true }] }],
+      })
+    ).toThrow();
+  });
+});
