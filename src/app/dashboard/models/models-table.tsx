@@ -24,6 +24,8 @@ export type ModelRow = {
   priceInput: string;
   priceOutput: string;
   premiumRequestCost: number;
+  isPaygOnly: boolean;
+  contextSurchargePer10k: number;
   isPremium: boolean;
   isFlatRate: boolean;
   creditsInputLabel: string;
@@ -132,7 +134,14 @@ function ModelDataRow({ model }: { model: ModelRow }) {
         {model.isFlatRate ? <span className="text-[var(--text-dim)]">--</span> : `$${model.priceOutput}`}
       </td>
       <td className="px-5 py-3.5 text-right text-white/70">
-        {model.isFlatRate ? (
+        {model.isPaygOnly ? (
+          <span
+            className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full badge-amber"
+            title="Per-token billing only — switch your account to Pay as you go in Settings to use this model."
+          >
+            PAYG only
+          </span>
+        ) : model.isFlatRate ? (
           <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full badge-success">
             {model.premiumRequestCost.toFixed(1)} cr
           </span>
@@ -145,13 +154,23 @@ function ModelDataRow({ model }: { model: ModelRow }) {
               : "badge-success"
           }`}>
             {model.premiumRequestCost === 1 ? "1 req" : `${model.premiumRequestCost} req`}
+            {model.contextSurchargePer10k > 0 && (
+              <span
+                className="opacity-70"
+                title={`+${model.contextSurchargePer10k} req per extra 10k of context above 32k`}
+              >
+                +{model.contextSurchargePer10k}/10k
+              </span>
+            )}
           </span>
         ) : (
           <span className="text-[var(--text-dim)]">--</span>
         )}
       </td>
       <td className="px-5 py-3.5 text-right font-semibold aurora-text">
-        {model.isPremium ? "1 credit" : model.isFlatRate ? `${model.premiumRequestCost.toFixed(1)} cr` : model.creditsInputLabel}
+        {model.isPaygOnly ? (
+          <span className="text-[var(--text-dim)] font-normal">per token</span>
+        ) : model.isPremium ? "1 credit" : model.isFlatRate ? `${model.premiumRequestCost.toFixed(1)} cr` : model.creditsInputLabel}
       </td>
     </tr>
   );

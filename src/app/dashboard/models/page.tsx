@@ -55,6 +55,12 @@ export default async function ModelsPage() {
       priceInput: creditsToUsd(creditsInput).toFixed(4),
       priceOutput: creditsToUsd(creditsOutput).toFixed(4),
       premiumRequestCost: Number(model.premium_request_cost),
+      // PAYG-only: el pool de premium requests no puede absorber su coste
+      // upstream, así que solo se sirve per-token (models.payg_only).
+      isPaygOnly: !!model.payg_only,
+      // Requests extra por cada 10k de contexto sobre 32k (upstreams que nos
+      // facturan por token). 0 = precio plano.
+      contextSurchargePer10k: Number(model.context_surcharge_per_10k) || 0,
       isPremium,
       isFlatRate,
       creditsInputLabel: creditsInput.toLocaleString(),

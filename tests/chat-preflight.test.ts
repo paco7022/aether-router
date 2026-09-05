@@ -49,4 +49,25 @@ describe("chat preflight", () => {
   it("does not add context premium cost to non-t models", () => {
     expect(getContextAdjustedPremiumRequestCost("r/claude-opus-4-7", "riftai", 7, 200_000)).toBe(7);
   });
+
+  it("applies a per-model context surcharge to per-token upstreams", () => {
+    // z/claude-sonnet-5: base 7 req for the first 32k, +1.547 per extra 10k.
+    const cost = (ctx: number) =>
+      getContextAdjustedPremiumRequestCost("z/claude-sonnet-5", "zenllm", 7, ctx, 1.547);
+    expect(cost(32_000)).toBe(7);
+    expect(cost(32_001)).toBe(8.55);   // 7 + 1.547
+    expect(cost(42_000)).toBe(8.55);
+    expect(cost(42_001)).toBe(10.09);  // 7 + 2 × 1.547
+    // A Max account at its 200k cap pays for the context it actually sends.
+    expect(cost(200_000)).toBe(33.3);  // 7 + 17 × 1.547
+  });
+
+  it("lets the per-model surcharge override the t/ default", () => {
+    expect(getContextAdjustedPremiumRequestCost("t/claude-opus-4.7", "trolllm", 6, 42_000, 0.5)).toBe(6.5);
+  });
+
+  it("ignores a zero or missing surcharge on non-t providers", () => {
+    expect(getContextAdjustedPremiumRequestCost("z/gpt-5.6-luna", "zenllm", 1, 200_000, 0)).toBe(1);
+    expect(getContextAdjustedPremiumRequestCost("z/gpt-5.6-luna", "zenllm", 1, 200_000, null)).toBe(1);
+  });
 });

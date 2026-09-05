@@ -99,11 +99,17 @@ const ORBIT_PAID_CONTEXT = 131072;  // paid plans
 // z/ (ZenLLM) free promo: same self-contained zero-cost pattern as or/.
 // Routes as zero-cost premium → no credits, no premium pool, no daily cap.
 // The only guard is a context cap: 32k for free plans, UNLIMITED for paid
-// (ZENLLM_PAID_CONTEXT = 0 → no cap). Default ON.
+// (ZENLLM_PAID_CONTEXT = 0 → no cap).
 // 2026-06-24: scoped to the top tiers (ultra/ultimate/max) — see
 // ORBIT_ZENLLM_FREE_PLANS below; cheaper plans now bill 1 premium request.
-// This env flag is the global kill switch (set "false" to disable for everyone).
-const ZENLLM_FREE_UNLIMITED = process.env.ZENLLM_FREE_UNLIMITED !== "false";
+//
+// 2026-09-05: DEFAULT FLIPPED TO OFF (opt-in via ZENLLM_FREE_UNLIMITED=true).
+// The promo made sense while z/ was a flat enterprise key where an extra token
+// cost us nothing. ZenLLM now bills PER TOKEN, so zero-cost + unlimited context
+// on ultra/ultimate/max would hand a 200k-context Opus 4.8 call (~$0.32 of
+// upstream) away for free. The flag is kept so the promo can be turned back on
+// deliberately if we ever get a flat contract again.
+const ZENLLM_FREE_UNLIMITED = process.env.ZENLLM_FREE_UNLIMITED === "true";
 const ZENLLM_FREE_CONTEXT = 32768;  // free plans
 const ZENLLM_PAID_CONTEXT = 0;      // paid plans = unlimited (0 = no cap)
 
@@ -789,6 +795,36 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // 5.4b. PAYG-only models (models.payg_only). Their upstream bills us per
+  // token at a rate the daily premium pool cannot absorb: priced honestly
+  // against the cheapest paid plan ($8 / 2250 premium requests = $0.00356 per
+  // request), Opus 4.8 lands at 20 premium requests a call and Fable 5 at 40 —
+  // numbers that make no sense in request mode. So they are offered only on
+  // per-token billing, where every token carries its own margin.
+  //
+  // Custom/enterprise keys (own contract), free pools/events and zero-cost
+  // promos are unaffected: none of them draw the premium pool either.
+  if (
+    model.payg_only &&
+    !isPaygRequest &&
+    !keyInfo.isCustom &&
+    !isFreePool &&
+    !isZeroCostPremium
+  ) {
+    return NextResponse.json(
+      {
+        error: {
+          message:
+            `${modelId} is only available on pay-as-you-go billing (charged per token, no context cap). ` +
+            `Switch your account to Pay as you go in Settings to use it.`,
+          type: "billing_error",
+          billing_mode_required: "payg",
+        },
+      },
+      { status: 402 }
+    );
+  }
+
   // Reservation flags so refundReservation() can roll back request counters
   // (premium RPD / custom-key RPD) on upstream failure, independently of the
   // credit reservation.
@@ -1098,7 +1134,8 @@ export async function POST(req: NextRequest) {
         modelId,
         model.provider,
         Number(model.premium_request_cost ?? 1),
-        estimatedContext
+        estimatedContext,
+        model.context_surcharge_per_10k
       );
       // t/ half-price package: 50k-credit perk halves trolllm premium cost
       // (Opus 6→3, Sonnet 3→1.5) for 30 days. Only applies to trolllm; the
@@ -1811,7 +1848,7 @@ export async function POST(req: NextRequest) {
     const durationMs = Date.now() - startTime;
     // Requests served under a free event don't cost premium-request budget.
     const premiumCost = isPremiumProvider && !activeEventId && !isPlanUnlimited && !isFlatPerTokenKey && !isFreePool
-      ? (premiumRequestCostForUsage || getContextAdjustedPremiumRequestCost(modelId, model.provider, Number(model.premium_request_cost ?? 1), estimatedPrompt))
+      ? (premiumRequestCostForUsage || getContextAdjustedPremiumRequestCost(modelId, model.provider, Number(model.premium_request_cost ?? 1), estimatedPrompt, model.context_surcharge_per_10k))
       : 0;
     // finish_reason of the upstream response — logged to diagnose cut-offs
     // (length = hit max_tokens, content_filter = blocked, stop = natural end).
@@ -1933,7 +1970,7 @@ export async function POST(req: NextRequest) {
 async function handleStreamingResponse(
   providerResponse: Response,
   keyInfo: { userId: string; keyId: string | null; credits: number; dailyCredits: number; isCustom: boolean; customCredits: number | null; planId: string; source: "api" | "chat"; pricingMode?: string; flatCostPerMTokens?: number | null; tokenWindowSeconds?: number | null; tokenWindowLimit?: number | null },
-  model: { id: string; provider: string; cost_per_m_input: number; cost_per_m_output: number; cost_per_m_cache_read?: number; cost_per_m_cache_write?: number; margin: number; premium_request_cost?: number; payg_credits_per_m_input?: number; payg_credits_per_m_output?: number },
+  model: { id: string; provider: string; cost_per_m_input: number; cost_per_m_output: number; cost_per_m_cache_read?: number; cost_per_m_cache_write?: number; margin: number; premium_request_cost?: number; context_surcharge_per_10k?: number | null; payg_credits_per_m_input?: number; payg_credits_per_m_output?: number },
   startTime: number,
   estimatedPromptTokens: number = 0,
   isFreePool: boolean = false,
@@ -2242,7 +2279,7 @@ async function handleStreamingResponse(
     const durationMs = Date.now() - startTime;
     const isPremium = isPremiumProviderName(model.provider);
     const streamPremiumCost = isPremium && !activeEventId && !isPlanUnlimited && !isFlatPerTokenKey && !isFreePool
-      ? (premiumRequestCostForUsage || getContextAdjustedPremiumRequestCost(model.id, model.provider, Number(model.premium_request_cost ?? 1), estimatedPromptTokens))
+      ? (premiumRequestCostForUsage || getContextAdjustedPremiumRequestCost(model.id, model.provider, Number(model.premium_request_cost ?? 1), estimatedPromptTokens, model.context_surcharge_per_10k))
       : 0;
     const writeStreamTx = !isFreePool && chargedCredits > 0;
     const streamSettlementSuffix = billingStatus === "success" ? "" : ` [${billingStatus}]`;
