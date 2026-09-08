@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { requireCsrf } from "@/lib/csrf";
 
 export const runtime = "nodejs";
@@ -52,7 +53,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "model_id required" }, { status: 400 });
   }
 
-  const { data: model } = await supabase
+  // `models` ya no es legible con la sesión del usuario (ver
+  // 20260907120000_lock_models_table.sql); esta validación de existencia va
+  // por service-role. Solo se lee el id, nada de costos ni provider.
+  const { data: model } = await createAdminClient()
     .from("models")
     .select("id")
     .eq("id", body.model_id)

@@ -1,4 +1,4 @@
-import { createServerSupabase } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { pricePerMTokens, creditsToUsd } from "@/lib/credits";
 import { isPremiumProvider as isPremiumProviderName, isFlatRateProvider as isFlatRateProviderName } from "@/lib/providers/types";
 import { classifyFamily } from "@/lib/model-family";
@@ -10,8 +10,18 @@ const HIGHLIGHTED_CAPABILITIES = ["tool_calling", "vision", "web_search", "json_
 // Models added within this window get a "New" highlight on the table
 const NEW_MODEL_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
+// Antes esta página era dinámica por accidente: createServerSupabase() lee
+// cookies, y eso la sacaba del prerender. Al pasar a service-role (que no lee
+// cookies) Next la prerenderizaba en build y el catálogo quedaba congelado
+// hasta el próximo deploy — un modelo nuevo o desactivado no se vería nunca.
+export const dynamic = "force-dynamic";
+
 export default async function ModelsPage() {
-  const supabase = await createServerSupabase();
+  // Service-role: `models` dejó de ser legible con la sesión del usuario (ver
+  // 20260907120000_lock_models_table.sql). Nada de lo crudo (cost_per_m_*,
+  // margin, provider, upstream_model_id) sale de este server component — las
+  // filas que se mandan al cliente son las ya derivadas de `ModelRow`.
+  const supabase = createAdminClient();
   const { data: models } = await supabase
     .from("models")
     .select("*")

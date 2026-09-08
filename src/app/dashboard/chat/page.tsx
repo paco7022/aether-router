@@ -55,7 +55,6 @@ function splitThink(text: string): { reasoning: string; body: string } {
 type Model = {
   id: string;
   display_name: string;
-  provider: string;
   capabilities: string[];
 };
 
@@ -201,12 +200,18 @@ export default function ChatPage() {
 
   useEffect(() => {
     (async () => {
-      const { data } = await supabase
-        .from("models")
-        .select("id, display_name, provider, capabilities")
-        .eq("is_active", true)
-        .order("id");
-      const list = (data ?? []) as Model[];
+      // Vía /api/v1/models, no leyendo la tabla: `models` guarda costos,
+      // márgenes y el provider real de cada modelo, así que ya no es legible
+      // con la anon key (ver 20260907120000_lock_models_table.sql).
+      const res = await fetch("/api/v1/models");
+      const json = res.ok
+        ? ((await res.json()) as { data?: Array<{ id: string; display_name?: string; capabilities?: string[] }> })
+        : { data: [] };
+      const list: Model[] = (json.data ?? []).map((m) => ({
+        id: m.id,
+        display_name: m.display_name ?? m.id,
+        capabilities: m.capabilities ?? [],
+      }));
       setModels(list);
       if (!selectedModel && list.length > 0) {
         const preferred =

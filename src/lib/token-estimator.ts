@@ -112,6 +112,42 @@ export function floorPromptTokens(
   return prompt;
 }
 
+/**
+ * Sanity CEILING for upstream-reported completion tokens.
+ *
+ * Counterpart of floorPromptTokens. The floor stops an upstream from
+ * under-reporting (which would let it drain credits while we bill nothing);
+ * this stops the opposite, which is what actually hits the customer: an
+ * upstream that over-reports `completion_tokens` bills the user for output
+ * that was never generated. Measured in the wild — or/ (Orbit) reports 4-9x
+ * the real output. Harmless while every premium provider billed a flat
+ * premium_request_cost, but real money once an account is on
+ * `billing_mode = 'payg'` or on a per-token provider (ds/, na/).
+ *
+ * We already hold the exact text that was streamed/returned to the caller, so
+ * `observed` (o200k over that text) is a hard lower bound on the truth. The
+ * allowance above it covers the legitimate gap: a different upstream tokenizer
+ * (Anthropic's is not o200k), plus reasoning/thinking tokens that are billed
+ * but never surfaced as content. It is deliberately generous — the goal is to
+ * cut absurd multipliers, not to shave honest counts.
+ *
+ * `observed <= 0` means we never saw the text (e.g. a tool-call-only reply), so
+ * there is nothing to compare against and the reported value stands.
+ */
+export const COMPLETION_TOKEN_CAP_MULTIPLIER = 3;
+export const COMPLETION_TOKEN_CAP_SLACK = 64;
+
+export function capCompletionTokens(
+  reportedCompletion: number,
+  observed: number
+): number {
+  const reported = Number(reportedCompletion) || 0;
+  const seen = Number(observed) || 0;
+  if (!(seen > 0)) return reported;
+  const ceiling = Math.ceil(seen * COMPLETION_TOKEN_CAP_MULTIPLIER) + COMPLETION_TOKEN_CAP_SLACK;
+  return reported > ceiling ? ceiling : reported;
+}
+
 function estimateContentTokens(content: unknown): number {
   if (typeof content === "string") return estimateTokens(content);
   if (!Array.isArray(content)) return 0;

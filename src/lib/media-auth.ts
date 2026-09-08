@@ -5,6 +5,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { validateApiKey, validateSession, type ApiKeyInfo } from "@/lib/auth";
 import { isApiKeyAuthHeader, getRequestFingerprint } from "@/lib/chat-preflight";
+import { authFailureRetryAfter, recordAuthFailure } from "@/lib/auth-throttle";
+import { getClientIp } from "@/lib/client-ip";
 import { evaluateBanStatus } from "@/lib/ban";
 import { requireCsrf } from "@/lib/csrf";
 import {
@@ -21,8 +23,22 @@ export async function authenticateMediaRequest(
 
   let keyInfo: ApiKeyInfo | null;
   if (isApiKeyAuthHeader(authHeader)) {
+    // Misma puerta Bearer que /v1/chat/completions: una IP que acumula fallos
+    // de auth entra en timeout antes de convertir cada intento en un SELECT.
+    const clientIp = getClientIp(req.headers);
+    const retryAfter = authFailureRetryAfter(clientIp);
+    if (retryAfter > 0) {
+      return {
+        response: NextResponse.json(
+          { error: { message: "Too many failed authentication attempts. Try again shortly.", type: "rate_limit" } },
+          { status: 429, headers: { "Retry-After": String(retryAfter) } },
+        ),
+      };
+    }
+
     keyInfo = await validateApiKey((authHeader ?? "").slice(7));
     if (!keyInfo) {
+      recordAuthFailure(clientIp);
       return {
         response: NextResponse.json(
           { error: { message: "Invalid API key", type: "auth_error" } },

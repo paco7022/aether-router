@@ -22,10 +22,15 @@ export async function GET() {
   // `modality` es una columna nueva (migración de media). Si el deploy de
   // código va por delante del de la DB, pedirla haría fallar TODO /v1/models,
   // que es el endpoint más crítico del router. Se reintenta sin ella.
-  type ModelRow = { id: string; capabilities?: unknown; modality?: string | null };
+  type ModelRow = {
+    id: string;
+    display_name?: string | null;
+    capabilities?: unknown;
+    modality?: string | null;
+  };
   let { data: models, error } = await supabase
     .from("models")
-    .select("id, capabilities, modality")
+    .select("id, display_name, capabilities, modality")
     .eq("is_active", true)
     .order("id")
     .overrideTypes<ModelRow[]>();
@@ -33,7 +38,7 @@ export async function GET() {
   if (error) {
     ({ data: models, error } = await supabase
       .from("models")
-      .select("id, capabilities")
+      .select("id, display_name, capabilities")
       .eq("is_active", true)
       .order("id")
       .overrideTypes<ModelRow[]>());
@@ -52,6 +57,10 @@ export async function GET() {
     object: "model",
     created: 0,
     owned_by: "aether-router",
+    // Nombre de catálogo. Es la etiqueta que ya se muestra en la web, así que
+    // no agrega exposición — pero es lo que necesita el selector del chat para
+    // no leer la tabla `models` directamente desde el browser.
+    display_name: m.display_name ?? m.id,
     capabilities: m.capabilities ?? ["streaming", "system_message"],
     // "image"/"video" no sirven en /v1/chat/completions; se exponen acá para
     // que un cliente pueda filtrarlos en vez de descubrirlo con un 400.

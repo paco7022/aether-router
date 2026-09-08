@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { validateApiKey, validateSession } from "@/lib/auth";
 import { calculateCredits, flatTokenCredits, paygCredits, isPaygPriced } from "@/lib/credits";
-import { estimateTokens, estimatePromptTokens, floorPromptTokens } from "@/lib/token-estimator";
+import {
+  estimateTokens,
+  estimatePromptTokens,
+  floorPromptTokens,
+  capCompletionTokens,
+} from "@/lib/token-estimator";
 import { getProvider } from "@/lib/providers";
 import {
   isPremiumProvider as isPremiumProviderName,
@@ -10,6 +15,8 @@ import {
 } from "@/lib/providers/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireCsrf } from "@/lib/csrf";
+import { authFailureRetryAfter, recordAuthFailure } from "@/lib/auth-throttle";
+import { getClientIp } from "@/lib/client-ip";
 import { evaluateBanStatus } from "@/lib/ban";
 import {
   getContextAdjustedPremiumRequestCost,
@@ -348,8 +355,21 @@ export async function POST(req: NextRequest) {
   const apiKeyToken = isApiKeyAuth ? (authHeader ?? "").slice(7) : null;
   let keyInfo;
   if (isApiKeyAuth) {
+    // An unknown key costs a DB lookup, so an IP that keeps failing gets put
+    // in timeout before it can turn that into a Disk IO drain. Valid keys
+    // never reach this counter.
+    const clientIp = getClientIp(req.headers);
+    const retryAfter = authFailureRetryAfter(clientIp);
+    if (retryAfter > 0) {
+      return NextResponse.json(
+        { error: { message: "Too many failed authentication attempts. Try again shortly.", type: "rate_limit" } },
+        { status: 429, headers: { "Retry-After": String(retryAfter) } }
+      );
+    }
+
     keyInfo = await validateApiKey(apiKeyToken!);
     if (!keyInfo) {
+      recordAuthFailure(clientIp);
       return NextResponse.json(
         { error: { message: "Invalid API key", type: "auth_error" } },
         { status: 401 }
@@ -1789,14 +1809,20 @@ export async function POST(req: NextRequest) {
       };
       cacheTokens = { read: 0, write: 0 };
     } else {
-      // Upstream reported usage — trust it, but enforce a floor so a
-      // malicious/buggy upstream can't claim 0 completion tokens when we
-      // saw real text in the response.
-      if (localCompletionEstimate > 0 && (usage.completion_tokens ?? 0) < localCompletionEstimate) {
+      // Upstream reported usage — trust it, but bound it on BOTH sides.
+      // Floor: it can't claim 0 completion tokens when we saw real text.
+      // Ceiling: it can't claim a multiple of the text it actually returned
+      // either — that over-bills the customer directly under payg / per-token
+      // pricing (see capCompletionTokens).
+      const boundedCompletion = capCompletionTokens(
+        Math.max(usage.completion_tokens ?? 0, localCompletionEstimate),
+        localCompletionEstimate
+      );
+      if (boundedCompletion !== (usage.completion_tokens ?? 0)) {
         usage = {
           ...usage,
-          completion_tokens: localCompletionEstimate,
-          total_tokens: (usage.prompt_tokens ?? 0) + localCompletionEstimate,
+          completion_tokens: boundedCompletion,
+          total_tokens: (usage.prompt_tokens ?? 0) + boundedCompletion,
         };
       }
       // Prompt-token sanity floor (mirrors the completion floor above): the
@@ -2127,11 +2153,15 @@ async function handleStreamingResponse(
       totalCompletionTokens = estimateTokens(completionText);
     } else {
       // Sanity floor: completion tokens can never be less than what we
-      // actually observed being streamed to the client.
+      // actually observed being streamed to the client. And sanity ceiling:
+      // they can't be a multiple of it either — an upstream inflating output
+      // (or/ has been measured at 4-9x) bills the customer directly once the
+      // account is on payg or on a per-token provider. See capCompletionTokens.
       const observedCompletion = completionText ? estimateTokens(completionText) : 0;
       if (observedCompletion > 0 && totalCompletionTokens < observedCompletion) {
         totalCompletionTokens = observedCompletion;
       }
+      totalCompletionTokens = capCompletionTokens(totalCompletionTokens, observedCompletion);
       // Prompt-token sanity floor (mirrors the completion floor above): the
       // billed prompt side can never be smaller than the prompt we actually
       // forwarded. Some upstreams under-report it in streaming — e.g. Orbit's

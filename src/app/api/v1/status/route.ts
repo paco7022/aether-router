@@ -13,10 +13,14 @@ const CACHE_TTL_MS = 15 * 60_000;
 const WINDOW_MINUTES = 1440; // rows considered at all (24h)
 const RECENT_MINUTES = 60; // preferred bucket for the verdict
 
+// `group` es el prefijo del id (r/, sh/, bl/, k/ …), que es la unidad que cae
+// junta porque un mismo reseller fronteo muchos modelos. Deliberadamente NO se
+// expone `models.provider`: este endpoint es público y sin auth, y el nombre
+// interno del provider revela la cadena de resellers.
 type StatusModel = {
   id: string;
   display_name: string;
-  provider: string;
+  group: string;
   state: HealthState;
   last_ok: string | null;
   last_error: string | null;
@@ -35,7 +39,7 @@ export async function GET() {
   const supabase = createAdminClient();
 
   const [{ data: models, error: modelsErr }, { data: health, error: healthErr }] = await Promise.all([
-    supabase.from("models").select("id, display_name, provider").eq("is_active", true).order("id"),
+    supabase.from("models").select("id, display_name").eq("is_active", true).order("id"),
     supabase.rpc("get_model_health", {
       p_window_minutes: WINDOW_MINUTES,
       p_recent_minutes: RECENT_MINUTES,
@@ -58,7 +62,7 @@ export async function GET() {
     return {
       id: m.id,
       display_name: m.display_name,
-      provider: m.provider,
+      group: m.id.includes("/") ? m.id.split("/")[0] + "/" : m.id,
       state: verdict.state,
       last_ok: row?.last_ok ?? null,
       last_error: row?.last_err ?? null,

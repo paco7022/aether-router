@@ -1,7 +1,20 @@
 import { createAdminClient } from "./supabase/admin";
 import { createServerSupabase } from "./supabase/server";
+import { TtlCache } from "./db-cache";
 import type { UserPreset } from "./preset";
 import type { Lorebook } from "./lorebook";
+
+// Negative cache for rejected API keys, keyed by the key's SHA-256 (never the
+// plaintext). Every unknown Bearer used to cost one `api_keys` SELECT, and the
+// realistic source of that load is not an attacker but a misconfigured client
+// looping on a stale/revoked key — the kind of traffic that eats the shared
+// compute's Disk IO budget (2026-06-08 outage).
+//
+// Only rejections are cached, and only briefly: a key that an admin re-enables
+// (or that a user has just created) starts working again within the TTL.
+// Successful lookups are NOT cached — credits/plan/preset must stay live.
+const REJECTED_KEY_TTL_MS = 30_000;
+const rejectedKeyCache = new TtlCache<true>(REJECTED_KEY_TTL_MS, 20_000);
 
 export interface ApiKeyInfo {
   // keyId is null when the caller authenticated with a Supabase session
@@ -86,6 +99,11 @@ export async function validateApiKey(key: string): Promise<ApiKeyInfo | null> {
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   const keyHash = hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 
+  // Recently-rejected key: skip the DB roundtrip entirely.
+  if (rejectedKeyCache.get(keyHash)) {
+    return null;
+  }
+
   // Look up key and join with profile for credits
   const { data: result, error } = await supabase
     .from("api_keys")
@@ -94,11 +112,18 @@ export async function validateApiKey(key: string): Promise<ApiKeyInfo | null> {
     .single();
 
   if (error || !result || !result.is_active) {
+    // Cache only a DEFINITIVE "no such usable key". PGRST116 is PostgREST's
+    // "no rows returned" for .single(), i.e. the unknown-key case; any other
+    // error is an outage and must not be memoized as an auth failure, or a
+    // blip would 401 valid keys for the whole TTL.
+    const noRows = (error as { code?: string } | null)?.code === "PGRST116";
+    if (!error || noRows) rejectedKeyCache.set(keyHash, true);
     return null;
   }
 
   // Check expiration for custom keys
   if (result.expires_at && new Date(result.expires_at) < new Date()) {
+    rejectedKeyCache.set(keyHash, true);
     return null;
   }
 

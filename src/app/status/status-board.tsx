@@ -6,7 +6,9 @@ import { STATE_LABEL, timeAgo, errorCodeLabel, type HealthState } from "@/lib/mo
 type StatusModel = {
   id: string;
   display_name: string;
-  provider: string;
+  // Prefijo del id (r/, sh/, bl/ …). Lo calcula el server; el nombre interno
+  // del provider ya no se publica.
+  group: string;
   state: HealthState;
   last_ok: string | null;
   last_error: string | null;
@@ -73,11 +75,12 @@ export default function StatusBoard() {
         ? `${data.summary.degraded} model${data.summary.degraded === 1 ? "" : "s"} degraded`
         : "All observed models operational";
 
-  // Group by internal provider prefix (r/, sh/, bl/, k/ …) — that's the unit
-  // that actually goes down together, since one reseller fronts many models.
+  // Group by model-id prefix (r/, sh/, bl/, k/ …) — that's the unit that
+  // actually goes down together, since one reseller fronts many models. The
+  // server sends the prefix precomputed as `group`.
   const groups = new Map<string, StatusModel[]>();
   for (const m of data.models) {
-    const prefix = m.id.includes("/") ? m.id.split("/")[0] + "/" : m.provider;
+    const prefix = m.group || m.id;
     if (!groups.has(prefix)) groups.set(prefix, []);
     groups.get(prefix)!.push(m);
   }
