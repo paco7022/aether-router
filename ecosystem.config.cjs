@@ -20,6 +20,25 @@ module.exports = {
       time: true,
     },
     {
+      // Sincroniza cada 30s los precios de z/ (ZenLLM) con su /v1/models.
+      // Ese proveedor nos factura por token y mueve la tarifa sin avisar (tres
+      // cambios en cinco días en septiembre); sin esto vendemos bajo coste
+      // hasta que alguien lo mira a mano. Solo escribe en la DB cuando algo
+      // cambió. Ver scripts/zenllm-price-sync.mjs.
+      name: "zenllm-price-sync",
+      script: "scripts/zenllm-price-sync.mjs",
+      cwd: __dirname,
+      instances: 1,
+      exec_mode: "fork",
+      autorestart: true,
+      max_restarts: 20,
+      min_uptime: "30s",
+      max_memory_restart: "300M",
+      error_file: "./logs/zenllm-price-sync-error.log",
+      out_file: "./logs/zenllm-price-sync-out.log",
+      time: true,
+    },
+    {
       // Puente entre el router y ComfyUI (generación de imagen/video).
       // El secreto NO va en el repo: se lee del entorno al hacer pm2 start.
       //   $env:BRIDGE_SECRET="..."; pm2 start ecosystem.config.cjs --only comfy-bridge
