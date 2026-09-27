@@ -31,6 +31,7 @@ import {
   claudeActivationApplies,
   claudePaidOnlyApplies,
   isAllowedClaudeProvider,
+  isAnthropicDirectAllowed,
   isClaudeModel,
 } from "@/lib/claude-block";
 import {
@@ -528,7 +529,17 @@ export async function POST(req: NextRequest) {
   // approved to route Claude. Paid-plan-only rule applies to most of
   // them; trolllm is exempt while we drain expiring keys.
   if (isClaudeModel(model)) {
-    if (!isAllowedClaudeProvider(model.provider)) {
+    // Anthropic direct (ad/, provider "anthropic"): hard-gated to hand-minted
+    // custom keys only, regardless of plan/claude_activated. See
+    // isAnthropicDirectAllowed in claude-block.ts for why this is a special
+    // case instead of an entry in ALLOWED_CLAUDE_PROVIDERS.
+    if (model.provider === "anthropic" && !isAnthropicDirectAllowed(keyInfo)) {
+      return NextResponse.json(
+        { error: { message: CLAUDE_BLOCK_MESSAGE, type: "model_blocked" } },
+        { status: 403 }
+      );
+    }
+    if (model.provider !== "anthropic" && !isAllowedClaudeProvider(model.provider)) {
       return NextResponse.json(
         { error: { message: CLAUDE_BLOCK_MESSAGE, type: "model_blocked" } },
         { status: 403 }
@@ -538,7 +549,12 @@ export async function POST(req: NextRequest) {
     // open to everyone — free plan included — so skip BOTH the paid-plan-only
     // rule and the per-user claude_activated gate for db/ while the flag is on.
     const dlabFreePromo = DLAB_FREE_UNLIMITED && model.provider === "dlab";
-    if (!dlabFreePromo) {
+    // anthropic (ad/) already passed its own hard gate above (custom key +
+    // explicit allowed_providers) — that stands in for both the paid-plan
+    // rule and the per-user activation gate, so skip this whole block for it
+    // (isAnthropicDirectAllowed already implies keyInfo.isCustom, which is
+    // what the two checks below would bypass on anyway).
+    if (!dlabFreePromo && model.provider !== "anthropic") {
       // "Paid" now includes pay-as-you-go accounts (purchased credits), not
       // just subscribers — see isPaidAccount in src/lib/free-tier.ts.
       if (!isPaidAccount(keyInfo) && claudePaidOnlyApplies(model.provider)) {

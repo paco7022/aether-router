@@ -270,6 +270,7 @@ Adaptadores:
 - `webproxy.ts`
 - `nano.ts`
 - `shoot.ts`
+- `anthropic.ts` — Anthropic oficial DIRECTO (`ad/`), key personal. NO forma parte del gate normal de Claude (paid+claude_activated): ver `isAnthropicDirectAllowed` en `claude-block.ts` — solo custom keys con `allowed_providers` incluyendo `"anthropic"` pasan. Implementa caching explícito (system con `ttl:"1h"` + `cache_control` top-level automático para el historial).
 
 Todos deben aceptar `signal?: AbortSignal` y pasarlo a `fetch`.
 

@@ -44,6 +44,7 @@ const PREMIUM_PROVIDERS = new Set<string>([
   "googleai",
   "shoot",
   "blaze",
+  "anthropic",
 ]);
 
 export function isPremiumProvider(provider: string | null | undefined): boolean {

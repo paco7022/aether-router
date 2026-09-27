@@ -17,6 +17,7 @@ import { atessaProvider } from "./atessa";
 import { googleaiProvider } from "./googleai";
 import { shootProvider } from "./shoot";
 import { blazeProvider } from "./blaze";
+import { anthropicProvider } from "./anthropic";
 
 const providers: Record<string, Provider> = {
   nano: nanoProvider,
@@ -37,6 +38,7 @@ const providers: Record<string, Provider> = {
   googleai: googleaiProvider,
   shoot: shootProvider,
   blaze: blazeProvider,
+  anthropic: anthropicProvider,
 };
 
 export function getProvider(name: string): Provider | undefined {

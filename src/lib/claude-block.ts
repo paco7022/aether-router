@@ -78,3 +78,22 @@ export function isClaudeModel(model: {
 export function isAllowedClaudeProvider(provider: string | null | undefined): boolean {
   return !!provider && ALLOWED_CLAUDE_PROVIDERS.has(provider);
 }
+
+// Anthropic direct (ad/, provider "anthropic"): the real official API, called
+// with our own personal key. Deliberately kept OUT of
+// ALLOWED_CLAUDE_PROVIDERS/CLAUDE_PAID_ONLY_BYPASS/CLAUDE_ACTIVATION_BYPASS —
+// the normal paid-plan + claude_activated rule must NEVER grant access here,
+// unlike every other Claude provider above. The only door in is a custom key
+// (hand-minted, one per approved person) whose allowed_providers explicitly
+// lists "anthropic". Checked in chat/completions/route.ts as a special case
+// of the Claude gate, before isAllowedClaudeProvider is even consulted.
+export function isAnthropicDirectAllowed(keyInfo: {
+  isCustom: boolean;
+  allowedProviders: string[] | null;
+}): boolean {
+  return (
+    keyInfo.isCustom &&
+    Array.isArray(keyInfo.allowedProviders) &&
+    keyInfo.allowedProviders.includes("anthropic")
+  );
+}
