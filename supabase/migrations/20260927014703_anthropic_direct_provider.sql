@@ -24,11 +24,10 @@
 -- as claude-opus-5 as a placeholder — adjust if Anthropic publishes a
 -- different rate.
 --
--- capabilities intentionally omit "tool_calling" and "vision": v1 of
--- src/lib/providers/anthropic.ts (same limitation as orbit.ts) translates
--- text only — no tool-call or image content translation yet. Text chat /
--- roleplay only, not (yet) suitable for Claude Code or other tool-using
--- clients.
+-- capabilities include "tool_calling" (added 2026-09-27): src/lib/providers/
+-- anthropic.ts translates OpenAI tools/tool_choice/tool_calls both ways now.
+-- "vision" is still omitted — image content blocks are not translated yet,
+-- text + tool traffic only.
 --
 -- ad/claude-fable-5-1 is inserted is_active=false on purpose: at $10/$50 per
 -- million tokens it's too expensive to hand out even on this personal/
@@ -42,11 +41,11 @@ INSERT INTO models (
   cost_per_m_cache_read, cost_per_m_cache_write,
   margin, is_active, premium_request_cost, context_length, capabilities
 ) VALUES
-  ('ad/claude-opus-5-5',   'anthropic', 'claude-opus-5-5',            'Claude Opus 5.5',   5,  25, 0.5, 0, 1.0, true,  6, 1000000, '["streaming","system_message","reasoning","pdf_input"]'::jsonb),
-  ('ad/claude-fable-5-1',  'anthropic', 'claude-fable-5-1',           'Claude Fable 5.1',  10, 50, 1.0, 0, 1.0, false, 6, 1000000, '["streaming","system_message","reasoning","pdf_input"]'::jsonb),
-  ('ad/claude-opus-5',     'anthropic', 'claude-opus-5',              'Claude Opus 5',     5,  25, 0.5, 0, 1.0, true,  6, 1000000, '["streaming","system_message","reasoning","pdf_input"]'::jsonb),
-  ('ad/claude-sonnet-5',   'anthropic', 'claude-sonnet-5',            'Claude Sonnet 5',   2,  10, 0.2, 0, 1.0, true, 3, 1000000, '["streaming","system_message","reasoning","pdf_input"]'::jsonb),
-  ('ad/claude-haiku-4-5',  'anthropic', 'claude-haiku-4-5-20251001',  'Claude Haiku 4.5',  1,  5,  0.1, 0, 1.0, true, 1,  200000, '["streaming","system_message","pdf_input"]'::jsonb)
+  ('ad/claude-opus-5-5',   'anthropic', 'claude-opus-5-5',            'Claude Opus 5.5',   5,  25, 0.5, 0, 1.0, true,  6, 1000000, '["streaming","system_message","reasoning","pdf_input","tool_calling"]'::jsonb),
+  ('ad/claude-fable-5-1',  'anthropic', 'claude-fable-5-1',           'Claude Fable 5.1',  10, 50, 1.0, 0, 1.0, false, 6, 1000000, '["streaming","system_message","reasoning","pdf_input","tool_calling"]'::jsonb),
+  ('ad/claude-opus-5',     'anthropic', 'claude-opus-5',              'Claude Opus 5',     5,  25, 0.5, 0, 1.0, true,  6, 1000000, '["streaming","system_message","reasoning","pdf_input","tool_calling"]'::jsonb),
+  ('ad/claude-sonnet-5',   'anthropic', 'claude-sonnet-5',            'Claude Sonnet 5',   2,  10, 0.2, 0, 1.0, true, 3, 1000000, '["streaming","system_message","reasoning","pdf_input","tool_calling"]'::jsonb),
+  ('ad/claude-haiku-4-5',  'anthropic', 'claude-haiku-4-5-20251001',  'Claude Haiku 4.5',  1,  5,  0.1, 0, 1.0, true, 1,  200000, '["streaming","system_message","pdf_input","tool_calling"]'::jsonb)
 ON CONFLICT (id) DO UPDATE SET
   provider               = EXCLUDED.provider,
   upstream_model_id      = EXCLUDED.upstream_model_id,
