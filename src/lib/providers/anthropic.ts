@@ -157,6 +157,47 @@ function stringifyContent(content: unknown): string {
   return "";
 }
 
+// OpenAI image_url (data URL or http URL) -> Anthropic image block.
+function imageUrlToBlock(url: unknown): AnthropicContentBlock | null {
+  if (typeof url !== "string") return null;
+  const m = /^data:([^;,]+);base64,([\s\S]*)$/.exec(url);
+  if (m) return { type: "image", source: { type: "base64", media_type: m[1], data: m[2] } };
+  if (/^https?:\/\//i.test(url)) return { type: "image", source: { type: "url", url } };
+  return null;
+}
+
+// OpenAI message content (string or text/image_url parts) -> Anthropic blocks.
+// Empty text is dropped: Anthropic 400s on empty text blocks.
+function contentToBlocks(content: unknown): AnthropicContentBlock[] {
+  if (typeof content === "string") return content ? [{ type: "text", text: content }] : [];
+  if (!Array.isArray(content)) return [];
+  const blocks: AnthropicContentBlock[] = [];
+  for (const part of content) {
+    if (typeof part === "string") {
+      if (part) blocks.push({ type: "text", text: part });
+      continue;
+    }
+    if (!part || typeof part !== "object") continue;
+    const p = part as { type?: string; text?: unknown; image_url?: unknown };
+    if (p.type === "text" && typeof p.text === "string") {
+      if (p.text) blocks.push({ type: "text", text: p.text });
+    } else if (p.type === "image_url") {
+      const url = typeof p.image_url === "string" ? p.image_url : (p.image_url as { url?: unknown } | undefined)?.url;
+      const img = imageUrlToBlock(url);
+      if (img) blocks.push(img);
+    }
+  }
+  return blocks;
+}
+
+// tool_result content: plain string when text-only, blocks when images.
+function toolResultContent(content: unknown): string | AnthropicContentBlock[] {
+  if (typeof content === "string") return content;
+  const blocks = contentToBlocks(content);
+  if (blocks.every((b) => b.type === "text")) return blocks.map((b) => b.text).join("");
+  return blocks;
+}
+
 function safeParseJson(text: string | undefined): unknown {
   if (!text) return {};
   try {
@@ -208,31 +249,27 @@ function translateToolChoice(req: ProviderRequest): AnthropicToolChoice | undefi
 // opposite direction.
 export function openAIToAnthropic(req: ProviderRequest): AnthropicRequestBody {
   const systemParts: string[] = [];
+  // Every message becomes a block array, and consecutive same-role messages
+  // are merged. That one rule covers: several OpenAI `tool` messages
+  // answering one parallel tool_use turn (Anthropic wants a single user
+  // turn), user text arriving alongside tool results (Claude Code's
+  // <system-reminder>s), and mid-conversation system text inlined into a
+  // user turn. Empty messages are dropped — Anthropic 400s on empty content.
   const out: AnthropicMessage[] = [];
-  // OpenAI tool-result messages (role: "tool") arrive as separate messages,
-  // one per call. Anthropic requires all tool_result blocks answering a
-  // single assistant tool_use turn to live in ONE user message — buffer them
-  // and flush as soon as a non-"tool" message follows (or at the end).
-  let pendingToolResults: AnthropicContentBlock[] = [];
+  let seenConversation = false;
 
-  function flushPendingToolResults() {
-    if (pendingToolResults.length === 0) return;
-    out.push({ role: "user", content: pendingToolResults });
-    pendingToolResults = [];
+  function append(role: "user" | "assistant", blocks: AnthropicContentBlock[]) {
+    if (blocks.length === 0) return;
+    const last = out[out.length - 1];
+    if (last && last.role === role) {
+      (last.content as AnthropicContentBlock[]).push(...blocks);
+    } else {
+      out.push({ role, content: blocks });
+    }
   }
 
   for (const raw of req.messages || []) {
     const m = raw as unknown as RawOpenAIMessage;
-
-    if (m.role === "tool") {
-      pendingToolResults.push({
-        type: "tool_result",
-        tool_use_id: String(m.tool_call_id ?? ""),
-        content: stringifyContent(m.content),
-      });
-      continue;
-    }
-    flushPendingToolResults();
 
     if (m.role === "system") {
       const text = stringifyContent(m.content);
@@ -242,61 +279,51 @@ export function openAIToAnthropic(req: ProviderRequest): AnthropicRequestBody {
       // messages (SillyTavern depth injections, jailbreaks, formatting
       // presets) must stay at their position — hoisting them to the top makes
       // some Claude variants ignore them (same bug fixed for orbit.ts, see
-      // project_aether_orbit_st_systemhoist). Convert those to an inline user
-      // turn instead.
-      if (out.length === 0) {
-        systemParts.push(text);
-      } else {
-        const last = out[out.length - 1];
-        if (last && last.role === "user" && typeof last.content === "string") {
-          last.content = last.content + "\n\n" + text;
-        } else {
-          out.push({ role: "user", content: text });
-        }
-      }
+      // project_aether_orbit_st_systemhoist). Inline them as user text.
+      if (!seenConversation) systemParts.push(text);
+      else append("user", [{ type: "text", text }]);
       continue;
     }
+    seenConversation = true;
 
-    if (m.role === "assistant") {
-      const text = stringifyContent(m.content);
-      if (Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
-        const blocks: AnthropicContentBlock[] = [];
-        if (text) blocks.push({ type: "text", text });
-        m.tool_calls.forEach((call, i) => {
-          blocks.push({
-            type: "tool_use",
-            id: String(call.id ?? `toolu_${i}`),
-            name: String(call.function?.name ?? ""),
-            input: safeParseJson(call.function?.arguments),
-          });
+    if (m.role === "tool") {
+      const content = toolResultContent(m.content);
+      append("user", [
+        {
+          type: "tool_result",
+          tool_use_id: String(m.tool_call_id ?? ""),
+          ...(content.length > 0 ? { content } : {}),
+        },
+      ]);
+    } else if (m.role === "assistant") {
+      const blocks = contentToBlocks(m.content);
+      (m.tool_calls ?? []).forEach((call, i) => {
+        blocks.push({
+          type: "tool_use",
+          id: String(call.id ?? `toolu_${i}`),
+          name: String(call.function?.name ?? ""),
+          input: safeParseJson(call.function?.arguments),
         });
-        out.push({ role: "assistant", content: blocks });
-      } else {
-        const last = out[out.length - 1];
-        if (last && last.role === "assistant" && typeof last.content === "string") {
-          last.content = last.content + "\n\n" + text;
-        } else {
-          out.push({ role: "assistant", content: text });
-        }
-      }
-      continue;
-    }
-
-    if (m.role === "user") {
-      const text = stringifyContent(m.content);
-      const last = out[out.length - 1];
-      if (last && last.role === "user" && typeof last.content === "string") {
-        last.content = last.content + "\n\n" + text;
-      } else {
-        out.push({ role: "user", content: text });
-      }
+      });
+      append("assistant", blocks);
+    } else if (m.role === "user") {
+      append("user", contentToBlocks(m.content));
     }
   }
-  flushPendingToolResults();
+
+  // Anthropic rejects a user turn whose tool_result blocks don't come first.
+  for (const turn of out) {
+    if (turn.role !== "user") continue;
+    const blocks = turn.content as AnthropicContentBlock[];
+    const results = blocks.filter((b) => b.type === "tool_result");
+    if (results.length > 0 && blocks[0].type !== "tool_result") {
+      turn.content = [...results, ...blocks.filter((b) => b.type !== "tool_result")];
+    }
+  }
 
   // Anthropic requires the first message to be from `user`.
   if (out.length === 0 || out[0].role !== "user") {
-    out.unshift({ role: "user", content: "" });
+    out.unshift({ role: "user", content: [{ type: "text", text: "(continue)" }] });
   }
 
   const requested =
@@ -387,10 +414,15 @@ export function anthropicToOpenAINonStream(
     }
   }
 
-  const input = Number(anth.usage?.input_tokens) || 0;
+  // Anthropic's input_tokens is only the UNCACHED remainder; the router
+  // (extractCacheTokens, calculateCredits, usage_logs) expects OpenAI's
+  // prompt_tokens = full prompt including cache. Reporting the raw
+  // input_tokens made the router clamp cache_read to that tiny remainder
+  // (logs showed cache_read = 4 on 78k-token requests that were ~100% hits).
   const output = Number(anth.usage?.output_tokens) || 0;
   const cacheRead = Number(anth.usage?.cache_read_input_tokens) || 0;
   const cacheWrite = Number(anth.usage?.cache_creation_input_tokens) || 0;
+  const input = (Number(anth.usage?.input_tokens) || 0) + cacheRead + cacheWrite;
 
   const message: {
     role: "assistant";
@@ -578,10 +610,16 @@ function makeAnthropicToOpenAIStreamTransform(
 
     if (type === "message_delta") {
       const delta = parsed.delta as { stop_reason?: string | null } | undefined;
-      const usage = parsed.usage as { output_tokens?: number } | undefined;
+      const usage = parsed.usage as
+        | { output_tokens?: number; input_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number }
+        | undefined;
       if (usage && typeof usage.output_tokens === "number") {
         completionTokens = usage.output_tokens;
       }
+      // message_delta can carry the final (cumulative) input/cache counts.
+      if (usage && typeof usage.input_tokens === "number") promptTokens = usage.input_tokens;
+      if (usage && typeof usage.cache_read_input_tokens === "number") cacheRead = usage.cache_read_input_tokens;
+      if (usage && typeof usage.cache_creation_input_tokens === "number") cacheWrite = usage.cache_creation_input_tokens;
       if (delta?.stop_reason) {
         finalFinish = mapStopReason(delta.stop_reason);
       }
@@ -595,10 +633,12 @@ function makeAnthropicToOpenAIStreamTransform(
         created,
         model,
         choices: [{ index: 0, delta: {}, finish_reason: finalFinish ?? "stop" }],
+        // OpenAI semantics: prompt_tokens includes cache (see the non-stream
+        // translation for why).
         usage: {
-          prompt_tokens: promptTokens,
+          prompt_tokens: promptTokens + cacheRead + cacheWrite,
           completion_tokens: completionTokens,
-          total_tokens: promptTokens + completionTokens,
+          total_tokens: promptTokens + cacheRead + cacheWrite + completionTokens,
           ...(cacheRead > 0 && { cache_read_input_tokens: cacheRead }),
           ...(cacheWrite > 0 && { cache_creation_input_tokens: cacheWrite }),
         },

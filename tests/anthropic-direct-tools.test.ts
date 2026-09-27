@@ -91,18 +91,101 @@ describe("anthropic direct (ad/) tool-call translation", () => {
     } as unknown as ProviderRequest;
 
     const body = openAIToAnthropic(req);
-    // [user, assistant(tool_use x2), user(tool_result x2), user("thanks!")]
-    // the trailing plain user text merges into the tool_result-carrying
-    // message only if it were the same role+string shape, which it isn't
-    // (array content) — so it must stay a separate message.
-    expect(body.messages).toHaveLength(4);
-    const toolResultMsg = body.messages[2];
-    expect(toolResultMsg.role).toBe("user");
-    expect(toolResultMsg.content).toEqual([
-      { type: "tool_result", tool_use_id: "call_1", content: "22C sunny" },
-      { type: "tool_result", tool_use_id: "call_2", content: "15C cloudy" },
+    // [user, assistant(tool_use x2), user(tool_result x2 + "thanks!")] —
+    // consecutive user content merges into one turn, tool_results first.
+    expect(body.messages).toHaveLength(3);
+    expect(body.messages[2]).toEqual({
+      role: "user",
+      content: [
+        { type: "tool_result", tool_use_id: "call_1", content: "22C sunny" },
+        { type: "tool_result", tool_use_id: "call_2", content: "15C cloudy" },
+        { type: "text", text: "thanks!" },
+      ],
+    });
+  });
+
+  it("puts tool_result blocks first even if user text arrives before them", () => {
+    const req = {
+      model: "ad/claude-opus-5",
+      messages: [
+        { role: "user", content: "hi" },
+        {
+          role: "assistant",
+          content: "",
+          tool_calls: [{ id: "call_1", type: "function", function: { name: "f", arguments: "{}" } }],
+        },
+        { role: "user", content: "<system-reminder>be brief</system-reminder>" },
+        { role: "tool", tool_call_id: "call_1", content: "ok" },
+      ],
+    } as unknown as ProviderRequest;
+
+    const last = openAIToAnthropic(req).messages[2];
+    expect((last.content as Array<{ type: string }>).map((b) => b.type)).toEqual([
+      "tool_result",
+      "text",
     ]);
-    expect(body.messages[3]).toEqual({ role: "user", content: "thanks!" });
+  });
+
+  it("drops empty messages instead of sending empty content", () => {
+    const req = {
+      model: "ad/claude-opus-5",
+      messages: [
+        { role: "user", content: "hi" },
+        { role: "assistant", content: "" },
+        { role: "user", content: "again" },
+      ],
+    } as unknown as ProviderRequest;
+
+    expect(openAIToAnthropic(req).messages).toEqual([
+      { role: "user", content: [{ type: "text", text: "hi" }, { type: "text", text: "again" }] },
+    ]);
+  });
+
+  it("translates images in user messages and in tool results", () => {
+    const png = "data:image/png;base64,iVBORw0KGgo=";
+    const req = {
+      model: "ad/claude-opus-5",
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "what is this?" },
+            { type: "image_url", image_url: { url: png } },
+          ],
+        },
+        {
+          role: "assistant",
+          content: "",
+          tool_calls: [{ id: "call_1", type: "function", function: { name: "Read", arguments: "{}" } }],
+        },
+        {
+          role: "tool",
+          tool_call_id: "call_1",
+          content: [{ type: "image_url", image_url: { url: png } }],
+        },
+      ],
+    } as unknown as ProviderRequest;
+
+    const body = openAIToAnthropic(req);
+    const image = { type: "image", source: { type: "base64", media_type: "image/png", data: "iVBORw0KGgo=" } };
+    expect(body.messages[0].content).toEqual([{ type: "text", text: "what is this?" }, image]);
+    expect(body.messages[2].content).toEqual([
+      { type: "tool_result", tool_use_id: "call_1", content: [image] },
+    ]);
+  });
+
+  it("reports prompt_tokens in OpenAI semantics (uncached + cache read + cache write)", () => {
+    const openAi = anthropicToOpenAINonStream(
+      {
+        content: [{ type: "text", text: "hi" }],
+        stop_reason: "end_turn",
+        usage: { input_tokens: 4, cache_read_input_tokens: 78000, cache_creation_input_tokens: 300, output_tokens: 10 },
+      },
+      "ad/claude-opus-5"
+    );
+    expect(openAi.usage.prompt_tokens).toBe(78304);
+    expect(openAi.usage.cache_read_input_tokens).toBe(78000);
+    expect(openAi.usage.cache_creation_input_tokens).toBe(300);
   });
 
   it("translates an Anthropic tool_use response block into OpenAI tool_calls", () => {

@@ -358,3 +358,58 @@ function start_index(
     (e) => e.event === "content_block_start" && e.data.content_block?.type === blockType
   )?.data.index;
 }
+
+describe("tool results from Claude Code (2026-09-27 fixes)", () => {
+  it("emits tool messages BEFORE the user text of the same turn", () => {
+    const openai = anthropicToOpenAIRequest({
+      model: "ad/claude-opus-5-5",
+      messages: [
+        { role: "user", content: "hi" },
+        { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "f", input: {} }] },
+        {
+          role: "user",
+          content: [
+            { type: "tool_result", tool_use_id: "t1", content: "ok" },
+            { type: "text", text: "<system-reminder>x</system-reminder>" },
+          ],
+        },
+      ],
+    });
+    expect(openai.messages.slice(2).map((m) => m.role)).toEqual(["tool", "user"]);
+  });
+
+  it("keeps a tool_result image as an image part, not base64 text", () => {
+    const openai = anthropicToOpenAIRequest({
+      model: "ad/claude-opus-5-5",
+      messages: [
+        { role: "user", content: "read it" },
+        { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "Read", input: {} }] },
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "t1",
+              content: [{ type: "image", source: { type: "base64", media_type: "image/png", data: "AAAA" } }],
+            },
+          ],
+        },
+      ],
+    });
+    expect(openai.messages[2].content).toEqual([
+      { type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } },
+    ]);
+  });
+
+  it("reports input_tokens without the cached part (no double count)", () => {
+    const res = openAIToAnthropicResponse(
+      {
+        choices: [{ message: { content: "hi" }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 78304, completion_tokens: 5, cache_read_input_tokens: 78000, cache_creation_input_tokens: 300 },
+      },
+      "ad/claude-opus-5-5"
+    );
+    expect(res.usage.input_tokens).toBe(4);
+    expect(res.usage.cache_read_input_tokens).toBe(78000);
+  });
+});

@@ -84,26 +84,65 @@ function imageBlockToOpenAI(block: any): any | null {
   return null;
 }
 
-/** Stringify a tool_result block's content for the OpenAI `tool` message. */
-function toolResultContentToText(content: unknown): string {
+/**
+ * Convert a tool_result block's content for the OpenAI `tool` message.
+ * Plain text stays a string. Images (e.g. Claude Code reading a PNG) become
+ * an array of text + image_url parts — NOT JSON-encoded text: a base64 PNG
+ * stringified into the prompt costs ~200k tokens and blew up agent contexts.
+ * Providers that can't take images in tool messages get them flattened to a
+ * placeholder by flattenToolMessageImages() before forwarding.
+ */
+function toolResultContent(content: unknown): string | any[] {
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
-    return content
-      .map((part) => {
-        if (typeof part === "string") return part;
-        if (part && typeof part === "object") {
-          const p = part as any;
-          if (typeof p.text === "string") return p.text;
-          // image / other tool_result parts are not representable in an
-          // OpenAI tool message; JSON-encode so no information is silently lost.
-          if (p.type && p.type !== "text") return JSON.stringify(p);
-        }
-        return "";
-      })
-      .join("");
+    const parts: any[] = [];
+    for (const part of content) {
+      if (typeof part === "string") {
+        if (part) parts.push({ type: "text", text: part });
+        continue;
+      }
+      if (!part || typeof part !== "object") continue;
+      const p = part as any;
+      if (p.type === "image") {
+        const img = imageBlockToOpenAI(p);
+        if (img) parts.push(img);
+      } else if (typeof p.text === "string") {
+        parts.push({ type: "text", text: p.text });
+      } else if (p.type) {
+        // Documents / other non-text parts: no base64 payloads in the prompt.
+        parts.push({ type: "text", text: `[${p.type} omitted]` });
+      }
+    }
+    if (parts.every((p) => p.type === "text")) {
+      return parts.map((p) => p.text).join("");
+    }
+    return parts;
   }
   if (content && typeof content === "object") return JSON.stringify(content);
   return "";
+}
+
+/**
+ * For providers that only accept string content in `tool` messages: replace
+ * image parts with a short placeholder and join to a string. The Anthropic
+ * direct provider (ad/) keeps the images, so it is skipped by the caller.
+ */
+export function flattenToolMessageImages(messages: unknown): void {
+  if (!Array.isArray(messages)) return;
+  for (const m of messages) {
+    if (!m || typeof m !== "object") continue;
+    const msg = m as any;
+    if (msg.role !== "tool" || !Array.isArray(msg.content)) continue;
+    msg.content = msg.content
+      .map((p: any) =>
+        p?.type === "text" && typeof p.text === "string"
+          ? p.text
+          : p?.type === "image_url"
+            ? "[image omitted: this model can't view images in tool results]"
+            : ""
+      )
+      .join("\n");
+  }
 }
 
 // ------------------------- request translation -----------------------------
@@ -179,13 +218,18 @@ export function anthropicToOpenAIRequest(body: any): OpenAIBody {
         toolMessages.push({
           role: "tool",
           tool_call_id: String(b.tool_use_id ?? ""),
-          content: toolResultContentToText(b.content),
+          content: toolResultContent(b.content),
         });
       }
     }
+    // Tool results go FIRST: they must directly follow the assistant turn
+    // that issued the tool calls (OpenAI requires it, and Anthropic requires
+    // tool_result blocks to lead the user turn). Claude Code sends
+    // <system-reminder> text in the same turn as its tool results; emitting
+    // that text first produced a 400 on every such request.
+    for (const tm of toolMessages) out.push(tm);
     if (userParts.length > 0) {
-      const onlyText =
-        userParts.length > 0 && userParts.every((p) => p.type === "text");
+      const onlyText = userParts.every((p) => p.type === "text");
       out.push({
         role: "user",
         content: onlyText
@@ -193,8 +237,6 @@ export function anthropicToOpenAIRequest(body: any): OpenAIBody {
           : userParts,
       });
     }
-    // Tool results follow the (optional) user text in submission order.
-    for (const tm of toolMessages) out.push(tm);
   }
 
   const openai: OpenAIBody = {
@@ -258,6 +300,19 @@ function mapFinishToStopReason(finish: string | null | undefined): string {
   }
 }
 
+/**
+ * Anthropic's `input_tokens` excludes cache reads/writes; OpenAI's
+ * `prompt_tokens` includes them. Providers report the OpenAI total, so
+ * subtract — otherwise Claude Code (input + cache_read + cache_creation)
+ * counts the cached prefix twice and compacts far too early. Guarded for
+ * upstreams that leak Anthropic semantics (prompt < cache, e.g. orbit):
+ * those are already the uncached remainder and pass through.
+ */
+function anthropicInputTokens(prompt: number, cacheRead: number, cacheWrite: number): number {
+  const cached = cacheRead + cacheWrite;
+  return prompt >= cached ? prompt - cached : prompt;
+}
+
 /** Generate an Anthropic-style message id. */
 export function genMessageId(): string {
   return `msg_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
@@ -301,10 +356,10 @@ export function openAIToAnthropicResponse(openai: any, fallbackModel: string): a
   if (contentBlocks.length === 0) contentBlocks.push({ type: "text", text: "" });
 
   const usage = openai?.usage ?? {};
-  const inputTokens = Number(usage.prompt_tokens) || 0;
   const outputTokens = Number(usage.completion_tokens) || 0;
   const cacheRead = Number(usage.cache_read_input_tokens) || 0;
   const cacheWrite = Number(usage.cache_creation_input_tokens) || 0;
+  const inputTokens = anthropicInputTokens(Number(usage.prompt_tokens) || 0, cacheRead, cacheWrite);
 
   return {
     id: String(openai?.id ?? genMessageId()),
@@ -527,7 +582,7 @@ export function makeOpenAIToAnthropicStreamTransform(
       type: "message_delta",
       delta: { stop_reason: stopReason, stop_sequence: null },
       usage: {
-        input_tokens: inputTokens,
+        input_tokens: anthropicInputTokens(inputTokens, cacheRead, cacheWrite),
         output_tokens: outputTokens,
         ...(cacheRead > 0 && { cache_read_input_tokens: cacheRead }),
         ...(cacheWrite > 0 && { cache_creation_input_tokens: cacheWrite }),

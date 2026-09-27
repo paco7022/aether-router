@@ -39,6 +39,7 @@ import {
   recordModerationReview,
 } from "@/lib/content-moderation";
 import { captureTrainingSample } from "@/lib/training-capture";
+import { flattenToolMessageImages } from "@/lib/anthropic/translate";
 import { applyPreset, applyLorebook } from "@/lib/preset";
 import { getBuiltinPreset } from "@/lib/builtinPresets";
 import { tryPcFailover } from "@/lib/pc-failover";
@@ -1723,6 +1724,13 @@ export async function POST(req: NextRequest) {
       }
     } else if (activeLorebook) {
       applyLorebook(forwardBody as Record<string, unknown>, activeLorebook);
+    }
+
+    // Tool results carrying images (Claude Code reading a PNG) arrive as
+    // text+image_url arrays. Only ad/ translates those to Anthropic image
+    // blocks; OpenAI-compat upstreams expect string tool content.
+    if (model.provider !== "anthropic") {
+      flattenToolMessageImages((forwardBody as Record<string, unknown>).messages);
     }
 
     const providerResponse = await provider.forward(forwardBody as any, req.signal);
