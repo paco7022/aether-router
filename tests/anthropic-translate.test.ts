@@ -5,6 +5,7 @@ import {
   openAIErrorToAnthropic,
   makeOpenAIToAnthropicStreamTransform,
   anthropicAuthorization,
+  TOOL_RESULT_IMAGE_PROVIDERS,
 } from "../src/lib/anthropic/translate";
 
 // Drive an OpenAI SSE string through the transform and collect the emitted
@@ -444,5 +445,17 @@ describe("tool results from Claude Code (2026-09-27 fixes)", () => {
     );
     expect(res.usage.input_tokens).toBe(4);
     expect(res.usage.cache_read_input_tokens).toBe(78000);
+  });
+});
+
+describe("TOOL_RESULT_IMAGE_PROVIDERS", () => {
+  it("keeps tool-result images for providers that can view them", () => {
+    expect(TOOL_RESULT_IMAGE_PROVIDERS.has("anthropic")).toBe(true);
+    expect(TOOL_RESULT_IMAGE_PROVIDERS.has("kiro")).toBe(true);
+  });
+
+  it("still flattens for plain OpenAI-compat resellers", () => {
+    expect(TOOL_RESULT_IMAGE_PROVIDERS.has("shoot")).toBe(false);
+    expect(TOOL_RESULT_IMAGE_PROVIDERS.has("zenllm")).toBe(false);
   });
 });

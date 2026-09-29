@@ -6,6 +6,7 @@ import {
   estimatePromptTokens,
   floorPromptTokens,
   capCompletionTokens,
+  toolCallsText,
 } from "@/lib/token-estimator";
 import { getProvider } from "@/lib/providers";
 import {
@@ -39,7 +40,7 @@ import {
   recordModerationReview,
 } from "@/lib/content-moderation";
 import { captureTrainingSample } from "@/lib/training-capture";
-import { flattenToolMessageImages } from "@/lib/anthropic/translate";
+import { flattenToolMessageImages, TOOL_RESULT_IMAGE_PROVIDERS } from "@/lib/anthropic/translate";
 import { applyPreset, applyLorebook } from "@/lib/preset";
 import { getBuiltinPreset } from "@/lib/builtinPresets";
 import { tryPcFailover } from "@/lib/pc-failover";
@@ -1727,9 +1728,11 @@ export async function POST(req: NextRequest) {
     }
 
     // Tool results carrying images (Claude Code reading a PNG) arrive as
-    // text+image_url arrays. Only ad/ translates those to Anthropic image
-    // blocks; OpenAI-compat upstreams expect string tool content.
-    if (model.provider !== "anthropic") {
+    // text+image_url arrays. Only providers that understand image parts in
+    // tool messages keep them (ad/ translates to Anthropic image blocks, the
+    // Kiro gateway to Kiro images); other OpenAI-compat upstreams expect
+    // string tool content.
+    if (!TOOL_RESULT_IMAGE_PROVIDERS.has(model.provider)) {
       flattenToolMessageImages((forwardBody as Record<string, unknown>).messages);
     }
 
@@ -1801,7 +1804,14 @@ export async function POST(req: NextRequest) {
     // has no usage data AND no completion text. Treat as a provider error so
     // unstable upstreams can't drain credits with empty replies. Refund the
     // full reservation (credits + premium counter) and bubble a 502 up.
-    if ((!data.usage || !Number(data.usage.total_tokens)) && !extractCompletionText(data).trim()) {
+    const toolCallOutputText = toolCallsText(
+      (data as { choices?: Array<{ message?: { tool_calls?: unknown } }> }).choices?.[0]?.message?.tool_calls
+    );
+    if (
+      (!data.usage || !Number(data.usage.total_tokens)) &&
+      !extractCompletionText(data).trim() &&
+      !toolCallOutputText
+    ) {
       await refundReservation();
       await logErrorUsage("error_empty");
       return NextResponse.json(
@@ -1822,7 +1832,8 @@ export async function POST(req: NextRequest) {
     // Also sanity-check: if upstream reports tokens but they're suspiciously
     // lower than what we can measure locally, use the local estimate instead.
     // This prevents abusive upstreams from under-reporting to drain credits.
-    const localCompletionEstimate = estimateTokens(extractCompletionText(data));
+    // Tool-call arguments are generated output too (see toolCallsText).
+    const localCompletionEstimate = estimateTokens(extractCompletionText(data) + toolCallOutputText);
     const localPromptEstimate = estimatePromptTokens(body);
 
     if (!usage.total_tokens || usage.total_tokens <= 0) {
@@ -2092,6 +2103,9 @@ async function handleStreamingResponse(
   let cacheReadTokens = 0;
   let cacheWriteTokens = 0;
   let completionText = "";
+  // Tool-call names/arguments streamed so far. Kept apart from completionText
+  // (which feeds training capture) but counted as observed output for billing.
+  let toolCallText = "";
   let hasUsageData = false;
   // finish_reason from the last chunk that carries one (length / stop /
   // content_filter) — logged so truncated responses can be diagnosed.
@@ -2126,6 +2140,7 @@ async function handleStreamingResponse(
       if (typeof delta === "string") {
         completionText += delta;
       }
+      toolCallText += toolCallsText(parsed.choices?.[0]?.delta?.tool_calls);
       const chunkFinish = parsed.choices?.[0]?.finish_reason;
       if (typeof chunkFinish === "string" && chunkFinish) {
         finishReason = chunkFinish;
@@ -2159,7 +2174,7 @@ async function handleStreamingResponse(
     // a usage payload AND no text was streamed. The provider returned 200 OK
     // and emitted nothing useful — treat as a failure and refund so users
     // don't get billed for empty replies during upstream outages.
-    if (reason === "complete" && !hasUsageData && !completionText.trim()) {
+    if (reason === "complete" && !hasUsageData && !completionText.trim() && !toolCallText) {
       try { await refundReservation(); } catch (e) {
         console.error("Refund-on-empty-stream failed:", e);
       }
@@ -2174,14 +2189,15 @@ async function handleStreamingResponse(
     // completion_tokens: 0 (or absurdly low) while streaming real content.
     if (!hasUsageData) {
       totalPromptTokens = estimatedPromptTokens;
-      totalCompletionTokens = estimateTokens(completionText);
+      totalCompletionTokens = estimateTokens(completionText + toolCallText);
     } else {
       // Sanity floor: completion tokens can never be less than what we
       // actually observed being streamed to the client. And sanity ceiling:
       // they can't be a multiple of it either — an upstream inflating output
       // (or/ has been measured at 4-9x) bills the customer directly once the
       // account is on payg or on a per-token provider. See capCompletionTokens.
-      const observedCompletion = completionText ? estimateTokens(completionText) : 0;
+      const observedText = completionText + toolCallText;
+      const observedCompletion = observedText ? estimateTokens(observedText) : 0;
       if (observedCompletion > 0 && totalCompletionTokens < observedCompletion) {
         totalCompletionTokens = observedCompletion;
       }

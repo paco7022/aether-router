@@ -127,6 +127,9 @@ function toolResultContent(content: unknown): string | any[] {
  * image parts with a short placeholder and join to a string. The Anthropic
  * direct provider (ad/) keeps the images, so it is skipped by the caller.
  */
+/** Providers whose upstream accepts image_url parts inside tool messages. */
+export const TOOL_RESULT_IMAGE_PROVIDERS: ReadonlySet<string> = new Set(["anthropic", "kiro"]);
+
 export function flattenToolMessageImages(messages: unknown): void {
   if (!Array.isArray(messages)) return;
   for (const m of messages) {

@@ -131,8 +131,8 @@ export function floorPromptTokens(
  * but never surfaced as content. It is deliberately generous — the goal is to
  * cut absurd multipliers, not to shave honest counts.
  *
- * `observed <= 0` means we never saw the text (e.g. a tool-call-only reply), so
- * there is nothing to compare against and the reported value stands.
+ * `observed` must include tool-call arguments (see toolCallsText). `observed <= 0`
+ * means we saw no output at all, so the reported value stands.
  */
 export const COMPLETION_TOKEN_CAP_MULTIPLIER = 3;
 export const COMPLETION_TOKEN_CAP_SLACK = 64;
@@ -146,6 +146,29 @@ export function capCompletionTokens(
   if (!(seen > 0)) return reported;
   const ceiling = Math.ceil(seen * COMPLETION_TOKEN_CAP_MULTIPLIER) + COMPLETION_TOKEN_CAP_SLACK;
   return reported > ceiling ? ceiling : reported;
+}
+
+/**
+ * Text of OpenAI tool calls (function names + raw argument strings), for
+ * output accounting. Tool arguments are real generated output — Claude Code's
+ * Write/Edit tools put whole files there — so the observed-completion floor and
+ * the capCompletionTokens ceiling must see them, not just `content`.
+ *
+ * Accepts either full `message.tool_calls` or streaming `delta.tool_calls`
+ * fragments (name/arguments arrive in pieces; concatenating them is enough for
+ * a token estimate).
+ */
+export function toolCallsText(toolCalls: unknown): string {
+  if (!Array.isArray(toolCalls)) return "";
+  let out = "";
+  for (const call of toolCalls) {
+    const fn = (call as { function?: { name?: unknown; arguments?: unknown } } | null)?.function;
+    if (!fn || typeof fn !== "object") continue;
+    if (typeof fn.name === "string") out += fn.name;
+    if (typeof fn.arguments === "string") out += fn.arguments;
+    else if (fn.arguments && typeof fn.arguments === "object") out += JSON.stringify(fn.arguments);
+  }
+  return out;
 }
 
 function estimateContentTokens(content: unknown): number {
