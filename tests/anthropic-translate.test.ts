@@ -4,6 +4,7 @@ import {
   openAIToAnthropicResponse,
   openAIErrorToAnthropic,
   makeOpenAIToAnthropicStreamTransform,
+  anthropicAuthorization,
 } from "../src/lib/anthropic/translate";
 
 // Drive an OpenAI SSE string through the transform and collect the emitted
@@ -262,6 +263,38 @@ describe("openAIErrorToAnthropic", () => {
       type: "error",
       error: { type: "authentication_error", message: "Invalid API key" },
     });
+  });
+
+  it("keeps the message when the core error is a plain string", () => {
+    const err = openAIErrorToAnthropic({ error: "Missing X-Requested-With header" });
+    expect(err).toEqual({
+      type: "error",
+      error: { type: "api_error", message: "Missing X-Requested-With header" },
+    });
+  });
+
+  it("still falls back to Unknown error for empty bodies", () => {
+    expect(openAIErrorToAnthropic(null).error.message).toBe("Unknown error");
+    expect(openAIErrorToAnthropic({}).error.message).toBe("Unknown error");
+  });
+});
+
+describe("anthropicAuthorization", () => {
+  it("converts x-api-key into a Bearer token", () => {
+    expect(anthropicAuthorization(new Headers({ "x-api-key": "sk-aether-123" }))).toBe(
+      "Bearer sk-aether-123"
+    );
+  });
+
+  it("prefers an explicit Authorization header", () => {
+    const h = new Headers({ authorization: "Bearer from-auth", "x-api-key": "from-key" });
+    expect(anthropicAuthorization(h)).toBe("Bearer from-auth");
+  });
+
+  it("trims the key and ignores blank values", () => {
+    expect(anthropicAuthorization(new Headers({ "x-api-key": "  k1  " }))).toBe("Bearer k1");
+    expect(anthropicAuthorization(new Headers({ "x-api-key": "   " }))).toBeNull();
+    expect(anthropicAuthorization(new Headers())).toBeNull();
   });
 });
 

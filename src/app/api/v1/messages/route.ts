@@ -5,6 +5,7 @@ import {
   openAIToAnthropicResponse,
   openAIErrorToAnthropic,
   makeOpenAIToAnthropicStreamTransform,
+  anthropicAuthorization,
 } from "@/lib/anthropic/translate";
 
 export const runtime = "nodejs";
@@ -29,7 +30,6 @@ function headersToForward(req: NextRequest): Headers {
   // Auth + anti-abuse signals the core route reads. Content-Type is set to
   // JSON because we hand it a freshly serialized OpenAI body.
   const pass = [
-    "authorization",
     "cookie",
     "x-fingerprint",
     "x-requested-with",
@@ -43,6 +43,8 @@ function headersToForward(req: NextRequest): Headers {
     const v = req.headers.get(name);
     if (v) h.set(name, v);
   }
+  const auth = anthropicAuthorization(req.headers);
+  if (auth) h.set("authorization", auth);
   h.set("content-type", "application/json");
   return h;
 }

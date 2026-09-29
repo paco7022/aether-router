@@ -378,8 +378,27 @@ export function openAIToAnthropicResponse(openai: any, fallbackModel: string): a
   };
 }
 
+/**
+ * Resolve the Authorization header to forward to the core handler.
+ *
+ * Anthropic clients authenticate with `x-api-key` (Claude Code with
+ * ANTHROPIC_API_KEY, the Anthropic SDKs) or with `Authorization: Bearer`
+ * (Claude Code with ANTHROPIC_AUTH_TOKEN). The core route only reads
+ * Authorization, so an `x-api-key` is converted to a Bearer token.
+ */
+export function anthropicAuthorization(headers: Headers): string | null {
+  const auth = headers.get("authorization");
+  if (auth) return auth;
+  const apiKey = headers.get("x-api-key")?.trim();
+  return apiKey ? `Bearer ${apiKey}` : null;
+}
+
 /** Translate an OpenAI-shape error body into the Anthropic error envelope. */
 export function openAIErrorToAnthropic(openaiErr: any): any {
+  // Some core errors are `{ error: "message" }` rather than `{ error: { message } }`.
+  if (typeof openaiErr?.error === "string") {
+    openaiErr = { error: { message: openaiErr.error } };
+  }
   const err = openaiErr?.error ?? openaiErr ?? {};
   const typeMap: Record<string, string> = {
     invalid_request: "invalid_request_error",
