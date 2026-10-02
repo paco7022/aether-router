@@ -21,6 +21,8 @@
     "TRUST_PROXY": "true",
     "AETHER_FREE_INCLUDED_USAGE_ENABLED": "true",
     "AETHER_FREE_PROMOS_ENABLED": "false",
+    // Training capture off: samples in Postgres filled the DB (2026-10-01).
+    "AETHER_TRAINING_CAPTURE_ENABLED": "false",
     // db/ (DLab) deprecated 2026-06-07 (models hidden as fake). Promo off.
     "DLAB_FREE_UNLIMITED": "false",
     // or/ (Orbit) 2026-07-03: paid-users-only, not free/unlimited.

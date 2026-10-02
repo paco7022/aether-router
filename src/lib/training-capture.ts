@@ -46,6 +46,14 @@ function newPromptTokens(messages: TrainingMessage[]): number {
   return 0;
 }
 
+// Kill switch. Off unless AETHER_TRAINING_CAPTURE_ENABLED=true: full
+// conversations stored in Postgres grew training_samples to ~2.6 GB on a 500 MB
+// Free-plan database and exhausted its disk IO (outage 2026-10-01). Re-enable
+// only once samples go to object storage instead of the main database.
+export function isTrainingCaptureEnabled(): boolean {
+  return process.env.AETHER_TRAINING_CAPTURE_ENABLED === "true";
+}
+
 export async function captureTrainingSample(opts: {
   userId: string;
   modelId: string | null;
@@ -59,6 +67,7 @@ export async function captureTrainingSample(opts: {
 }): Promise<void> {
   // Nothing useful to learn from an empty reply — and the stream-guard upstream
   // would already have refunded it. Skip to keep the corpus clean.
+  if (!isTrainingCaptureEnabled()) return;
   if (!opts.completion || !opts.completion.trim()) return;
   if (!opts.messages || opts.messages.length === 0) return;
 
